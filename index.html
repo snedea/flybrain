@@ -13,6 +13,7 @@
             <button class="tool-btn" data-tool="touch">Touch</button>
             <button class="tool-btn" data-tool="air">Air</button>
             <button class="tool-btn" data-tool="light" id="lightBtn">Light: Bright</button>
+            <button class="tool-btn" id="helpBtn">?</button>
         </div>
         <div class="toolbar-right">
             <span class="toolbar-title">FlyBrain</span>
@@ -23,10 +24,23 @@
             </a>
         </div>
     </div>
+    <div id="helpOverlay" class="help-overlay" style="display:none;">
+        <div class="help-overlay-header">
+            <span>Interaction Guide</span>
+            <button class="help-close-btn" id="helpCloseBtn">&times;</button>
+        </div>
+        <div class="help-item"><strong>Feed</strong> -- Click on the canvas to place food. The fly will seek and eat it when hungry.</div>
+        <div class="help-item"><strong>Touch</strong> -- Click on the fly to touch it. Location matters: head, thorax, abdomen, or leg each triggers different grooming.</div>
+        <div class="help-item"><strong>Air</strong> -- Click and drag near the fly to blow wind. Drag distance controls wind strength.</div>
+        <div class="help-item"><strong>Light</strong> -- Cycles through Bright, Dim, and Dark. The fly exhibits phototaxis toward light.</div>
+    </div>
     <canvas id='canvas'></canvas>
     <div id="bottom-panel">
         <div id="connectome-panel">
-            <span class="connectome-label">Connectome</span>
+            <div class="connectome-header">
+                <span class="connectome-label">Connectome</span>
+                <button class="connectome-toggle-btn" id="connectomeToggleBtn">Hide</button>
+            </div>
             <div id="nodeHolder"></div>
         </div>
         <div id="drive-meters">

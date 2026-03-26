@@ -139,6 +139,44 @@ for (var i = 0; i < toolButtons.length; i++) {
 	})(toolButtons[i]);
 }
 
+// --- Help overlay toggle ---
+var helpOverlay = document.getElementById('helpOverlay');
+var helpBtn = document.getElementById('helpBtn');
+var helpCloseBtn = document.getElementById('helpCloseBtn');
+
+helpBtn.addEventListener('click', function () {
+	var isVisible = helpOverlay.style.display !== 'none';
+	helpOverlay.style.display = isVisible ? 'none' : 'block';
+});
+
+helpCloseBtn.addEventListener('click', function () {
+	helpOverlay.style.display = 'none';
+});
+
+// Close help overlay when clicking outside of it
+document.addEventListener('click', function (e) {
+	if (helpOverlay.style.display !== 'none' &&
+		!helpOverlay.contains(e.target) &&
+		e.target !== helpBtn) {
+		helpOverlay.style.display = 'none';
+	}
+});
+
+// --- Connectome panel toggle ---
+var connectomeToggleBtn = document.getElementById('connectomeToggleBtn');
+var nodeHolder = document.getElementById('nodeHolder');
+
+connectomeToggleBtn.addEventListener('click', function () {
+	var isHidden = nodeHolder.classList.contains('hidden');
+	if (isHidden) {
+		nodeHolder.classList.remove('hidden');
+		connectomeToggleBtn.textContent = 'Hide';
+	} else {
+		nodeHolder.classList.add('hidden');
+		connectomeToggleBtn.textContent = 'Show';
+	}
+});
+
 /**
  * Updates the brain state and converts motor output to direction/speed.
  * Interface unchanged from worm-sim.
@@ -182,6 +220,26 @@ var ctx = canvas.getContext('2d');
 canvas.addEventListener('mousedown', handleCanvasMousedown, false);
 canvas.addEventListener('mousemove', handleCanvasMousemove, false);
 canvas.addEventListener('mouseup', handleCanvasMouseup, false);
+
+// --- Touch event handlers (mobile/tablet support) ---
+canvas.addEventListener('touchstart', function (event) {
+	event.preventDefault();
+	var touch = event.touches[0];
+	handleCanvasMousedown({ clientX: touch.clientX, clientY: touch.clientY });
+}, { passive: false });
+
+canvas.addEventListener('touchmove', function (event) {
+	event.preventDefault();
+	var touch = event.touches[0];
+	handleCanvasMousemove({ clientX: touch.clientX, clientY: touch.clientY });
+}, { passive: false });
+
+canvas.addEventListener('touchend', function (event) {
+	event.preventDefault();
+	// Use changedTouches for the touch that was lifted
+	var touch = event.changedTouches[0];
+	handleCanvasMouseup({ clientX: touch.clientX, clientY: touch.clientY });
+}, { passive: false });
 
 function handleCanvasMousedown(event) {
 	var cx = event.clientX;
@@ -838,6 +896,13 @@ function drawAbdomen() {
 	var rx = BODY.abdomenRadiusX;
 	var ry = BODY.abdomenRadiusY;
 
+	// Abdomen curl during abdomen-specific grooming
+	var abdomenCurl = 0;
+	if (behavior.current === 'groom' && (BRAIN.stimulate.touchLocation === 'abdomen' || BRAIN.stimulate.touchLocation === null)) {
+		abdomenCurl = Math.sin(anim.groomPhase * 0.8) * 2;
+	}
+	ay += abdomenCurl;
+
 	// Main abdomen shape
 	ctx.beginPath();
 	ctx.ellipse(ax, ay, rx, ry, 0, 0, Math.PI * 2);
@@ -1055,10 +1120,30 @@ function drawLegs(state) {
 			var inGroupA = groupA.indexOf(legIdx) !== -1;
 			var legPhase = anim.walkPhase + (inGroupA ? 0 : Math.PI);
 			walkOffset = Math.sin(legPhase) * 0.35;
-		} else if (isGrooming && pairIdx === 0) {
-			// Front legs: grooming rub -- swing inward and oscillate
-			hipMod = -0.2 + Math.sin(anim.groomPhase) * 0.5;
-			kneeMod = -0.6 + Math.sin(anim.groomPhase * 1.3) * 0.2;
+		} else if (isGrooming) {
+			var groomLoc = BRAIN.stimulate.touchLocation || 'thorax';
+			if (groomLoc === 'head' && pairIdx === 0) {
+				// Front legs rub the head area: swing forward and inward
+				hipMod = -0.9 + Math.sin(anim.groomPhase) * 0.4;
+				kneeMod = -0.8 + Math.sin(anim.groomPhase * 1.5) * 0.25;
+			} else if (groomLoc === 'abdomen' && pairIdx === 2) {
+				// Rear legs reach back to abdomen: swing backward
+				hipMod = 1.0 + Math.sin(anim.groomPhase * 0.8) * 0.3;
+				kneeMod = 0.5 + Math.sin(anim.groomPhase * 1.2) * 0.2;
+			} else if (groomLoc === 'thorax' && pairIdx === 0) {
+				// Full bilateral front-leg grooming: wide symmetric rub
+				hipMod = -0.2 + Math.sin(anim.groomPhase) * 0.5;
+				kneeMod = -0.6 + Math.sin(anim.groomPhase * 1.3) * 0.2;
+			} else if (groomLoc === 'leg') {
+				// Targeted single-leg cleaning: only the leg on the touched side moves
+				// Use side-based targeting: left legs clean when side=-1 touch
+				var targetPair = pairIdx; // all legs may participate
+				if (pairIdx === 1) {
+					// Middle legs do the cleaning motion
+					hipMod = 0.1 + Math.sin(anim.groomPhase * 1.1) * 0.4;
+					kneeMod = 0.3 + Math.sin(anim.groomPhase * 1.4) * 0.3;
+				}
+			}
 		} else if (isFlying) {
 			// Tucked legs during flight
 			hipMod *= 0.4;
@@ -1149,6 +1234,37 @@ function update(dt) {
 		facingDir -= 0.1 * dtScale;
 	} else if (angleDiff < 0) {
 		facingDir += 0.1 * dtScale;
+	}
+
+	// Edge avoidance: bias targetDir away from screen edges when within 50px
+	var edgeMargin = 50;
+	var edgeBias = 0;
+	var edgeBiasY = 0;
+	var topBound = 44;
+	var bottomBound = window.innerHeight - 90;
+	var leftBound = 0;
+	var rightBound = window.innerWidth;
+
+	if (fly.x - leftBound < edgeMargin) {
+		edgeBias += (edgeMargin - (fly.x - leftBound)) / edgeMargin; // push right (+x)
+	} else if (rightBound - fly.x < edgeMargin) {
+		edgeBias -= (edgeMargin - (rightBound - fly.x)) / edgeMargin; // push left (-x)
+	}
+	if (fly.y - topBound < edgeMargin) {
+		edgeBiasY -= (edgeMargin - (fly.y - topBound)) / edgeMargin; // push down (-y, but facingDir uses -sin for y)
+	} else if (bottomBound - fly.y < edgeMargin) {
+		edgeBiasY += (edgeMargin - (bottomBound - fly.y)) / edgeMargin; // push up
+	}
+
+	if (edgeBias !== 0 || edgeBiasY !== 0) {
+		// Compute desired direction away from edges
+		var awayAngle = Math.atan2(edgeBiasY, edgeBias);
+		var awayStrength = Math.min(1, Math.sqrt(edgeBias * edgeBias + edgeBiasY * edgeBiasY));
+		var angleDiffEdge = awayAngle - targetDir;
+		// Normalize to [-PI, PI]
+		while (angleDiffEdge > Math.PI) angleDiffEdge -= 2 * Math.PI;
+		while (angleDiffEdge < -Math.PI) angleDiffEdge += 2 * Math.PI;
+		targetDir += angleDiffEdge * awayStrength * 0.3;
 	}
 
 	fly.x += Math.cos(facingDir) * speed;
