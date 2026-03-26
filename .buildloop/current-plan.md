@@ -1,108 +1,121 @@
-# Plan: D8.2
-
-## Summary
-
-Fix D4.2 regression where MN_HEAD locomotion signal (from DN_TURN during normal walking) leaks into the groom accumulator, causing false groom triggers without any grooming stimulus. Use approach (b) from the task description: gate the head contribution on abdomen having signal, since abdomen > 0 indicates a real groom command from SEZ_GROOM rather than locomotion noise.
-
-## Design Decision: Why approach (b)
-
-Three fix options were proposed:
-- (a) Raise threshold from 8 to 12-15: fragile, would also raise the bar for legitimate groom triggers (user touch -> SEZ_GROOM -> MN_ABDOMEN + MN_HEAD + legs), making grooming harder to trigger overall.
-- (b) Gate head on abdomen: `abdomen + (abdomen > 0 ? head : 0) + Math.min(legL1, legR1)` -- surgically fixes the problem. When SEZ_GROOM fires, it sends signal to both MN_ABDOMEN (weight 5) and MN_HEAD (weight 4), so abdomen > 0 is a reliable indicator that head signal is groom-related. When only DN_TURN fires (locomotion), abdomen = 0 and head is excluded. No threshold change needed.
-- (c) Subtract tonic baseline: `abdomen + Math.max(0, head - 4) + Math.min(legL1, legR1)` -- works for the DN_TURN case (weight 4) but breaks if multiple head sources fire simultaneously (SEZ_FEED + DN_TURN = 8, minus 4 = 4, still leaks). Less robust.
-
-Approach (b) is the cleanest fix with zero side effects on legitimate groom behavior.
+# Plan: D9.1
 
 ## Dependencies
-
 - list: none
 - commands: none
 
 ## File Operations (in execution order)
 
-### 1. MODIFY js/connectome.js
+### 1. MODIFY js/main.js
 - operation: MODIFY
-- reason: Gate the head signal contribution to accumGroom on abdomen having nonzero signal, preventing locomotion-only MN_HEAD signal from triggering false groom state
+- reason: Three fixes: (a) reorder edge avoidance before facingDir interpolation, (b) reset behavior/speed state in visibilitychange resume handler, (c) remove dead isWalking variable in drawFlyBody
 
-#### Anchor
-```js
-BRAIN.accumGroom = abdomen + head + Math.min(legL1, legR1);
+#### Fix 1: Edge avoidance ordering (move edge avoidance block BEFORE facingDir interpolation)
+
+- anchor: `var angleDiffTurn = normalizeAngle(targetDir - facingDir);`
+
+The current code in update() at lines 1352-1391 is ordered:
+
 ```
-This is at line 469 of connectome.js, inside the `BRAIN.motorcontrol` function.
+// [A] facingDir interpolation (lines 1356-1357)
+var angleDiffTurn = normalizeAngle(targetDir - facingDir);
+facingDir += angleDiffTurn * (1 - Math.pow(0.9, dtScale));
 
-#### Change
-Replace the single line:
-```js
-BRAIN.accumGroom = abdomen + head + Math.min(legL1, legR1);
+// [B] edge avoidance (lines 1359-1387)
+var edgeMargin = 50;
+... (edge avoidance modifies targetDir) ...
+
+// [C] angle normalization (lines 1389-1391)
+facingDir = normalizeAngle(facingDir);
+targetDir = normalizeAngle(targetDir);
 ```
-With:
+
+Replace the entire block from the comment `// Exponential interpolation toward targetDir` (line 1352) through `targetDir = normalizeAngle(targetDir);` (line 1391) with the reordered version:
+
 ```js
-BRAIN.accumGroom = abdomen + (abdomen > 0 ? head : 0) + Math.min(legL1, legR1);
-```
+	// Edge avoidance: bias targetDir away from screen edges when within 50px
+	var edgeMargin = 50;
+	var edgeBias = 0;
+	var edgeBiasY = 0;
+	var topBound = 44;
+	var bottomBound = window.innerHeight - 90;
+	var leftBound = 0;
+	var rightBound = window.innerWidth;
 
-#### What NOT to change
-- Do NOT modify the `var head = readMotor('MN_HEAD');` line at line 467 -- head must still be read and drained every tick.
-- Do NOT modify `BRAIN.accumHead = head;` at line 468 -- accumHead is used independently for head orientation bias at main.js:588-589.
-- Do NOT modify `BRAIN.accumHead = Math.max(0, BRAIN.accumHead);` at line 484.
-- Do NOT modify the comment block at lines 463-465.
-
-#### Verification after change
-The surrounding code block (lines 463-484) should read:
-```js
-	// Grooming (front legs + abdomen when both active)
-	// Grooming is detected when front legs are active AND abdomen is active,
-	// or when SEZ_GROOM was the dominant command
-	var abdomen = readMotor('MN_ABDOMEN');
-	var head = readMotor('MN_HEAD');
-	BRAIN.accumHead = head;
-	BRAIN.accumGroom = abdomen + (abdomen > 0 ? head : 0) + Math.min(legL1, legR1);
-
-	// Startle is derived from DN_STARTLE neuron state (not a motor neuron per se,
-	// but we track its activation level for behavior selection)
-	if (BRAIN.postSynaptic['DN_STARTLE']) {
-		BRAIN.accumStartle = BRAIN.postSynaptic['DN_STARTLE'][BRAIN.thisState];
+	if (fly.x - leftBound < edgeMargin) {
+		edgeBias += (edgeMargin - (fly.x - leftBound)) / edgeMargin; // push right (+x)
+	} else if (rightBound - fly.x < edgeMargin) {
+		edgeBias -= (edgeMargin - (rightBound - fly.x)) / edgeMargin; // push left (-x)
+	}
+	if (fly.y - topBound < edgeMargin) {
+		edgeBiasY -= (edgeMargin - (fly.y - topBound)) / edgeMargin; // push down (-y, but facingDir uses -sin for y)
+	} else if (bottomBound - fly.y < edgeMargin) {
+		edgeBiasY += (edgeMargin - (bottomBound - fly.y)) / edgeMargin; // push up
 	}
 
-	// Floor all accumulators at 0 (negative motor output has no physical meaning)
-	BRAIN.accumWalkLeft = Math.max(0, BRAIN.accumWalkLeft);
-	BRAIN.accumWalkRight = Math.max(0, BRAIN.accumWalkRight);
-	BRAIN.accumFlight = Math.max(0, BRAIN.accumFlight);
-	BRAIN.accumFeed = Math.max(0, BRAIN.accumFeed);
-	BRAIN.accumGroom = Math.max(0, BRAIN.accumGroom);
-	BRAIN.accumStartle = Math.max(0, BRAIN.accumStartle);
-	BRAIN.accumHead = Math.max(0, BRAIN.accumHead);
+	if (edgeBias !== 0 || edgeBiasY !== 0) {
+		// Compute desired direction away from edges
+		var awayAngle = Math.atan2(edgeBiasY, edgeBias);
+		var awayStrength = Math.min(1, Math.sqrt(edgeBias * edgeBias + edgeBiasY * edgeBiasY));
+		var angleDiffEdge = awayAngle - targetDir;
+		// Normalize to [-PI, PI]
+		angleDiffEdge = normalizeAngle(angleDiffEdge);
+		targetDir += angleDiffEdge * awayStrength * 0.3 * dtScale;
+	}
+
+	// Exponential interpolation toward targetDir using shortest-arc angle difference.
+	// Retention factor 0.9 matches proboscisExtend (line 691); at dtScale=1 (60fps),
+	// facingDir closes 10% of the remaining gap per frame -- fast enough to track
+	// quick heading changes but cannot overshoot because it never exceeds the gap.
+	var angleDiffTurn = normalizeAngle(targetDir - facingDir);
+	facingDir += angleDiffTurn * (1 - Math.pow(0.9, dtScale));
+
+	// Normalize angles to [-PI, PI] to prevent unbounded growth
+	facingDir = normalizeAngle(facingDir);
+	targetDir = normalizeAngle(targetDir);
 ```
 
-### No changes to js/main.js
+The logic is identical -- just [B] moved before [A]. The facingDir interpolation now sees the edge-avoidance-corrected targetDir in the same frame.
 
-The BEHAVIOR_THRESHOLDS.groom value of 8 at main.js:73 does NOT need to change. With the gated formula:
-- During locomotion (no groom stimulus): accumGroom = 0 (abdomen) + 0 (head gated off) + 4-7 (legs) = 4-7, which is below 8. Walk continues uninterrupted.
-- During actual grooming (SEZ_GROOM fires): accumGroom = 5 (abdomen, from SEZ_GROOM weight 5) + 4 (head, gated on because abdomen > 0) + 10 (legs, from SEZ_GROOM weight 10 to each front leg, min = 10) = 19, well above 8. Groom triggers correctly.
-- During user touch (touch stimulus -> groom drive -> SEZ_GROOM activation over several ticks): Same pathway as above, abdomen receives signal, head is included. Groom triggers as intended.
+#### Fix 2: Visibilitychange resume state gaps (add behavior/speed resets)
 
-The evaluateBehaviorEntry check at main.js:464 (`BRAIN.accumGroom > BEHAVIOR_THRESHOLDS.groom`) remains correct with the existing strict greater-than and threshold of 8.
+- anchor: `// Reset lastTime so the RAF loop does not compute a huge dt on resume`
+
+Insert the following block immediately BEFORE the line `// Reset lastTime so the RAF loop does not compute a huge dt on resume` (line 287) and AFTER the closing brace `}` of the driveSnapshotOnHide restore block (line 285):
+
+```js
+		// Reset behavior and speed state to prevent high-speed transient
+		// states from persisting after stimuli have been cleared
+		behavior.current = 'idle';
+		behavior.startlePhase = 'none';
+		behavior.enterTime = Date.now();
+		speed = 0;
+		speedChangeInterval = 0;
+```
+
+This goes between the drive snapshot restore (line 284-285) and the lastTime reset comment (line 287). The exact insertion point is after `driveSnapshotOnHide = null;` + `}` and before `// Reset lastTime`.
+
+#### Fix 3: Remove dead isWalking in drawFlyBody
+
+- anchor: `var isWalking = (state === 'walk' || state === 'explore' || state === 'phototaxis');` inside `function drawFlyBody(dtScale)`
+
+Delete the entire line 931:
+```js
+	var isWalking = (state === 'walk' || state === 'explore' || state === 'phototaxis');
+```
+
+This is at line 931 inside `drawFlyBody`. There is a separate `isWalking` declaration at line 1204 inside `drawLegs` -- that one is live and must NOT be touched. The line to delete is the one preceded by `var state = behavior.current;` (line 930) and followed by a blank line then `// --- Wings (drawn first, behind body) ---` (line 933).
 
 ## Verification
-
-- build: Open `index.html` in a browser (no build step -- vanilla JS)
-- lint: No linter configured for this project
-- test: No automated tests exist
-- smoke:
-  1. Open `index.html` in browser
-  2. Let the fly walk around for 30+ seconds without any user interaction
-  3. Observe behavior: the fly should walk and explore continuously without spontaneously entering groom state (no legs-rubbing-head animation should appear unless the user touches the fly)
-  4. Use the touch tool to click on the fly's head -- after a few brain ticks the fly should enter groom state (front legs rubbing head), confirming legitimate groom still works
-  5. Use the touch tool to click on the fly's abdomen -- the fly should enter groom state with abdomen grooming animation
-  6. Open browser console and periodically check `BRAIN.accumGroom` during normal walking -- values should stay in the 4-7 range, below 8
-  7. After touching the fly, check `BRAIN.accumGroom` -- values should spike well above 8 (typically 15-20+)
+- build: no build step (vanilla JS, loaded directly by index.html)
+- lint: no configured linter
+- test: no existing tests
+- smoke: open index.html in a browser; (1) move the fly near a screen edge and observe that it turns away smoothly without hitting the wall first -- compare with the old behavior where the fly would contact the wall and then turn, (2) wait for a startle or high-speed state, then switch to another tab for 2+ seconds and switch back -- the fly should be idle and stationary on resume, not zooming across the screen, (3) open browser devtools console and type `typeof drawFlyBody` to confirm it loads without syntax errors (verifying the dead code removal did not break parsing)
 
 ## Constraints
-
-- Do NOT modify js/main.js -- no threshold change is needed
-- Do NOT modify js/constants.js -- connection weights are correct as-is
-- Do NOT modify index.html or css/main.css
-- Do NOT add new files
-- Do NOT add new dependencies
-- Do NOT change any other accumulator formulas in connectome.js
-- Do NOT remove the `readMotor('MN_HEAD')` call -- head must still be read/drained every tick to prevent signal buildup
-- Do NOT modify `BRAIN.accumHead` assignment -- it is used independently for head orientation
+- Do NOT modify any file other than js/main.js
+- Do NOT modify SPEC.md, CLAUDE.md, TASKS.md, or any file in .buildloop/ other than current-plan.md
+- Do NOT change the drawLegs isWalking declaration at line 1204 -- only remove the dead one at line 931 in drawFlyBody
+- Do NOT change the edge avoidance logic itself (the math, thresholds, or strength values) -- only move the existing block
+- Do NOT change the existing visibilitychange resume resets for stimuli, drag state, food, or drives -- only add the new behavior/speed resets
+- The edge avoidance block and facingDir interpolation block must remain adjacent (just swapped in order), with the angle normalization still AFTER both

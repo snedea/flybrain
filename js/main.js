@@ -284,6 +284,14 @@ document.addEventListener('visibilitychange', function () {
 			driveSnapshotOnHide = null;
 		}
 
+		// Reset behavior and speed state to prevent high-speed transient
+		// states from persisting after stimuli have been cleared
+		behavior.current = 'idle';
+		behavior.startlePhase = 'none';
+		behavior.enterTime = Date.now();
+		speed = 0;
+		speedChangeInterval = 0;
+
 		// Reset lastTime so the RAF loop does not compute a huge dt on resume
 		lastTime = -1;
 
@@ -928,7 +936,6 @@ var COLORS = {
 function drawFlyBody(dtScale) {
 	var t = Date.now() / 1000;
 	var state = behavior.current;
-	var isWalking = (state === 'walk' || state === 'explore' || state === 'phototaxis');
 
 	// --- Wings (drawn first, behind body) ---
 	drawWing(-1); // left
@@ -1349,13 +1356,6 @@ function update(dt) {
 	speed += speedChangeInterval * dtScale;
 	if (speed < 0) speed = 0;
 
-	// Exponential interpolation toward targetDir using shortest-arc angle difference.
-	// Retention factor 0.9 matches proboscisExtend (line 691); at dtScale=1 (60fps),
-	// facingDir closes 10% of the remaining gap per frame -- fast enough to track
-	// quick heading changes but cannot overshoot because it never exceeds the gap.
-	var angleDiffTurn = normalizeAngle(targetDir - facingDir);
-	facingDir += angleDiffTurn * (1 - Math.pow(0.9, dtScale));
-
 	// Edge avoidance: bias targetDir away from screen edges when within 50px
 	var edgeMargin = 50;
 	var edgeBias = 0;
@@ -1385,6 +1385,13 @@ function update(dt) {
 		angleDiffEdge = normalizeAngle(angleDiffEdge);
 		targetDir += angleDiffEdge * awayStrength * 0.3 * dtScale;
 	}
+
+	// Exponential interpolation toward targetDir using shortest-arc angle difference.
+	// Retention factor 0.9 matches proboscisExtend (line 691); at dtScale=1 (60fps),
+	// facingDir closes 10% of the remaining gap per frame -- fast enough to track
+	// quick heading changes but cannot overshoot because it never exceeds the gap.
+	var angleDiffTurn = normalizeAngle(targetDir - facingDir);
+	facingDir += angleDiffTurn * (1 - Math.pow(0.9, dtScale));
 
 	// Normalize angles to [-PI, PI] to prevent unbounded growth
 	facingDir = normalizeAngle(facingDir);
