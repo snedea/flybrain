@@ -1,6 +1,0 @@
-{
-  "task_id": "T6.3",
-  "task_desc": "Add neuron population counts and connectome compression indicators -- Enhance the existing connectome dot panel and the 3D brain to show the scale of the real connectome behind each group. (1) Add a data structure mapping each of the ~70 neuron groups to its approximate real neuron count from FlyWire data (e.g., MB_KC: ~2000, VIS_ME: ~15000, MN_LEG_L1: ~50), (2) In the connectome dot panel tooltip, append the population count (e.g., \"Kenyon cells (odor memory) -- represents ~2,000 neurons\"), (3) In the 3D brain hover tooltip, show per-region totals (e.g., \"Mushroom Bodies: 6 groups representing ~3,500 neurons\"), (4) Add a small summary line in the connectome panel header: \"70 groups / ~130K neurons\" to make the compression immediately visible. Files: js/main.js, js/brain3d.js, js/education.js.",
-  "completed_stage": "builder",
-  "timestamp": "2026-03-26T20:50:33.111272+00:00"
-}
