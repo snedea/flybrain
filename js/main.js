@@ -429,8 +429,11 @@ var connectomeToggleBtn = document.getElementById('connectomeToggleBtn');
 var nodeHolder = document.getElementById('nodeHolder');
 
 connectomeToggleBtn.addEventListener('click', function () {
-	var isHidden = nodeHolder.classList.contains('hidden');
-	if (isHidden) {
+	if (typeof NeuroRenderer !== 'undefined' && NeuroRenderer.isActive()) {
+		NeuroRenderer.destroy();
+		nodeHolder.classList.remove('hidden');
+		connectomeToggleBtn.textContent = 'Hide';
+	} else if (nodeHolder.classList.contains('hidden')) {
 		nodeHolder.classList.remove('hidden');
 		connectomeToggleBtn.textContent = 'Hide';
 	} else {
@@ -445,22 +448,24 @@ connectomeToggleBtn.addEventListener('click', function () {
  */
 function updateBrain() {
 	BRAIN.update();
-	for (var postSynaptic in BRAIN.connectome) {
-		var psBox = document.getElementById(postSynaptic);
-		if (!psBox) continue;
-		var neuron = BRAIN.postSynaptic[postSynaptic][BRAIN.thisState];
-		var color = neuronColorMap[postSynaptic] || '#55FF55';
-		var baseOpacity = Math.min(1, neuron / 50);
-		var dots = neuronDotCache[postSynaptic];
-		if (!dots) continue;
-		for (var di = 0; di < dots.length; di++) {
-			var variation = (Math.random() - 0.5) * 0.6;
-			var dotOpacity = Math.max(0, Math.min(1, baseOpacity + variation * baseOpacity));
-			dots[di].style.backgroundColor = color;
-			dots[di].style.opacity = dotOpacity;
-			dots[di].style.boxShadow = dotOpacity > 0.5 ? '0 0 ' + Math.round(dotOpacity * 4) + 'px ' + color : 'none';
+	if (typeof NeuroRenderer === 'undefined' || !NeuroRenderer.isActive()) {
+		for (var postSynaptic in BRAIN.connectome) {
+			var psBox = document.getElementById(postSynaptic);
+			if (!psBox) continue;
+			var neuron = BRAIN.postSynaptic[postSynaptic][BRAIN.thisState];
+			var color = neuronColorMap[postSynaptic] || '#55FF55';
+			var baseOpacity = Math.min(1, neuron / 50);
+			var dots = neuronDotCache[postSynaptic];
+			if (!dots) continue;
+			for (var di = 0; di < dots.length; di++) {
+				var variation = (Math.random() - 0.5) * 0.6;
+				var dotOpacity = Math.max(0, Math.min(1, baseOpacity + variation * baseOpacity));
+				dots[di].style.backgroundColor = color;
+				dots[di].style.opacity = dotOpacity;
+				dots[di].style.boxShadow = dotOpacity > 0.5 ? '0 0 ' + Math.round(dotOpacity * 4) + 'px ' + color : 'none';
+			}
+			psBox.classList.toggle('cg-active', baseOpacity > 0.15);
 		}
-		psBox.classList.toggle('cg-active', baseOpacity > 0.15);
 	}
 	// Evaluate behavioral state and compute movement
 	updateBehaviorState();
@@ -484,6 +489,16 @@ function updateBrain() {
 }
 
 BRAIN.randExcite();
+
+// Poll for worker ready state to init WebGL neuron renderer
+var _neuroRendererInitTimer = setInterval(function () {
+	if (BRAIN.workerReady && typeof NeuroRenderer !== 'undefined') {
+		clearInterval(_neuroRendererInitTimer);
+		NeuroRenderer.init();
+	}
+}, 200);
+setTimeout(function () { clearInterval(_neuroRendererInitTimer); }, 30000);
+
 var brainTickId = setInterval(updateBrain, 500);
 
 // --- Tab visibility handling ---

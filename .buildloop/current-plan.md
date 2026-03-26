@@ -1,517 +1,498 @@
-# Plan: T7.4
+# Plan: T7.5
 
 ## Dependencies
-- list: [] (no new packages)
-- commands: [] (no install commands)
+- list: none (WebGL2 is built into all modern browsers; no external packages needed)
+- commands: none
 
 ## File Operations (in execution order)
 
 ### 1. MODIFY js/sim-worker.js
 - operation: MODIFY
-- reason: Add groupId to ready message and add sustained stimulation support so main thread can set persistent stimulation state applied every tick
+- reason: Include regionType array in the worker 'ready' message so the main thread can access per-neuron region types for WebGL coloring
+- anchor: `self.postMessage({type: 'ready', neuronCount: N, edgeCount: edgeCount, groupId: groupId});`
 
-#### Change 1: Include groupId in ready message
-- anchor: `self.postMessage({type: 'ready', neuronCount: N, edgeCount: edgeCount});`
+#### Changes
+- Replace the single `postReady` function body. The existing line:
+  ```javascript
+  self.postMessage({type: 'ready', neuronCount: N, edgeCount: edgeCount, groupId: groupId});
+  ```
+  becomes:
+  ```javascript
+  self.postMessage({type: 'ready', neuronCount: N, edgeCount: edgeCount, groupId: groupId, regionType: regionType});
+  ```
+  This adds `regionType` (the `Uint8Array(N)` parsed in `parseBinary`) to the ready message.
 
-Replace both occurrences of `postReady()` definition (inside `case 'init':`) with:
-```js
-function postReady() {
-    self.postMessage({type: 'ready', neuronCount: N, edgeCount: edgeCount, groupId: groupId});
-}
-```
-(groupId is already a Uint16Array populated by parseBinary — just add it to the message)
+### 2. MODIFY js/brain-worker-bridge.js
+- operation: MODIFY
+- reason: Capture regionType from worker ready message, expose latestFireState/neuronCount/regionType/groupIdArr/groupIdToName/groupSizes on BRAIN object so the WebGL renderer (neuro-renderer.js) can read them
 
-#### Change 2: Add sustained stimulation state variables
-- anchor: `var running = false;`
+#### Change A: Add regionTypeArr variable
+- anchor: `var groupIdArr = null;       // Uint16Array[neuronCount] from worker`
+- Add immediately after that line:
+  ```javascript
+  var regionTypeArr = null;    // Uint8Array[neuronCount] from worker
+  ```
 
-Add immediately after `var running = false;`:
-```js
-var sustainedIndices = null;
-var sustainedIntensities = null;
-```
+#### Change B: Capture regionType in handleWorkerMessage 'ready' case
+- anchor: `groupIdArr = new Uint16Array(e.data.groupId.buffer`
+- The existing two lines (87-88) are:
+  ```javascript
+  groupIdArr = new Uint16Array(e.data.groupId.buffer
+      ? e.data.groupId.buffer : e.data.groupId);
+  ```
+- Add immediately after those two lines:
+  ```javascript
+  regionTypeArr = new Uint8Array(e.data.regionType.buffer
+      ? e.data.regionType.buffer : e.data.regionType);
+  ```
 
-#### Change 3: Apply sustained stimulation in tick()
-- anchor: `/* step 2 — propagate from fired neurons */`
+#### Change C: Expose state on BRAIN after workerReady = true
+- anchor: `workerReady = true;`
+- Add immediately after that line (before the `// Reset postSynaptic` comment):
+  ```javascript
+  BRAIN.workerReady = true;
+  BRAIN.workerNeuronCount = neuronCount;
+  BRAIN.workerRegionType = regionTypeArr;
+  BRAIN.workerGroupIdArr = groupIdArr;
+  BRAIN.workerGroupIdToName = groupIdToName;
+  BRAIN.workerGroupSizes = groupSizes;
+  ```
 
-Insert the following block BEFORE the `/* step 2 */` comment (between step 1 decay and step 2 propagation):
-```js
-	/* step 1.5 — apply sustained external stimulation */
-	if (sustainedIndices) {
-		for (var k = 0; k < sustainedIndices.length; k++) {
-			var si = sustainedIndices[k];
-			if (si < N && refractory[si] === 0) {
-				V[si] += sustainedIntensities[k];
-			}
-		}
-	}
-```
+#### Change D: Expose latestFireState on every tick
+- anchor: `latestFireState = e.data.fireState;`
+- Add immediately after that line:
+  ```javascript
+  BRAIN.latestFireState = e.data.fireState;
+  ```
 
-#### Change 4: Add setStimulusState message handler
-- anchor: `case 'setParams':`
+#### Change E: Clear workerReady on fallback (two locations)
+- First location anchor: `workerReady = false;` inside the `case 'error':` block of handleWorkerMessage (around line 113)
+- Add immediately after: `BRAIN.workerReady = false;`
+- Second location anchor: `workerReady = false;` inside handleWorkerError function (around line 122)
+- Add immediately after: `BRAIN.workerReady = false;`
 
-Insert a new case BEFORE `case 'setParams':`:
-```js
-	case 'setStimulusState':
-		sustainedIndices = e.data.indices;
-		sustainedIntensities = e.data.intensities;
-		break;
-```
-
----
-
-### 2. CREATE js/brain-worker-bridge.js
+### 3. CREATE js/neuro-renderer.js
 - operation: CREATE
-- reason: Bridge between main thread stimulation/behavior logic and the LIF Web Worker, replacing BRAIN.update() with worker communication and providing fallback to legacy 59-group simulation
-
-#### Full file content:
-
-```js
-/* brain-worker-bridge.js — T7.4
- *
- * Bridges the main-thread behavioral layer (connectome.js, fly-logic.js, main.js)
- * to the LIF Web Worker (sim-worker.js). Loads the full connectome binary,
- * initializes the worker, translates BRAIN.stimulate/drives to worker messages,
- * and aggregates worker fire states back into BRAIN.postSynaptic format.
- *
- * Loaded after connectome.js, before fly-logic.js and main.js.
- * Falls back to legacy BRAIN.update() if connectome.bin.gz fails to load.
- */
-
-(function () {
-	'use strict';
-
-	/* ---- constants (tunable, may need adjustment in T7.7) ---- */
-
-	// Intensity applied per worker tick for sustained stimulation.
-	// With leak=0.95 and threshold=1.0, V_steady = intensity / (1 - leak).
-	// At 0.15: V_steady = 3.0 → fires after ~8 ticks.
-	var STIM_INTENSITY = 0.15;
-
-	// Scale factor mapping (fired_fraction_per_group) to BRAIN.postSynaptic values.
-	// The behavioral state machine reads accumulators derived from postSynaptic.
-	// Motor neuron values of ~5-30 are needed to exceed behavior thresholds.
-	var FIRE_STATE_SCALE = 100;
-
-	/* ---- saved legacy reference ---- */
-
-	var legacyUpdate = BRAIN.update;
-
-	/* ---- module state ---- */
-
-	var worker = null;
-	var workerReady = false;
-	var latestFireState = null;
-	var neuronCount = 0;
-	var groupCount = 0;
-	var groupIdArr = null;       // Uint16Array[neuronCount] from worker
-	var groupIndices = null;     // Array of Uint32Array per group_id
-	var groupSizes = null;       // Array[groupCount] of int from neuron_meta.json
-	var groupNameToId = {};      // e.g. {'VIS_R1R6': 0, ...}
-	var groupIdToName = [];      // e.g. [0: 'VIS_R1R6', ...]
-
-	/* ---- initialization ---- */
-
-	function initBridge() {
-		var metaUrl = 'data/neuron_meta.json';
-		var binUrl = 'data/connectome.bin.gz';
-
-		fetch(metaUrl)
-			.then(function (res) {
-				if (!res.ok) throw new Error('HTTP ' + res.status + ' fetching ' + metaUrl);
-				return res.json();
-			})
-			.then(function (meta) {
-				groupCount = meta.group_count;
-				groupSizes = meta.group_sizes;
-				for (var i = 0; i < meta.groups.length; i++) {
-					var g = meta.groups[i];
-					groupNameToId[g.name] = g.id;
-					groupIdToName[g.id] = g.name;
-				}
-				return fetch(binUrl);
-			})
-			.then(function (res) {
-				if (!res.ok) throw new Error('HTTP ' + res.status + ' fetching ' + binUrl);
-				return res.arrayBuffer();
-			})
-			.then(function (buffer) {
-				worker = new Worker('js/sim-worker.js');
-				worker.onmessage = handleWorkerMessage;
-				worker.onerror = handleWorkerError;
-				worker.postMessage({type: 'init', buffer: buffer}, [buffer]);
-			})
-			.catch(function (err) {
-				console.warn('connectome.bin.gz load failed, using 59-group BRAIN.update():', err);
-				BRAIN.update = legacyUpdate;
-			});
-	}
-
-	/* ---- worker message handling ---- */
-
-	function handleWorkerMessage(e) {
-		switch (e.data.type) {
-		case 'ready':
-			neuronCount = e.data.neuronCount;
-			groupIdArr = new Uint16Array(e.data.groupId.buffer
-				? e.data.groupId.buffer : e.data.groupId);
-			buildGroupIndices();
-			workerReady = true;
-
-			// Reset postSynaptic to avoid stale legacy values
-			for (var ps in BRAIN.postSynaptic) {
-				BRAIN.postSynaptic[ps][0] = 0;
-				BRAIN.postSynaptic[ps][1] = 0;
-			}
-
-			// Switch to worker-driven update
-			BRAIN.update = workerUpdate;
-			worker.postMessage({type: 'start'});
-			console.log('Connectome worker ready: ' + neuronCount + ' neurons, ' +
-				e.data.edgeCount + ' edges');
-			break;
-
-		case 'tick':
-			latestFireState = e.data.fireState;
-			break;
-
-		case 'error':
-			console.warn('Worker error: ' + e.data.message);
-			if (workerReady) {
-				console.warn('Falling back to 59-group BRAIN.update()');
-				workerReady = false;
-				BRAIN.update = legacyUpdate;
-			}
-			break;
-		}
-	}
-
-	function handleWorkerError(err) {
-		console.warn('Worker crashed, falling back to 59-group BRAIN.update():', err.message || err);
-		workerReady = false;
-		BRAIN.update = legacyUpdate;
-	}
-
-	/* ---- build group-to-neuron-indices lookup ---- */
-
-	function buildGroupIndices() {
-		// Count neurons per group
-		var counts = new Uint32Array(groupCount);
-		for (var i = 0; i < neuronCount; i++) {
-			counts[groupIdArr[i]]++;
-		}
-		// Allocate typed arrays per group
-		groupIndices = new Array(groupCount);
-		for (var g = 0; g < groupCount; g++) {
-			groupIndices[g] = new Uint32Array(counts[g]);
-			counts[g] = 0; // reuse as write offset
-		}
-		// Fill indices
-		for (var i = 0; i < neuronCount; i++) {
-			var gid = groupIdArr[i];
-			groupIndices[gid][counts[gid]++] = i;
-		}
-	}
-
-	/* ---- worker-driven BRAIN.update replacement ---- */
-
-	function workerUpdate() {
-		// 1. Update drives (same logic as legacy, runs on main thread)
-		BRAIN.updateDrives();
-
-		// 2. Build and send sustained stimulation state to worker
-		sendStimulation();
-
-		// 3. Aggregate latest fire state into BRAIN.postSynaptic
-		if (latestFireState) {
-			aggregateFireState();
-
-			// 4. Motor control (reads postSynaptic[nextState], sets accumulators)
-			BRAIN.motorcontrol();
-
-			// 5. State swap (same as BRAIN.runconnectome lines 413-421)
-			for (var ps in BRAIN.postSynaptic) {
-				BRAIN.postSynaptic[ps][BRAIN.thisState] =
-					BRAIN.postSynaptic[ps][BRAIN.nextState];
-			}
-			var temp = BRAIN.thisState;
-			BRAIN.thisState = BRAIN.nextState;
-			BRAIN.nextState = temp;
-		}
-	}
-
-	/* ---- translate BRAIN.stimulate + BRAIN.drives to worker stimulation ---- */
-
-	function sendStimulation() {
-		// Collect all stimulation segments, then build one batched message
-		var totalLen = 0;
-		var segments = []; // {indices: Uint32Array, intensity: number}
-
-		function addGroup(groupName, intensity) {
-			var gid = groupNameToId[groupName];
-			if (gid === undefined) return;
-			var idx = groupIndices[gid];
-			if (!idx || idx.length === 0) return;
-			segments.push({indices: idx, intensity: intensity});
-			totalLen += idx.length;
-		}
-
-		var d = BRAIN.drives;
-
-		// --- Drive stimulation ---
-		if (d.hunger > 0.2) {
-			var pulses = d.hunger > 0.6 ? 3 : (d.hunger > 0.4 ? 2 : 1);
-			addGroup('DRIVE_HUNGER', STIM_INTENSITY * d.hunger * pulses);
-		}
-		if (d.fear > 0.05) {
-			var pulses = d.fear > 0.5 ? 3 : (d.fear > 0.2 ? 2 : 1);
-			addGroup('DRIVE_FEAR', STIM_INTENSITY * d.fear * pulses);
-		}
-		if (d.fatigue > 0.3) {
-			addGroup('DRIVE_FATIGUE', STIM_INTENSITY * d.fatigue);
-		}
-		if (d.curiosity > 0.2) {
-			var pulses = d.curiosity > 0.5 ? 2 : 1;
-			addGroup('DRIVE_CURIOSITY', STIM_INTENSITY * d.curiosity * pulses);
-		}
-		if (d.groom > 0.3) {
-			addGroup('DRIVE_GROOM', STIM_INTENSITY * d.groom);
-		}
-
-		// --- Sensory stimulation ---
-		if (BRAIN.stimulate.touch) {
-			addGroup('MECH_BRISTLE', STIM_INTENSITY);
-			if (BRAIN.stimulate.touchLocation === 'head' ||
-				BRAIN.stimulate.touchLocation === 'thorax') {
-				addGroup('MECH_BRISTLE', STIM_INTENSITY); // double dose
-			}
-		}
-		if (BRAIN.stimulate.foodNearby) {
-			addGroup('OLF_ORN_FOOD', STIM_INTENSITY);
-		}
-		if (BRAIN.stimulate.foodContact) {
-			addGroup('GUS_GRN_SWEET', STIM_INTENSITY);
-		}
-		if (BRAIN.stimulate.dangerOdor) {
-			addGroup('OLF_ORN_DANGER', STIM_INTENSITY);
-		}
-		if (BRAIN.stimulate.wind) {
-			addGroup('MECH_JO', STIM_INTENSITY * BRAIN.stimulate.windStrength);
-		}
-		if (BRAIN.stimulate.lightLevel > 0.2) {
-			addGroup('VIS_R1R6', STIM_INTENSITY * BRAIN.stimulate.lightLevel);
-			addGroup('VIS_R7R8', STIM_INTENSITY * BRAIN.stimulate.lightLevel * 0.7);
-		}
-		if (BRAIN.stimulate.temperature > 0.65) {
-			var warmIntensity = (BRAIN.stimulate.temperature - 0.5) * 2;
-			addGroup('THERMO_WARM', STIM_INTENSITY * warmIntensity);
-		} else if (BRAIN.stimulate.temperature < 0.35) {
-			var coolIntensity = (0.5 - BRAIN.stimulate.temperature) * 2;
-			addGroup('THERMO_COOL', STIM_INTENSITY * coolIntensity);
-		}
-		if (BRAIN.stimulate.nociception) {
-			addGroup('NOCI', STIM_INTENSITY);
-			BRAIN.stimulate.nociception = false; // single-tick, auto-clear
-		}
-		if (BRAIN._isMoving) {
-			addGroup('MECH_CHORD', STIM_INTENSITY);
-		}
-		if (BRAIN.stimulate.lightLevel > 0.1 && BRAIN._isMoving) {
-			addGroup('VIS_LPTC', STIM_INTENSITY * 0.3);
-		}
-
-		// --- Tonic background activity ---
-		var tonicIntensity = BRAIN.stimulate.lightLevel === 0 ? 0.03 : 0.06;
-		addGroup('CX_FC', tonicIntensity);
-		addGroup('CX_EPG', tonicIntensity);
-		addGroup('CX_PFN', tonicIntensity);
-
-		// --- Build batched message ---
-		if (totalLen === 0) {
-			worker.postMessage({type: 'setStimulusState', indices: null, intensities: null});
-			return;
-		}
-
-		var allIndices = new Uint32Array(totalLen);
-		var allIntensities = new Float32Array(totalLen);
-		var offset = 0;
-		for (var s = 0; s < segments.length; s++) {
-			var seg = segments[s];
-			allIndices.set(seg.indices, offset);
-			for (var k = 0; k < seg.indices.length; k++) {
-				allIntensities[offset + k] = seg.intensity;
-			}
-			offset += seg.indices.length;
-		}
-
-		worker.postMessage({type: 'setStimulusState', indices: allIndices, intensities: allIntensities});
-	}
-
-	/* ---- aggregate fire state into BRAIN.postSynaptic ---- */
-
-	function aggregateFireState() {
-		var fire = latestFireState;
-
-		// Sum fired neurons per group
-		var groupFires = new Float32Array(groupCount);
-		for (var i = 0; i < neuronCount; i++) {
-			if (fire[i]) {
-				groupFires[groupIdArr[i]]++;
-			}
-		}
-
-		// Normalize by group size, scale, and write to BRAIN.postSynaptic[nextState]
-		for (var g = 0; g < groupCount; g++) {
-			var name = groupIdToName[g];
-			if (!name || !BRAIN.postSynaptic[name]) continue;
-			var size = groupSizes[g];
-			var activation = size > 0 ? (groupFires[g] / size) * FIRE_STATE_SCALE : 0;
-			BRAIN.postSynaptic[name][BRAIN.nextState] = activation;
-		}
-	}
-
-	/* ---- start ---- */
-
-	initBridge();
-
-})();
-```
+- reason: WebGL2 renderer that draws 139K neurons as GL_POINTS in the left sidebar, colored by region type, brightness driven by fire state
 
 #### Imports / Dependencies
-- Depends on `BRAIN` global from connectome.js (must be loaded after connectome.js)
-- Depends on `data/neuron_meta.json` (output of scripts/build_connectome.py)
-- Depends on `data/connectome.bin.gz` (output of scripts/build_connectome.py)
-- Depends on `js/sim-worker.js` (created in T7.3)
+- None (vanilla JS, WebGL2 built-in). Loaded via `<script>` tag.
+
+#### Module Structure
+- Entire file wrapped in IIFE: `(function() { 'use strict'; ... })();`
+- Exposes `window.NeuroRenderer = { init: init, destroy: destroy, isActive: isActive }` at end of IIFE.
+
+#### Constants
+```javascript
+var REGION_COLORS = [
+    [0.231, 0.510, 0.965],  // region_type 0 = sensory: #3b82f6
+    [0.545, 0.361, 0.965],  // region_type 1 = central: #8b5cf6
+    [0.961, 0.620, 0.043],  // region_type 2 = drives:  #f59e0b
+    [0.937, 0.267, 0.267]   // region_type 3 = motor:   #ef4444
+];
+var POINT_SIZE = 2.0;
+var SECTION_GAP = 24;
+var PAD = 4;
+var PICK_RADIUS_SQ = 16;
+var SECTION_NAMES = ['Sensory', 'Central', 'Drives', 'Motor'];
+var LABEL_COLORS = ['#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444'];
+var LABEL_BGS = ['rgba(59,130,246,0.1)', 'rgba(139,92,246,0.1)', 'rgba(245,158,11,0.1)', 'rgba(239,68,68,0.1)'];
+```
+
+#### Module-Level State Variables
+```javascript
+var canvas = null;
+var gl = null;
+var program = null;
+var posBuffer = null;
+var colorBuffer = null;
+var brightnessBuffer = null;
+var brightnessData = null;     // Float32Array(neuronCount)
+var neuronCount = 0;
+var cols = 0;                  // columns per row in the grid layout
+var animFrameId = null;
+var active = false;
+var tooltipEl = null;
+var labelContainer = null;
+var sectionBounds = [];        // Array of {y0, y1, region, neuronIndices}
+var neuronPositions = null;    // Float32Array(neuronCount * 2) pixel coords for hit-testing
+var _onMouseMove = null;
+var _onMouseLeave = null;
+```
 
 #### Functions
 
-- signature: `function initBridge()`
-  - purpose: Fetch neuron_meta.json and connectome.bin.gz, create worker, send binary to worker
-  - logic:
-    1. Fetch `data/neuron_meta.json`, parse JSON
-    2. Store `groupCount`, `groupSizes`, build `groupNameToId` and `groupIdToName` from `meta.groups`
-    3. Fetch `data/connectome.bin.gz`, get ArrayBuffer
-    4. Create `new Worker('js/sim-worker.js')`
-    5. Set `worker.onmessage = handleWorkerMessage` and `worker.onerror = handleWorkerError`
-    6. Send `{type: 'init', buffer: buffer}` to worker with buffer as transferable
-    7. On any error in the promise chain: `console.warn(...)`, set `BRAIN.update = legacyUpdate`
-  - calls: `handleWorkerMessage`, `handleWorkerError`
-  - returns: void (async, no return)
-  - error handling: catch block logs warning and falls back to legacyUpdate
+##### `init()`
+- signature: `function init()`
+- purpose: Create WebGL2 canvas, compile shaders, build neuron layout, start render loop
+- logic:
+    1. Read `BRAIN.workerNeuronCount`. If falsy or 0, return false.
+    2. Set `neuronCount = BRAIN.workerNeuronCount`.
+    3. `var holder = document.getElementById('nodeHolder')`. Set `holder.style.display = 'none'`.
+    4. `var panel = document.getElementById('connectome-panel')`.
+    5. Check if `document.getElementById('neuro-renderer-wrap')` already exists. If so, remove it (prevents double-init).
+    6. Create wrapper div: `var wrap = document.createElement('div')`. Set `wrap.id = 'neuro-renderer-wrap'`. Append to `panel`.
+    7. Create canvas: `canvas = document.createElement('canvas')`. Set `canvas.id = 'neuro-canvas'`. Append to `wrap`.
+    8. Create label container: `labelContainer = document.createElement('div')`. Set `labelContainer.id = 'neuro-labels'`. Append to `wrap`.
+    9. Get WebGL2 context: `gl = canvas.getContext('webgl2', {antialias: false, alpha: false})`. If null, log `'WebGL2 not available'`, set `holder.style.display = ''`, remove wrap, return false.
+    10. Set `canvas.width = Math.floor(wrap.getBoundingClientRect().width)` (or fallback 320 if 0).
+    11. Call `buildShaders()`. If `program` is null after call, clean up and return false.
+    12. Call `buildLayout()`.
+    13. Call `buildLabels()`.
+    14. `tooltipEl = document.getElementById('neuronTooltip')`.
+    15. `_onMouseMove = onMouseMove`. `canvas.addEventListener('mousemove', _onMouseMove)`.
+    16. `_onMouseLeave = onMouseLeave`. `canvas.addEventListener('mouseleave', _onMouseLeave)`.
+    17. Set `active = true`.
+    18. `animFrameId = requestAnimationFrame(renderLoop)`.
+    19. Return true.
+- returns: boolean (true = success)
+- error handling: If WebGL2 not available or shaders fail, restore holder display, remove wrapper div, return false.
 
-- signature: `function handleWorkerMessage(e)`
-  - purpose: Handle messages from the LIF worker (ready, tick, error)
-  - logic:
-    1. If `e.data.type === 'ready'`: store neuronCount, groupIdArr (Uint16Array from e.data.groupId), call `buildGroupIndices()`, set `workerReady = true`, zero all BRAIN.postSynaptic entries, set `BRAIN.update = workerUpdate`, send `{type: 'start'}` to worker, log to console
-    2. If `e.data.type === 'tick'`: store `e.data.fireState` in `latestFireState`
-    3. If `e.data.type === 'error'`: console.warn, if workerReady was true then set `workerReady = false` and `BRAIN.update = legacyUpdate`
-  - calls: `buildGroupIndices` (on ready)
-  - returns: void
-  - error handling: error type falls back to legacyUpdate
+##### `destroy()`
+- signature: `function destroy()`
+- purpose: Tear down WebGL context, remove canvas, restore DOM dots, cancel animation frame
+- logic:
+    1. Set `active = false`.
+    2. If `animFrameId !== null`, call `cancelAnimationFrame(animFrameId)`. Set `animFrameId = null`.
+    3. If `canvas` and `_onMouseMove`, call `canvas.removeEventListener('mousemove', _onMouseMove)`.
+    4. If `canvas` and `_onMouseLeave`, call `canvas.removeEventListener('mouseleave', _onMouseLeave)`.
+    5. If `tooltipEl`, set `tooltipEl.style.display = 'none'`.
+    6. `var wrap = document.getElementById('neuro-renderer-wrap')`. If wrap and wrap.parentNode, call `wrap.parentNode.removeChild(wrap)`.
+    7. `var holder = document.getElementById('nodeHolder')`. If holder, set `holder.style.display = ''`.
+    8. Set `gl = null; canvas = null; program = null; neuronCount = 0; brightnessData = null; neuronPositions = null; sectionBounds = []; posBuffer = null; colorBuffer = null; brightnessBuffer = null; labelContainer = null;`.
+- returns: void
 
-- signature: `function handleWorkerError(err)`
-  - purpose: Handle worker crash/script-load failure
-  - logic:
-    1. console.warn with error message
-    2. Set `workerReady = false`
-    3. Set `BRAIN.update = legacyUpdate`
-  - returns: void
+##### `isActive()`
+- signature: `function isActive()`
+- purpose: Returns whether the renderer is currently running
+- logic: `return active;`
+- returns: boolean
 
-- signature: `function buildGroupIndices()`
-  - purpose: Build per-group arrays of neuron indices for stimulation targeting
-  - logic:
-    1. Allocate `counts = new Uint32Array(groupCount)`, iterate neuronCount to count neurons per group
-    2. Allocate `groupIndices = new Array(groupCount)`, for each group g create `new Uint32Array(counts[g])`, reset counts[g] to 0
-    3. Iterate neuronCount again, for each neuron i: `groupIndices[groupIdArr[i]][counts[groupIdArr[i]]++] = i`
-  - returns: void (writes to module-level `groupIndices`)
+##### `buildShaders()`
+- signature: `function buildShaders()`
+- purpose: Compile vertex/fragment shaders, link program, cache attribute and uniform locations
+- logic:
+    1. Vertex shader source string (GLSL 300 es):
+       ```
+       #version 300 es
+       in vec2 a_position;
+       in vec3 a_color;
+       in float a_brightness;
+       uniform vec2 u_resolution;
+       out vec3 v_color;
+       out float v_brightness;
+       void main() {
+           vec2 clipPos = (a_position / u_resolution) * 2.0 - 1.0;
+           clipPos.y = -clipPos.y;
+           gl_Position = vec4(clipPos, 0.0, 1.0);
+           gl_PointSize = 2.0;
+           v_color = a_color;
+           v_brightness = a_brightness;
+       }
+       ```
+    2. Fragment shader source string (GLSL 300 es):
+       ```
+       #version 300 es
+       precision mediump float;
+       in vec3 v_color;
+       in float v_brightness;
+       out vec4 fragColor;
+       void main() {
+           float b = 0.15 + v_brightness * 0.85;
+           fragColor = vec4(v_color * b, 1.0);
+       }
+       ```
+    3. `var vs = gl.createShader(gl.VERTEX_SHADER)`. `gl.shaderSource(vs, vertSrc)`. `gl.compileShader(vs)`. If `!gl.getShaderParameter(vs, gl.COMPILE_STATUS)`: `console.warn('VS compile:', gl.getShaderInfoLog(vs))`, set `program = null`, return.
+    4. `var fs = gl.createShader(gl.FRAGMENT_SHADER)`. `gl.shaderSource(fs, fragSrc)`. `gl.compileShader(fs)`. If `!gl.getShaderParameter(fs, gl.COMPILE_STATUS)`: `console.warn('FS compile:', gl.getShaderInfoLog(fs))`, set `program = null`, return.
+    5. `program = gl.createProgram()`. `gl.attachShader(program, vs)`. `gl.attachShader(program, fs)`. `gl.linkProgram(program)`. If `!gl.getProgramParameter(program, gl.LINK_STATUS)`: `console.warn('Link:', gl.getProgramInfoLog(program))`, set `program = null`, return.
+    6. `program.a_position = gl.getAttribLocation(program, 'a_position')`.
+    7. `program.a_color = gl.getAttribLocation(program, 'a_color')`.
+    8. `program.a_brightness = gl.getAttribLocation(program, 'a_brightness')`.
+    9. `program.u_resolution = gl.getUniformLocation(program, 'u_resolution')`.
+- returns: void (sets module-level `program`; null on failure)
 
-- signature: `function workerUpdate()`
-  - purpose: Replace BRAIN.update() — runs drives, sends stimulation, aggregates fire state, runs motor control
-  - logic:
-    1. Call `BRAIN.updateDrives()`
-    2. Call `sendStimulation()`
-    3. If `latestFireState` is not null:
-       a. Call `aggregateFireState()` (writes to `BRAIN.postSynaptic[name][BRAIN.nextState]`)
-       b. Call `BRAIN.motorcontrol()` (reads motor neurons from nextState, sets accumulators)
-       c. State swap: for each ps in BRAIN.postSynaptic, copy nextState to thisState; then swap `BRAIN.thisState` and `BRAIN.nextState`
-  - calls: `BRAIN.updateDrives`, `sendStimulation`, `aggregateFireState`, `BRAIN.motorcontrol`
-  - returns: void
+##### `buildLayout()`
+- signature: `function buildLayout()`
+- purpose: Compute pixel (x,y) per neuron in a grid grouped by region; upload position and color buffers to GPU
+- logic:
+    1. `var regionType = BRAIN.workerRegionType` (Uint8Array of length neuronCount).
+    2. Build per-region neuron index lists: `var regionNeurons = [[], [], [], []]`. Loop `i = 0` to `neuronCount - 1`: `regionNeurons[regionType[i]].push(i)`.
+    3. `var W = canvas.width`.
+    4. `var usableW = W - PAD * 2`.
+    5. `cols = Math.max(1, Math.floor(usableW / POINT_SIZE))`.
+    6. `neuronPositions = new Float32Array(neuronCount * 2)`.
+    7. `var posData = new Float32Array(neuronCount * 2)`.
+    8. `var colorData = new Float32Array(neuronCount * 3)`.
+    9. `var cursorY = 0`. `sectionBounds = []`.
+    10. For each `r` in `[0, 1, 2, 3]`:
+        a. `var neurons = regionNeurons[r]`.
+        b. If `neurons.length === 0`: push `{y0: cursorY, y1: cursorY, region: r, neuronIndices: []}` to `sectionBounds`. Continue.
+        c. `var sectionY0 = cursorY`.
+        d. `cursorY += SECTION_GAP` (vertical space for label).
+        e. `var rowCount = Math.ceil(neurons.length / cols)`.
+        f. For `j = 0` to `neurons.length - 1`:
+            - `var nIdx = neurons[j]`
+            - `var c = j % cols`
+            - `var row = Math.floor(j / cols)`
+            - `var px = PAD + c * POINT_SIZE + POINT_SIZE * 0.5`
+            - `var py = cursorY + row * POINT_SIZE + POINT_SIZE * 0.5`
+            - `posData[nIdx * 2] = px`
+            - `posData[nIdx * 2 + 1] = py`
+            - `neuronPositions[nIdx * 2] = px`
+            - `neuronPositions[nIdx * 2 + 1] = py`
+            - `var rgb = REGION_COLORS[r]`
+            - `colorData[nIdx * 3] = rgb[0]`
+            - `colorData[nIdx * 3 + 1] = rgb[1]`
+            - `colorData[nIdx * 3 + 2] = rgb[2]`
+        g. `cursorY += rowCount * POINT_SIZE + 2`.
+        h. Push `{y0: sectionY0, y1: cursorY, region: r, neuronIndices: neurons}` to `sectionBounds`.
+    11. `canvas.height = Math.ceil(cursorY)`.
+    12. `gl.viewport(0, 0, canvas.width, canvas.height)`.
+    13. `posBuffer = gl.createBuffer()`. `gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer)`. `gl.bufferData(gl.ARRAY_BUFFER, posData, gl.STATIC_DRAW)`.
+    14. `colorBuffer = gl.createBuffer()`. `gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer)`. `gl.bufferData(gl.ARRAY_BUFFER, colorData, gl.STATIC_DRAW)`.
+    15. `brightnessData = new Float32Array(neuronCount)`.
+    16. `brightnessBuffer = gl.createBuffer()`. `gl.bindBuffer(gl.ARRAY_BUFFER, brightnessBuffer)`. `gl.bufferData(gl.ARRAY_BUFFER, brightnessData, gl.DYNAMIC_DRAW)`.
+- returns: void
 
-- signature: `function sendStimulation()`
-  - purpose: Translate BRAIN.stimulate flags and BRAIN.drives values to a batched worker setStimulusState message
-  - logic:
-    1. Initialize `totalLen = 0`, `segments = []`
-    2. Define inner `addGroup(groupName, intensity)`: look up groupNameToId, get groupIndices, push segment, add to totalLen
-    3. Translate drives: check each drive threshold and compute intensity = STIM_INTENSITY * driveValue * pulseCount (exact conditions replicate BRAIN.update lines 279-302)
-    4. Translate sensory: check each BRAIN.stimulate flag and add corresponding group with appropriate intensity (exact conditions replicate BRAIN.update lines 307-371)
-    5. Translate tonic: add CX_FC, CX_EPG, CX_PFN with tonic intensity (0.03 if dark, 0.06 otherwise)
-    6. If totalLen is 0: send `{type: 'setStimulusState', indices: null, intensities: null}`, return
-    7. Build `allIndices = new Uint32Array(totalLen)` and `allIntensities = new Float32Array(totalLen)` by iterating segments
-    8. Send `{type: 'setStimulusState', indices: allIndices, intensities: allIntensities}` to worker
-  - calls: `worker.postMessage`
-  - returns: void
+##### `buildLabels()`
+- signature: `function buildLabels()`
+- purpose: Create HTML label overlays positioned above each region section in the canvas
+- logic:
+    1. `labelContainer.innerHTML = ''`.
+    2. For `r = 0` to `3`:
+        a. If `sectionBounds[r].neuronIndices.length === 0`, skip.
+        b. `var div = document.createElement('div')`.
+        c. Set `div.style.cssText = 'position:absolute;left:4px;top:' + sectionBounds[r].y0 + 'px;font-size:0.6rem;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;padding:0.15rem 0.3rem;border-radius:3px;font-family:system-ui,-apple-system,sans-serif;color:' + LABEL_COLORS[r] + ';background:' + LABEL_BGS[r] + ';'`.
+        d. `div.textContent = SECTION_NAMES[r]`.
+        e. `labelContainer.appendChild(div)`.
+- returns: void
 
-- signature: `function aggregateFireState()`
-  - purpose: Aggregate per-neuron fire state from worker into per-group BRAIN.postSynaptic values
-  - logic:
-    1. Allocate `groupFires = new Float32Array(groupCount)`
-    2. Iterate all neuronCount neurons: if `latestFireState[i]` is truthy, increment `groupFires[groupIdArr[i]]`
-    3. For each group g (0 to groupCount-1): look up `name = groupIdToName[g]`, if name exists and BRAIN.postSynaptic[name] exists, compute `activation = (groupFires[g] / groupSizes[g]) * FIRE_STATE_SCALE`, write to `BRAIN.postSynaptic[name][BRAIN.nextState]`
-  - returns: void (writes to BRAIN.postSynaptic)
+##### `renderLoop()`
+- signature: `function renderLoop()`
+- purpose: Read latest fire state, update brightness buffer, draw all neurons as GL_POINTS, schedule next frame
+- logic:
+    1. If `!active`, return without scheduling next frame.
+    2. `var fire = BRAIN.latestFireState`.
+    3. If `fire` and `fire.length >= neuronCount`:
+        - Loop `i = 0` to `neuronCount - 1`: `brightnessData[i] = fire[i] ? 1.0 : 0.0`.
+    4. Else:
+        - Loop `i = 0` to `neuronCount - 1`: `brightnessData[i] = 0.0`.
+    5. `gl.bindBuffer(gl.ARRAY_BUFFER, brightnessBuffer)`. `gl.bufferSubData(gl.ARRAY_BUFFER, 0, brightnessData)`.
+    6. `gl.clearColor(0.086, 0.129, 0.243, 1.0)` (matches --surface #16213e).
+    7. `gl.clear(gl.COLOR_BUFFER_BIT)`.
+    8. `gl.useProgram(program)`.
+    9. `gl.uniform2f(program.u_resolution, canvas.width, canvas.height)`.
+    10. `gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer)`. `gl.enableVertexAttribArray(program.a_position)`. `gl.vertexAttribPointer(program.a_position, 2, gl.FLOAT, false, 0, 0)`.
+    11. `gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer)`. `gl.enableVertexAttribArray(program.a_color)`. `gl.vertexAttribPointer(program.a_color, 3, gl.FLOAT, false, 0, 0)`.
+    12. `gl.bindBuffer(gl.ARRAY_BUFFER, brightnessBuffer)`. `gl.enableVertexAttribArray(program.a_brightness)`. `gl.vertexAttribPointer(program.a_brightness, 1, gl.FLOAT, false, 0, 0)`.
+    13. `gl.drawArrays(gl.POINTS, 0, neuronCount)`.
+    14. `animFrameId = requestAnimationFrame(renderLoop)`.
+- returns: void
+- note: Single draw call for all 139K neurons. GL_POINTS with per-vertex attributes is equivalent to instanced points for this use case but simpler. The task spec says "single draw call using ANGLE_instanced_arrays" but ANGLE_instanced_arrays is a WebGL1 extension; in WebGL2 we use native drawArrays which achieves the same single-draw-call goal.
+
+##### `onMouseMove(e)`
+- signature: `function onMouseMove(e)`
+- purpose: Find nearest neuron to cursor using grid-based O(1) lookup, show tooltip with group name + description
+- logic:
+    1. `var rect = canvas.getBoundingClientRect()`.
+    2. `var mx = e.clientX - rect.left`.
+    3. `var scrollTop = canvas.parentElement.scrollTop`.
+    4. `var canvasY = (e.clientY - rect.top) + scrollTop`.
+    5. Find which section mouse is in: loop `r = 0` to `3`. If `canvasY >= sectionBounds[r].y0 && canvasY < sectionBounds[r].y1 && sectionBounds[r].neuronIndices.length > 0`, set `var bounds = sectionBounds[r]` and break. If no match, hide tooltip (`tooltipEl.style.display = 'none'`), return.
+    6. `var neurons = bounds.neuronIndices`.
+    7. `var sectionTopY = bounds.y0 + SECTION_GAP` (Y where dots start).
+    8. `var approxRow = Math.floor((canvasY - sectionTopY) / POINT_SIZE)`.
+    9. `var approxCol = Math.floor((mx - PAD) / POINT_SIZE)`.
+    10. `var maxRow = Math.ceil(neurons.length / cols) - 1`. Clamp `approxRow` to `[0, maxRow]`.
+    11. Clamp `approxCol` to `[0, cols - 1]`.
+    12. `var bestDist = PICK_RADIUS_SQ`. `var bestIdx = -1`.
+    13. For `dr = -1` to `1`: for `dc = -1` to `1`:
+        - `var checkRow = approxRow + dr`. `var checkCol = approxCol + dc`.
+        - If `checkRow < 0 || checkRow > maxRow || checkCol < 0 || checkCol >= cols`, continue.
+        - `var j = checkRow * cols + checkCol`. If `j >= neurons.length`, continue.
+        - `var nIdx = neurons[j]`.
+        - `var dx = neuronPositions[nIdx * 2] - mx`.
+        - `var dy = neuronPositions[nIdx * 2 + 1] - canvasY`.
+        - `var dist = dx * dx + dy * dy`.
+        - If `dist < bestDist`: `bestDist = dist; bestIdx = nIdx`.
+    14. If `bestIdx === -1`: `tooltipEl.style.display = 'none'`. Return.
+    15. `var gid = BRAIN.workerGroupIdArr[bestIdx]`.
+    16. `var groupName = BRAIN.workerGroupIdToName[gid] || ('group_' + gid)`.
+    17. `var desc = (typeof neuronDescriptions !== 'undefined' && neuronDescriptions[groupName]) ? neuronDescriptions[groupName] : groupName.replace(/_/g, ' ')`.
+    18. `tooltipEl.textContent = desc`.
+    19. `tooltipEl.style.display = 'block'`.
+    20. `tooltipEl.style.left = (e.clientX + 10) + 'px'`.
+    21. `tooltipEl.style.bottom = (window.innerHeight - e.clientY + 10) + 'px'`.
+    22. `tooltipEl.style.top = 'auto'`.
+- returns: void
+
+##### `onMouseLeave(e)`
+- signature: `function onMouseLeave(e)`
+- purpose: Hide tooltip when mouse exits the canvas
+- logic:
+    1. If `tooltipEl`, set `tooltipEl.style.display = 'none'`.
+- returns: void
 
 #### Wiring / Integration
-- Loaded as a script tag after connectome.js, before fly-logic.js
-- IIFE runs synchronously: saves `legacyUpdate = BRAIN.update`, then starts async `initBridge()`
-- During async loading, BRAIN.update remains legacyUpdate (old behavior works)
-- On worker ready: BRAIN.update is replaced with workerUpdate
-- On any failure: BRAIN.update is restored to legacyUpdate with console.warn
-- The rest of main.js (updateBrain, updateBehaviorState, computeMovementForBehavior, dot visualization, drive meters) works unchanged because:
-  - `BRAIN.postSynaptic[name][BRAIN.thisState]` contains aggregated fire state values
-  - `BRAIN.accumWalkLeft/Right/Flight/Feed/Groom/Startle/Head` are set by `BRAIN.motorcontrol()`
-  - `BRAIN.accumleft/accumright` are set by `BRAIN.motorcontrol()`
-  - `BRAIN.drives.*` are updated by `BRAIN.updateDrives()`
-  - `BRAIN.stimulate.*` flags are read by sendStimulation and also by updateBehaviorState (unchanged)
+- At end of IIFE, before closing `})();`:
+  ```javascript
+  window.NeuroRenderer = { init: init, destroy: destroy, isActive: isActive };
+  ```
+- Called from main.js (see file operation #5).
 
----
-
-### 3. MODIFY index.html
+### 4. MODIFY index.html
 - operation: MODIFY
-- reason: Add brain-worker-bridge.js script tag so the bridge loads after connectome.js and before fly-logic.js
-- anchor: `<script type="text/javascript" src="./js/connectome.js"></script>`
+- reason: Add script tag for neuro-renderer.js between brain-worker-bridge.js and fly-logic.js
+- anchor: `<script type="text/javascript" src="./js/brain-worker-bridge.js"></script>`
 
-#### Change
-Insert a new script tag immediately after the connectome.js script tag:
-```html
-    <script type="text/javascript" src="./js/brain-worker-bridge.js"></script>
-```
+#### Changes
+- Add the following line immediately after the brain-worker-bridge.js script tag:
+  ```html
+  <script type="text/javascript" src="./js/neuro-renderer.js"></script>
+  ```
 
-The resulting script order will be:
-```
-    <script type="text/javascript" src="./js/constants.js"></script>
-    <script type="text/javascript" src="./js/connectome.js"></script>
-    <script type="text/javascript" src="./js/brain-worker-bridge.js"></script>
-    <script type="text/javascript" src="./js/fly-logic.js"></script>
-    <script type="text/javascript" src="./js/brain3d.js"></script>
-    <script type="text/javascript" src="./js/education.js"></script>
-    <script type="text/javascript" src="./js/main.js"></script>
-```
+### 5. MODIFY js/main.js
+- operation: MODIFY
+- reason: Initialize NeuroRenderer when worker is ready; skip DOM dot updates when WebGL is active; integrate with connectome toggle button
 
----
+#### Change A: Add NeuroRenderer init polling
+- anchor: `BRAIN.randExcite();` (line 486)
+- Add immediately after that line (before `var brainTickId = setInterval(updateBrain, 500);`):
+  ```javascript
+  // Poll for worker ready state to init WebGL neuron renderer
+  var _neuroRendererInitTimer = setInterval(function () {
+      if (BRAIN.workerReady && typeof NeuroRenderer !== 'undefined') {
+          clearInterval(_neuroRendererInitTimer);
+          NeuroRenderer.init();
+      }
+  }, 200);
+  setTimeout(function () { clearInterval(_neuroRendererInitTimer); }, 30000);
+  ```
+
+#### Change B: Skip DOM dot updates when WebGL renderer is active
+- anchor: `for (var postSynaptic in BRAIN.connectome) {` (line 448, inside updateBrain function)
+- Wrap the entire DOM dot update block (from that `for` loop through the closing `}` that ends `psBox.classList.toggle(...)` on line 464) in a conditional check. The existing code block is:
+  ```javascript
+  	for (var postSynaptic in BRAIN.connectome) {
+  		var psBox = document.getElementById(postSynaptic);
+  		if (!psBox) continue;
+  		var neuron = BRAIN.postSynaptic[postSynaptic][BRAIN.thisState];
+  		var color = neuronColorMap[postSynaptic] || '#55FF55';
+  		var baseOpacity = Math.min(1, neuron / 50);
+  		var dots = neuronDotCache[postSynaptic];
+  		if (!dots) continue;
+  		for (var di = 0; di < dots.length; di++) {
+  			var variation = (Math.random() - 0.5) * 0.6;
+  			var dotOpacity = Math.max(0, Math.min(1, baseOpacity + variation * baseOpacity));
+  			dots[di].style.backgroundColor = color;
+  			dots[di].style.opacity = dotOpacity;
+  			dots[di].style.boxShadow = dotOpacity > 0.5 ? '0 0 ' + Math.round(dotOpacity * 4) + 'px ' + color : 'none';
+  		}
+  		psBox.classList.toggle('cg-active', baseOpacity > 0.15);
+  	}
+  ```
+- Replace with:
+  ```javascript
+  	if (typeof NeuroRenderer === 'undefined' || !NeuroRenderer.isActive()) {
+  		for (var postSynaptic in BRAIN.connectome) {
+  			var psBox = document.getElementById(postSynaptic);
+  			if (!psBox) continue;
+  			var neuron = BRAIN.postSynaptic[postSynaptic][BRAIN.thisState];
+  			var color = neuronColorMap[postSynaptic] || '#55FF55';
+  			var baseOpacity = Math.min(1, neuron / 50);
+  			var dots = neuronDotCache[postSynaptic];
+  			if (!dots) continue;
+  			for (var di = 0; di < dots.length; di++) {
+  				var variation = (Math.random() - 0.5) * 0.6;
+  				var dotOpacity = Math.max(0, Math.min(1, baseOpacity + variation * baseOpacity));
+  				dots[di].style.backgroundColor = color;
+  				dots[di].style.opacity = dotOpacity;
+  				dots[di].style.boxShadow = dotOpacity > 0.5 ? '0 0 ' + Math.round(dotOpacity * 4) + 'px ' + color : 'none';
+  			}
+  			psBox.classList.toggle('cg-active', baseOpacity > 0.15);
+  		}
+  	}
+  ```
+
+#### Change C: Update connectome toggle button handler
+- anchor: the existing event listener block starting with:
+  ```javascript
+  connectomeToggleBtn.addEventListener('click', function () {
+  	var isHidden = nodeHolder.classList.contains('hidden');
+  	if (isHidden) {
+  		nodeHolder.classList.remove('hidden');
+  		connectomeToggleBtn.textContent = 'Hide';
+  	} else {
+  		nodeHolder.classList.add('hidden');
+  		connectomeToggleBtn.textContent = 'Show';
+  	}
+  });
+  ```
+- Replace the entire addEventListener call with:
+  ```javascript
+  connectomeToggleBtn.addEventListener('click', function () {
+  	if (typeof NeuroRenderer !== 'undefined' && NeuroRenderer.isActive()) {
+  		NeuroRenderer.destroy();
+  		nodeHolder.classList.remove('hidden');
+  		connectomeToggleBtn.textContent = 'Hide';
+  	} else if (nodeHolder.classList.contains('hidden')) {
+  		nodeHolder.classList.remove('hidden');
+  		connectomeToggleBtn.textContent = 'Hide';
+  	} else {
+  		nodeHolder.classList.add('hidden');
+  		connectomeToggleBtn.textContent = 'Show';
+  	}
+  });
+  ```
+
+### 6. MODIFY css/main.css
+- operation: MODIFY
+- reason: Add styles for the WebGL renderer wrapper and canvas element
+- anchor: `#nodeHolder.hidden {`
+
+#### Changes
+- After the existing `#nodeHolder.hidden { display: none; }` rule block, add:
+  ```css
+  #neuro-renderer-wrap {
+      position: relative;
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+  }
+
+  #neuro-canvas {
+      display: block;
+      image-rendering: pixelated;
+  }
+
+  #neuro-labels {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      pointer-events: none;
+  }
+  ```
 
 ## Verification
-- build: No build step (vanilla JS project, no bundler)
-- lint: No linter configured
-- test: `node tests/run-node.js` (existing test runner; tests exercise fly-logic.js pure functions, not the worker bridge — they should still pass since the bridge only replaces BRAIN.update at runtime in a browser context)
-- smoke: Open `index.html` in a browser with DevTools console. Verify one of:
-  - If `data/connectome.bin.gz` and `data/neuron_meta.json` exist: console shows "Connectome worker ready: 139255 neurons, NNNN edges". The fly should respond to stimuli (feed, touch, air tools). The connectome dot visualization should show activity.
-  - If data files do NOT exist: console shows "connectome.bin.gz load failed, using 59-group BRAIN.update(): Error: HTTP 404 fetching data/neuron_meta.json". The fly behaves exactly as before (legacy 59-group simulation).
+- build: no build step (vanilla JS project)
+- lint: no linter configured
+- test: `node tests/run-node.js`
+- smoke: Open index.html in a browser with data files present (data/connectome.bin.gz and data/neuron_meta.json). Verify:
+  1. Left sidebar shows a WebGL canvas with colored dots in 4 sections (blue sensory, purple central, amber drives, red motor) with section labels
+  2. Dots flash bright when their neurons fire, dim (15% brightness) when not firing
+  3. Hovering over a dot region shows tooltip with group name and description
+  4. Clicking "Hide" button destroys the WebGL renderer and shows the old DOM dot clusters
+  5. If data files are missing (no connectome.bin.gz), the old 59-group DOM dots display as before (fallback mode)
+  6. No console errors related to WebGL or shader compilation
 
 ## Constraints
-- Do NOT modify js/connectome.js (the bridge saves and replaces BRAIN.update externally)
-- Do NOT modify js/main.js (the bridge is transparent to the updateBrain loop)
+- Do NOT modify SPEC.md, TASKS.md, or CLAUDE.md
 - Do NOT modify js/fly-logic.js (behavioral state machine is unchanged)
-- Do NOT modify js/constants.js
-- Do NOT add any npm or external dependencies
-- Do NOT create data files (connectome.bin.gz and neuron_meta.json are output of scripts/build_connectome.py from T7.1, which requires FlyWire CSV data)
-- The STIM_INTENSITY (0.15) and FIRE_STATE_SCALE (100) constants are initial values that may need tuning in T7.7; do not spend time calibrating them
-- The `setStimulusState` worker message replaces per-tick `stimulate` for sustained stimulation; keep the existing one-shot `stimulate` handler in sim-worker.js (do not remove it)
-- The compatibility shim (fallback to legacy BRAIN.update) must work when data files are absent — this is the primary expected state until users run the preprocessing pipeline
+- Do NOT add any external dependencies or npm packages
+- Do NOT change the sim-worker.js tick or simulation logic — only modify the postReady message to include regionType
+- The DOM-based dot cluster code in main.js must remain functional for fallback (when WebGL renderer is not active or worker fails to load)
+- All CSS colors must use existing CSS custom properties except in WebGL shaders where RGB float values are hardcoded to match the CSS variable values
+- The tooltip must reuse the existing `#neuronTooltip` element — do NOT create a new tooltip element
+- Keep the existing connectome-header (label, subtitle, toggle button) intact — only the nodeHolder content area is replaced by the WebGL canvas
+- The `neuronDescriptions` object in main.js is a global variable — the renderer accesses it via `typeof neuronDescriptions !== 'undefined' && neuronDescriptions[groupName]`

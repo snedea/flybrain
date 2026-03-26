@@ -185,7 +185,7 @@ self.onmessage = function (e) {
 			var buffer = e.data.buffer;
 
 			function postReady() {
-				self.postMessage({type: 'ready', neuronCount: N, edgeCount: edgeCount, groupId: groupId});
+				self.postMessage({type: 'ready', neuronCount: N, edgeCount: edgeCount, groupId: groupId, regionType: regionType});
 			}
 
 			var header = new Uint8Array(buffer, 0, 2);

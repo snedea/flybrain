@@ -36,6 +36,7 @@
 	var neuronCount = 0;
 	var groupCount = 0;
 	var groupIdArr = null;       // Uint16Array[neuronCount] from worker
+	var regionTypeArr = null;    // Uint8Array[neuronCount] from worker
 	var groupIndices = null;     // Array of Uint32Array per group_id
 	var groupSizes = null;       // Array[groupCount] of int from neuron_meta.json
 	var groupNameToId = {};      // e.g. {'VIS_R1R6': 0, ...}
@@ -86,8 +87,16 @@
 			neuronCount = e.data.neuronCount;
 			groupIdArr = new Uint16Array(e.data.groupId.buffer
 				? e.data.groupId.buffer : e.data.groupId);
+			regionTypeArr = new Uint8Array(e.data.regionType.buffer
+				? e.data.regionType.buffer : e.data.regionType);
 			buildGroupIndices();
 			workerReady = true;
+			BRAIN.workerReady = true;
+			BRAIN.workerNeuronCount = neuronCount;
+			BRAIN.workerRegionType = regionTypeArr;
+			BRAIN.workerGroupIdArr = groupIdArr;
+			BRAIN.workerGroupIdToName = groupIdToName;
+			BRAIN.workerGroupSizes = groupSizes;
 
 			// Reset postSynaptic to avoid stale legacy values
 			for (var ps in BRAIN.postSynaptic) {
@@ -104,6 +113,7 @@
 
 		case 'tick':
 			latestFireState = e.data.fireState;
+			BRAIN.latestFireState = e.data.fireState;
 			break;
 
 		case 'error':
@@ -111,6 +121,7 @@
 			if (workerReady) {
 				console.warn('Falling back to 59-group BRAIN.update()');
 				workerReady = false;
+				BRAIN.workerReady = false;
 				BRAIN.update = legacyUpdate;
 			}
 			break;
@@ -120,6 +131,7 @@
 	function handleWorkerError(err) {
 		console.warn('Worker crashed, falling back to 59-group BRAIN.update():', err.message || err);
 		workerReady = false;
+		BRAIN.workerReady = false;
 		BRAIN.update = legacyUpdate;
 	}
 

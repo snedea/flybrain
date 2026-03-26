@@ -36,7 +36,7 @@ Data source: FlyWire Codex GCS bucket (public, no auth). Files in data/:
 
 ### T7.5: WebGL2 Visualization
 
-- [ ] T7.5: Replace the DOM-based dot clusters in the left sidebar with a WebGL2 canvas (js/neuro-renderer.js) that renders 139K neurons as instanced points. Each neuron is a 1-2px point colored by region type (sensory blue, central purple, drives amber, motor red), brightness driven by fire state from the Uint8Array. Layout: neurons arranged within their region section in a grid pattern, with section labels (Sensory, Central, Drives, Motor) as HTML overlays positioned above the canvas regions. Single draw call using ANGLE_instanced_arrays. Update at display refresh rate, reading from the latest fire state buffer. Keep the tooltip on hover (raycast from mouse position to nearest neuron, show group name + description).
+- [x] T7.5: Replace the DOM-based dot clusters in the left sidebar with a WebGL2 canvas (js/neuro-renderer.js) that renders 139K neurons as instanced points. Each neuron is a 1-2px point colored by region type (sensory blue, central purple, drives amber, motor red), brightness driven by fire state from the Uint8Array. Layout: neurons arranged within their region section in a grid pattern, with section labels (Sensory, Central, Drives, Motor) as HTML overlays positioned above the canvas regions. Single draw call using ANGLE_instanced_arrays. Update at display refresh rate, reading from the latest fire state buffer. Keep the tooltip on hover (raycast from mouse position to nearest neuron, show group name + description). [-PI-]
 
 ### T7.6: Loading and Fallback
 
