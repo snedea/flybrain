@@ -139,6 +139,7 @@ BRAIN.stimulate = {
 	dangerOdor: false,
 	wind: false,
 	windStrength: 0,       // 0-1
+	windDirection: 0,      // radians, direction wind is blowing FROM (math convention: 0=right, PI/2=up)
 	lightLevel: 1,         // 0-1 (0=dark, 1=bright)
 	lightDirection: 0,     // angle in radians
 	temperature: 0.5,      // 0-1 (0=cold, 1=hot), 0.5 = preferred
@@ -325,7 +326,7 @@ BRAIN.update = function () {
 
 	// Wind
 	if (BRAIN.stimulate.wind) {
-		var windScale = Math.max(0.3, BRAIN.stimulate.windStrength);
+		var windScale = BRAIN.stimulate.windStrength;
 		BRAIN.dendriteAccumulateScaled('MECH_JO', windScale);
 	}
 

@@ -55,6 +55,7 @@ var BEHAVIOR_MIN_DURATION = {
 	feed: 2000,
 	fly: 1500,
 	startle: 800,
+	brace: 500,
 };
 
 // Cooldown (ms) after exiting a state before it can be re-entered
@@ -63,6 +64,7 @@ var BEHAVIOR_COOLDOWN = {
 	fly: 1000,
 	groom: 3000,
 	feed: 1000,
+	brace: 1000,
 };
 
 // Accumulator thresholds for entering each state
@@ -255,6 +257,7 @@ document.addEventListener('visibilitychange', function () {
 		BRAIN.stimulate.touchLocation = null;
 		BRAIN.stimulate.wind = false;
 		BRAIN.stimulate.windStrength = 0;
+		BRAIN.stimulate.windDirection = 0;
 		BRAIN.stimulate.foodNearby = false;
 		BRAIN.stimulate.foodContact = false;
 		touchResetTime = 0;
@@ -353,6 +356,7 @@ function handleCanvasMousedown(event) {
 		dragStart.y = cy;
 		BRAIN.stimulate.wind = true;
 		BRAIN.stimulate.windStrength = 0.3;
+		BRAIN.stimulate.windDirection = 0;
 	}
 }
 
@@ -364,6 +368,7 @@ function handleCanvasMousemove(event) {
 	var dy = event.clientY - dragStart.y;
 	var dragDist = Math.sqrt(dx * dx + dy * dy);
 	BRAIN.stimulate.windStrength = Math.min(1, dragDist / 150);
+	BRAIN.stimulate.windDirection = Math.atan2(-(dy), dx);
 	windArrowEnd = { x: event.clientX, y: event.clientY };
 }
 
@@ -376,8 +381,10 @@ function handleCanvasMouseup(event) {
 			if (dragDist < 5) {
 				var distToFly = Math.hypot(event.clientX - fly.x, event.clientY - fly.y);
 				BRAIN.stimulate.windStrength = Math.max(0.1, Math.min(1, 1 - distToFly / 200));
+				BRAIN.stimulate.windDirection = Math.atan2(-(fly.y - event.clientY), fly.x - event.clientX);
 			} else {
 				BRAIN.stimulate.windStrength = Math.min(1, dragDist / 150);
+				BRAIN.stimulate.windDirection = Math.atan2(-(dy), dx);
 			}
 			BRAIN.stimulate.wind = true;
 			windResetTime = Date.now() + 2000;
@@ -473,6 +480,10 @@ function evaluateBehaviorEntry() {
 	}
 	if (BRAIN.accumGroom > BEHAVIOR_THRESHOLDS.groom && !isCoolingDown('groom', now)) {
 		return 'groom';
+	}
+	if (BRAIN.stimulate.wind && BRAIN.stimulate.windStrength < 0.5 &&
+		BRAIN.accumStartle < BEHAVIOR_THRESHOLDS.startle && !isCoolingDown('brace', now)) {
+		return 'brace';
 	}
 	if (BRAIN.drives.fatigue > BEHAVIOR_THRESHOLDS.restFatigue) {
 		return 'rest';
@@ -635,6 +646,14 @@ function computeMovementForBehavior() {
 			targetSpeed = 0;
 			speedChangeInterval = -speed * 0.1;
 		}
+	} else if (state === 'brace') {
+		targetSpeed = 0;
+		speedChangeInterval = -speed * 0.1;
+		// Orient to face into the wind (toward wind source = windDirection + PI)
+		var braceDir = normalizeAngle(BRAIN.stimulate.windDirection + Math.PI);
+		var braceDiff = normalizeAngle(braceDir - targetDir);
+		targetDir += braceDiff * 0.8;
+		targetDir = normalizeAngle(targetDir);
 	} else if (state === 'groom' || state === 'rest') {
 		targetSpeed = 0;
 		speedChangeInterval = -speed * 0.1;
@@ -669,7 +688,8 @@ function applyBehaviorMovement(dtScale) {
 	}
 
 	if (behavior.current === 'groom' ||
-		behavior.current === 'rest' || behavior.current === 'idle') {
+		behavior.current === 'rest' || behavior.current === 'idle' ||
+		behavior.current === 'brace') {
 		if (speed > 0.05) {
 			speed *= Math.pow(0.92, dtScale);
 		} else {
@@ -1159,6 +1179,20 @@ function drawAntennae(t, dtScale) {
 
 		// Base angle: spread outward and forward
 		var baseAngle = -Math.PI / 2 + side * 0.5 + twitch;
+
+		// Wind-sensing posture: bias antennae toward wind direction
+		if (BRAIN.stimulate.wind || behavior.current === 'brace') {
+			// Convert world-space windDirection to body-local frame.
+			// The canvas transform is: rotate(-facingDir + PI/2), so body-local
+			// "forward" (-Y in body space) corresponds to facingDir in world space.
+			// Body-local angle of wind = windDirection - facingDir, then rotate by
+			// PI/2 because body space has forward = -Y (up on canvas).
+			var localWindAngle = normalizeAngle(BRAIN.stimulate.windDirection - facingDir + Math.PI / 2);
+			// Blend antenna toward wind source with modest strength
+			var windBias = normalizeAngle(localWindAngle - baseAngle) * 0.3;
+			baseAngle += windBias;
+		}
+
 		var tipX = bx + Math.cos(baseAngle) * BODY.antennaLength;
 		var tipY = by + Math.sin(baseAngle) * BODY.antennaLength;
 
@@ -1217,6 +1251,7 @@ function drawLegs(state, dtScale) {
 	var isStartleBurst = (state === 'startle' && behavior.startlePhase === 'burst');
 	var isStartleFreeze = (state === 'startle' && behavior.startlePhase === 'freeze');
 	var isResting = (state === 'rest');
+	var isBracing = (state === 'brace');
 
 	// Update idle jitter targets periodically
 	if (t - anim.legJitterTimer > anim.legJitterNextInterval) {
@@ -1296,6 +1331,10 @@ function drawLegs(state, dtScale) {
 			// Slightly tucked with slow jitter
 			hipMod *= 0.7;
 			jitter = anim.legJitter[legIdx] * 0.3;
+		} else if (isBracing) {
+			// Widened stance with suppressed jitter to show bracing
+			hipMod *= 1.1;
+			jitter = anim.legJitter[legIdx] * 0.1;
 		} else {
 			// idle / feed / default: normal idle jitter
 			jitter = anim.legJitter[legIdx];
@@ -1481,6 +1520,7 @@ function update(dt) {
 	if (windResetTime > 0 && Date.now() >= windResetTime) {
 		BRAIN.stimulate.wind = false;
 		BRAIN.stimulate.windStrength = 0;
+		BRAIN.stimulate.windDirection = 0;
 		windResetTime = 0;
 	}
 

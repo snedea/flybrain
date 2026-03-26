@@ -1,3 +1,4 @@
 {
-  "dual_selection": "first"
+  "dual_selection": "first",
+  "sandbox": true
 }
