@@ -422,11 +422,6 @@ function updateBrain() {
 	if (behaviorStateEl) behaviorStateEl.textContent = behavior.current;
 }
 
-// Initialize Brain3D module (deferred — actual Three.js setup happens on first toggle)
-if (typeof Brain3D !== 'undefined') {
-    Brain3D.init();
-}
-
 BRAIN.randExcite();
 var brainTickId = setInterval(updateBrain, 500);
 

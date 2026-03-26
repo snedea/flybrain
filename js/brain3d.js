@@ -171,7 +171,6 @@ window.Brain3D = {
             Brain3D._mouse = new THREE.Vector2();
 
             Brain3D._renderer.domElement.addEventListener('mousemove', Brain3D._onMouseMove);
-            window.addEventListener('resize', Brain3D._onResize);
 
             Brain3D._initialized = true;
         } catch (e) {
@@ -262,16 +261,21 @@ window.Brain3D = {
 
     show: function () {
         if (!Brain3D._initialized) {
+            Brain3D._container = document.getElementById('brain3d-overlay');
+            Brain3D._container.style.display = 'block';
             Brain3D.init();
             if (!Brain3D._initialized) return;
+        } else {
+            Brain3D._container.style.display = 'block';
         }
-        Brain3D._container.style.display = 'block';
         Brain3D.active = true;
+        window.addEventListener('resize', Brain3D._onResize);
         Brain3D._onResize();
         Brain3D._renderLoop();
     },
 
     hide: function () {
+        window.removeEventListener('resize', Brain3D._onResize);
         Brain3D._container.style.display = 'none';
         Brain3D.active = false;
         Brain3D._tooltipEl.style.display = 'none';
