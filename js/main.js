@@ -89,6 +89,7 @@ var behavior = {
 var activeTool = 'feed';
 var isDragging = false;
 var dragStart = { x: 0, y: 0 };
+var canvasTouchActive = false;
 var lightStates = [1, 0.5, 0];
 var lightStateIndex = 0;
 var lightLabels = ['Bright', 'Dim', 'Dark'];
@@ -231,6 +232,7 @@ document.addEventListener('mouseup', handleCanvasMouseup, false);
 
 // --- Touch event handlers (mobile/tablet support) ---
 canvas.addEventListener('touchstart', function (event) {
+	canvasTouchActive = true;
 	event.preventDefault();
 	var touch = event.touches[0];
 	handleCanvasMousedown({ clientX: touch.clientX, clientY: touch.clientY });
@@ -243,10 +245,12 @@ canvas.addEventListener('touchmove', function (event) {
 }, { passive: false });
 
 document.addEventListener('touchend', function (event) {
-	event.preventDefault();
-	// Use changedTouches for the touch that was lifted
-	var touch = event.changedTouches[0];
-	handleCanvasMouseup({ clientX: touch.clientX, clientY: touch.clientY });
+	if (canvasTouchActive) {
+		event.preventDefault();
+		var touch = event.changedTouches[0];
+		handleCanvasMouseup({ clientX: touch.clientX, clientY: touch.clientY });
+		canvasTouchActive = false;
+	}
 }, { passive: false });
 
 function handleCanvasMousedown(event) {
@@ -254,6 +258,9 @@ function handleCanvasMousedown(event) {
 	var cy = event.clientY;
 
 	if (activeTool === 'feed') {
+		var foodMinY = 44;
+		var foodMaxY = window.innerHeight - 90;
+		cy = Math.max(foodMinY, Math.min(foodMaxY, cy));
 		food.push({ x: cx, y: cy, radius: 10, feedStart: 0, feedDuration: 0 });
 	} else if (activeTool === 'touch') {
 		applyTouchTool(cx, cy);
@@ -279,12 +286,11 @@ function handleCanvasMousemove(event) {
 }
 
 function handleCanvasMouseup(event) {
-	if (isDragging && activeTool === 'air') {
+	if (isDragging) {
 		var dx = event.clientX - dragStart.x;
 		var dy = event.clientY - dragStart.y;
 		var dragDist = Math.sqrt(dx * dx + dy * dy);
 		if (dragDist < 5) {
-			// Click (no drag): wind strength from proximity to fly
 			var distToFly = Math.hypot(event.clientX - fly.x, event.clientY - fly.y);
 			BRAIN.stimulate.windStrength = Math.max(0.1, Math.min(1, 1 - distToFly / 200));
 		} else {
