@@ -227,7 +227,7 @@ var ctx = canvas.getContext('2d');
 
 canvas.addEventListener('mousedown', handleCanvasMousedown, false);
 canvas.addEventListener('mousemove', handleCanvasMousemove, false);
-canvas.addEventListener('mouseup', handleCanvasMouseup, false);
+document.addEventListener('mouseup', handleCanvasMouseup, false);
 
 // --- Touch event handlers (mobile/tablet support) ---
 canvas.addEventListener('touchstart', function (event) {
@@ -242,7 +242,7 @@ canvas.addEventListener('touchmove', function (event) {
 	handleCanvasMousemove({ clientX: touch.clientX, clientY: touch.clientY });
 }, { passive: false });
 
-canvas.addEventListener('touchend', function (event) {
+document.addEventListener('touchend', function (event) {
 	event.preventDefault();
 	// Use changedTouches for the touch that was lifted
 	var touch = event.changedTouches[0];
