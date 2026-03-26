@@ -1,29 +1,29 @@
-# Build Claims -- T7.2
+# Build Claims -- T7.3
 
 ## Files Changed
-- [MODIFY] scripts/build_connectome.py -- Refined neuron-to-group mapping logic with explicit intrinsic flow handling, expanded pattern matching, side-based motor assignment, group_sizes output, and mapping stats
+- [CREATE] js/sim-worker.js -- Leaky integrate-and-fire neuron simulator Web Worker with CSR adjacency, gzip decompression, tick loop, and message protocol
 
 ## Verification Results
-- Build: PASS (`node -e` structural validation: balanced parens/brackets/braces, all 6 required functions present, all key features verified)
-- Tests: SKIPPED (no Python interpreter available in environment; smoke test logic verified via Node.js reimplementation of determine_region and determine_group)
-- Lint: PASS (`node -e` structural validation: balanced delimiters, no syntax-breaking issues detected)
+- Build: PASS (no build step required — vanilla JS; `node --check js/sim-worker.js` passes with zero errors)
+- Tests: PASS (synthetic binary smoke tests for parseBinary and tick logic ran via Node.js — all assertions passed)
+- Lint: SKIPPED (eslint not installed in project; `npx eslint` attempted but CLI flag format incompatible with eslint v10)
 
 ## Claims
-- [ ] `determine_region()` now explicitly handles `flow == "intrinsic"` and `flow == ""` with super_class heuristic fallthrough (lines 133-155)
-- [ ] `determine_group()` has new `side: str = ""` parameter with default value for backward compatibility (line 158)
-- [ ] `determine_group()` adds pattern matching for: ascending neurons -> GNG_DESC, optic in cls, vnc/ventral_nerve_cord -> VNC_CPG, fan_shaped/fan-shaped -> CX_FC, ellipsoid -> CX_EPG, noduli/nodulus -> CX_PFN, pars_intercerebralis/neurosecretory -> DRIVE_HUNGER, protocerebral/superior_brain/superior_medial -> CX_EPG (lines 259-371)
-- [ ] `determine_group()` uses `side` field for left/right leg motor neuron and wing motor neuron assignment (lines 317-348)
-- [ ] `classify_neurons()` reads the `side` column from classification.csv and passes it to `determine_group()` (line 407, 410)
-- [ ] `write_meta()` outputs `group_count` (int, value 63) and `group_sizes` (flat array of length 63 indexed by group_id) in neuron_meta.json (lines 494-499)
-- [ ] `print_mapping_stats()` new function prints region counts, generic fallback percentage, and top 10 groups to stderr (lines 417-441)
-- [ ] `main()` calls `print_mapping_stats()` after classification, before edge aggregation (line 528)
-- [ ] GROUPS list order and count (63) unchanged; group_id assignments 0-62 stable
-- [ ] Binary file format unchanged (header + edges + per-neuron uint8 region + uint16 group_id)
-- [ ] No new imports or external dependencies added
-- [ ] No JavaScript files modified
+- [ ] Claim 1: js/sim-worker.js is a valid self-contained Web Worker script (227 lines) with no external dependencies
+- [ ] Claim 2: Constants defined at top: DEFAULT_LEAK_RATE=0.95, DEFAULT_THRESHOLD=1.0, DEFAULT_REFRACTORY_PERIOD=3, WEIGHT_SCALE=0.15
+- [ ] Claim 3: Module-level state variables declared: N, edgeCount, V (Float32Array), fired (Uint8Array), refractory (Uint8Array), rowPtr (Uint32Array), colIdx (Uint32Array), values (Float32Array), regionType (Uint8Array), groupId (Uint16Array), leakRate, threshold, refractoryPeriod, running, tickCount
+- [ ] Claim 4: `decompressGzip(buffer)` uses native DecompressionStream API to decompress gzipped ArrayBuffers, returns Promise<ArrayBuffer>
+- [ ] Claim 5: `parseBinary(buffer)` reads little-endian binary header (neuron_count, edge_count), builds CSR format (rowPtr, colIdx, values) from edge list, normalizes weights by maxAbsWeight * WEIGHT_SCALE, reads per-neuron metadata (regionType uint8, groupId uint16), allocates V/fired/refractory arrays
+- [ ] Claim 6: `tick()` implements LIF: (1) decay V *= leakRate with refractory handling, (2) propagate from fired neurons via CSR adjacency, (3) clear fired + threshold check + set new fires + refractory reset. Posts {type:'tick', fireState, tickCount} via structured clone (not transfer). Schedules next tick with setTimeout(tick, 0) if running
+- [ ] Claim 7: `self.onmessage` handles 5 message types: 'init' (with gzip detection), 'start', 'stop', 'stimulate' (indices + intensities with bounds check), 'setParams' (leakRate, threshold, refractoryPeriod)
+- [ ] Claim 8: Worker → Main message protocol: {type:'ready', neuronCount, edgeCount}, {type:'tick', fireState, tickCount}, {type:'error', message}
+- [ ] Claim 9: Uses `var` declarations throughout, matching project code style (js/connectome.js, js/constants.js)
+- [ ] Claim 10: No existing files were modified — no changes to js/main.js, js/connectome.js, js/constants.js, or any other file
+- [ ] Claim 11: tick() contains no try/catch (performance-critical hot loop as specified)
+- [ ] Claim 12: All DataView reads use little-endian (true as last argument) matching Python struct pack format '<'
 
 ## Gaps and Assumptions
-- No Python interpreter was available in the build environment, so syntax correctness was verified via Node.js structural analysis (balanced delimiters, function presence) rather than `py_compile`
-- Smoke test assertions were verified by reimplementing determine_region/determine_group logic in JavaScript and confirming all 11 test cases pass
-- The `"kc" == cls` check on line 230 is an exact equality check (matching cls exactly equal to "kc"), which differs from T7.1's substring `"kc" in sub_class` — this follows the plan exactly
-- Cannot verify end-to-end with real FlyWire CSV data (data files not present in repo)
+- Cannot test actual Web Worker instantiation or DecompressionStream in Node.js — these are browser-only APIs; parseBinary and tick logic were verified with synthetic data in Node
+- Cannot test against real connectome.bin.gz without browser environment — the binary format parsing was verified with a hand-crafted synthetic binary
+- Performance target of 20+ ticks/second for 139K neurons cannot be verified without browser + real data; the algorithm follows the spec (CSR for cache-friendly iteration, setTimeout(tick,0) for cooperative scheduling, no try/catch in hot loop)
+- The CSR construction assumes edges in the binary are sorted by pre-synaptic neuron index (as stated in the plan); if edges are unsorted, colIdx entries would be placed correctly by index but not grouped properly within each row — however the plan states edges are sorted by pre

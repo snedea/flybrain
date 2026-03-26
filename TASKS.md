@@ -28,7 +28,7 @@ Data source: FlyWire Codex GCS bucket (public, no auth). Files in data/:
 
 ### T7.3: LIF Simulation Engine (Web Worker)
 
-- [ ] T7.3: Implement a leaky integrate-and-fire (LIF) neuron simulator in a dedicated Web Worker (js/sim-worker.js). On init, receives the binary connectome data via transferable ArrayBuffer. Builds sparse adjacency from edge list (CSR format for cache-friendly iteration). Each neuron has: membrane potential V (Float32Array), leak rate (0.95 default), threshold (1.0), refractory counter (Uint8Array). Each tick: (1) decay V *= leak, (2) for each neuron that fired last tick, iterate its outgoing edges and add weight to post-synaptic V, (3) check threshold and set fire state, (4) handle refractory. Post fire state (Uint8Array, 139K bytes) back to main thread every tick. Receive sensory stimulation messages (neuron indices + intensity) from main thread. Target: 20+ simulation ticks/second.
+- [x] T7.3: Implement a leaky integrate-and-fire (LIF) neuron simulator in a dedicated Web Worker (js/sim-worker.js). On init, receives the binary connectome data via transferable ArrayBuffer. Builds sparse adjacency from edge list (CSR format for cache-friendly iteration). Each neuron has: membrane potential V (Float32Array), leak rate (0.95 default), threshold (1.0), refractory counter (Uint8Array). Each tick: (1) decay V *= leak, (2) for each neuron that fired last tick, iterate its outgoing edges and add weight to post-synaptic V, (3) check threshold and set fire state, (4) handle refractory. Post fire state (Uint8Array, 139K bytes) back to main thread every tick. Receive sensory stimulation messages (neuron indices + intensity) from main thread. Target: 20+ simulation ticks/second. [-PI-]
 
 ### T7.4: Main Thread Integration
 
