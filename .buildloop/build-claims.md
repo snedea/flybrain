@@ -1,29 +1,33 @@
-# Build Claims -- T7.3
+# Build Claims -- T7.4
 
 ## Files Changed
-- [CREATE] js/sim-worker.js -- Leaky integrate-and-fire neuron simulator Web Worker with CSR adjacency, gzip decompression, tick loop, and message protocol
+- [MODIFY] js/sim-worker.js -- Added groupId to ready message, sustained stimulation state vars, step 1.5 sustained stimulation in tick(), and setStimulusState message handler
+- [CREATE] js/brain-worker-bridge.js -- Bridge between main thread BRAIN.update() and LIF Web Worker: loads connectome binary, translates stimulation/drives to worker messages, aggregates fire states back into BRAIN.postSynaptic format, with fallback to legacy 59-group simulation
+- [MODIFY] index.html -- Added brain-worker-bridge.js script tag after connectome.js and before fly-logic.js
 
 ## Verification Results
-- Build: PASS (no build step required — vanilla JS; `node --check js/sim-worker.js` passes with zero errors)
-- Tests: PASS (synthetic binary smoke tests for parseBinary and tick logic ran via Node.js — all assertions passed)
-- Lint: SKIPPED (eslint not installed in project; `npx eslint` attempted but CLI flag format incompatible with eslint v10)
+- Build: PASS (no build step — vanilla JS project)
+- Tests: PASS (`node tests/run-node.js` — 45 passed / 0 failed / 45 total)
+- Lint: SKIPPED (no linter configured)
 
 ## Claims
-- [ ] Claim 1: js/sim-worker.js is a valid self-contained Web Worker script (227 lines) with no external dependencies
-- [ ] Claim 2: Constants defined at top: DEFAULT_LEAK_RATE=0.95, DEFAULT_THRESHOLD=1.0, DEFAULT_REFRACTORY_PERIOD=3, WEIGHT_SCALE=0.15
-- [ ] Claim 3: Module-level state variables declared: N, edgeCount, V (Float32Array), fired (Uint8Array), refractory (Uint8Array), rowPtr (Uint32Array), colIdx (Uint32Array), values (Float32Array), regionType (Uint8Array), groupId (Uint16Array), leakRate, threshold, refractoryPeriod, running, tickCount
-- [ ] Claim 4: `decompressGzip(buffer)` uses native DecompressionStream API to decompress gzipped ArrayBuffers, returns Promise<ArrayBuffer>
-- [ ] Claim 5: `parseBinary(buffer)` reads little-endian binary header (neuron_count, edge_count), builds CSR format (rowPtr, colIdx, values) from edge list, normalizes weights by maxAbsWeight * WEIGHT_SCALE, reads per-neuron metadata (regionType uint8, groupId uint16), allocates V/fired/refractory arrays
-- [ ] Claim 6: `tick()` implements LIF: (1) decay V *= leakRate with refractory handling, (2) propagate from fired neurons via CSR adjacency, (3) clear fired + threshold check + set new fires + refractory reset. Posts {type:'tick', fireState, tickCount} via structured clone (not transfer). Schedules next tick with setTimeout(tick, 0) if running
-- [ ] Claim 7: `self.onmessage` handles 5 message types: 'init' (with gzip detection), 'start', 'stop', 'stimulate' (indices + intensities with bounds check), 'setParams' (leakRate, threshold, refractoryPeriod)
-- [ ] Claim 8: Worker → Main message protocol: {type:'ready', neuronCount, edgeCount}, {type:'tick', fireState, tickCount}, {type:'error', message}
-- [ ] Claim 9: Uses `var` declarations throughout, matching project code style (js/connectome.js, js/constants.js)
-- [ ] Claim 10: No existing files were modified — no changes to js/main.js, js/connectome.js, js/constants.js, or any other file
-- [ ] Claim 11: tick() contains no try/catch (performance-critical hot loop as specified)
-- [ ] Claim 12: All DataView reads use little-endian (true as last argument) matching Python struct pack format '<'
+- [ ] Claim 1: js/sim-worker.js ready message now includes `groupId: groupId` (Uint16Array) so the bridge can build per-group neuron indices
+- [ ] Claim 2: js/sim-worker.js has `sustainedIndices` and `sustainedIntensities` module-level vars, applied in tick() step 1.5 between decay and propagation, only to non-refractory neurons
+- [ ] Claim 3: js/sim-worker.js has new `setStimulusState` message handler that sets sustainedIndices/sustainedIntensities (existing one-shot `stimulate` handler is preserved unchanged)
+- [ ] Claim 4: js/brain-worker-bridge.js is an IIFE that saves `legacyUpdate = BRAIN.update`, then async-fetches `data/neuron_meta.json` and `data/connectome.bin.gz`, creates a Worker, and on ready replaces `BRAIN.update` with `workerUpdate`
+- [ ] Claim 5: If fetch of neuron_meta.json or connectome.bin.gz fails (HTTP error or network), the catch handler logs a console.warn and restores `BRAIN.update = legacyUpdate` — this is the expected default state until users run the preprocessing pipeline
+- [ ] Claim 6: If the worker posts an `error` message or the worker crashes (onerror), the bridge falls back to legacyUpdate with console.warn
+- [ ] Claim 7: `workerUpdate()` calls BRAIN.updateDrives(), sendStimulation(), aggregateFireState(), BRAIN.motorcontrol(), and performs the state swap — maintaining compatibility with the existing behavioral state machine
+- [ ] Claim 8: `sendStimulation()` translates BRAIN.drives thresholds and BRAIN.stimulate flags to batched setStimulusState worker messages mapping to group names (DRIVE_HUNGER, MECH_BRISTLE, OLF_ORN_FOOD, etc.)
+- [ ] Claim 9: `aggregateFireState()` sums per-neuron fire states into per-group fractions, scales by FIRE_STATE_SCALE (100), and writes to BRAIN.postSynaptic[name][BRAIN.nextState]
+- [ ] Claim 10: index.html loads brain-worker-bridge.js after connectome.js and before fly-logic.js, matching the required script order
+- [ ] Claim 11: No modifications were made to connectome.js, fly-logic.js, main.js, or constants.js (per constraints)
+- [ ] Claim 12: No npm or external dependencies were added
+- [ ] Claim 13: STIM_INTENSITY (0.15) and FIRE_STATE_SCALE (100) are defined as tunable constants at the top of the bridge IIFE
 
 ## Gaps and Assumptions
-- Cannot test actual Web Worker instantiation or DecompressionStream in Node.js — these are browser-only APIs; parseBinary and tick logic were verified with synthetic data in Node
-- Cannot test against real connectome.bin.gz without browser environment — the binary format parsing was verified with a hand-crafted synthetic binary
-- Performance target of 20+ ticks/second for 139K neurons cannot be verified without browser + real data; the algorithm follows the spec (CSR for cache-friendly iteration, setTimeout(tick,0) for cooperative scheduling, no try/catch in hot loop)
-- The CSR construction assumes edges in the binary are sorted by pre-synaptic neuron index (as stated in the plan); if edges are unsorted, colIdx entries would be placed correctly by index but not grouped properly within each row — however the plan states edges are sorted by pre
+- The data files (data/connectome.bin.gz and data/neuron_meta.json) do not exist yet — they are outputs of scripts/build_connectome.py from T7.1 which requires FlyWire CSV data. The fallback path (legacy BRAIN.update) will be active until those files are generated.
+- STIM_INTENSITY and FIRE_STATE_SCALE are initial guesses that may need tuning in T7.7 for realistic behavioral response.
+- Browser smoke test was not performed (headless browser not available in this environment). The node test suite passes, confirming no regressions in fly-logic.js pure functions.
+- The bridge assumes neuron_meta.json has fields: group_count (int), group_sizes (array), groups (array of {name, id}). This matches the T7.2 spec output format.
+- The groupId Uint16Array transfer in the ready message uses structured clone (not transferable) — this is a one-time cost at init and acceptable.

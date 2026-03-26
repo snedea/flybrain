@@ -32,7 +32,7 @@ Data source: FlyWire Codex GCS bucket (public, no auth). Files in data/:
 
 ### T7.4: Main Thread Integration
 
-- [ ] T7.4: Replace BRAIN.update() with Web Worker communication. Main thread sends stimulation events to the worker (food detected -> activate OLF_ORN neurons, touch -> activate MECH neurons, etc.) by mapping the existing BRAIN.stimulateNeuron calls to individual neuron indices using the group mapping. Worker posts back Uint8Array fire states. Main thread aggregates fire states into the 59 functional groups (sum of fires / group size) and writes to BRAIN.postSynaptic format so the existing behavioral state machine (updateBehaviorState, computeMovementForBehavior, drive updates) works unchanged. Add a compatibility shim: if connectome.bin.gz fails to load, fall back to current 59-group BRAIN.update() with a console warning.
+- [x] T7.4: Replace BRAIN.update() with Web Worker communication. Main thread sends stimulation events to the worker (food detected -> activate OLF_ORN neurons, touch -> activate MECH neurons, etc.) by mapping the existing BRAIN.stimulateNeuron calls to individual neuron indices using the group mapping. Worker posts back Uint8Array fire states. Main thread aggregates fire states into the 59 functional groups (sum of fires / group size) and writes to BRAIN.postSynaptic format so the existing behavioral state machine (updateBehaviorState, computeMovementForBehavior, drive updates) works unchanged. Add a compatibility shim: if connectome.bin.gz fails to load, fall back to current 59-group BRAIN.update() with a console warning. [-PI-]
 
 ### T7.5: WebGL2 Visualization
 

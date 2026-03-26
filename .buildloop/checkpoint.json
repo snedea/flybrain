@@ -1,6 +1,6 @@
 {
-  "task_id": "T7.3",
-  "task_desc": "Implement a leaky integrate-and-fire (LIF) neuron simulator in a dedicated Web Worker (js/sim-worker.js). On init, receives the binary connectome data via transferable ArrayBuffer. Builds sparse adjacency from edge list (CSR format for cache-friendly iteration). Each neuron has: membrane potential V (Float32Array), leak rate (0.95 default), threshold (1.0), refractory counter (Uint8Array). Each tick: (1) decay V *= leak, (2) for each neuron that fired last tick, iterate its outgoing edges and add weight to post-synaptic V, (3) check threshold and set fire state, (4) handle refractory. Post fire state (Uint8Array, 139K bytes) back to main thread every tick. Receive sensory stimulation messages (neuron indices + intensity) from main thread. Target: 20+ simulation ticks/second.",
+  "task_id": "T7.4",
+  "task_desc": "Replace BRAIN.update() with Web Worker communication. Main thread sends stimulation events to the worker (food detected -> activate OLF_ORN neurons, touch -> activate MECH neurons, etc.) by mapping the existing BRAIN.stimulateNeuron calls to individual neuron indices using the group mapping. Worker posts back Uint8Array fire states. Main thread aggregates fire states into the 59 functional groups (sum of fires / group size) and writes to BRAIN.postSynaptic format so the existing behavioral state machine (updateBehaviorState, computeMovementForBehavior, drive updates) works unchanged. Add a compatibility shim: if connectome.bin.gz fails to load, fall back to current 59-group BRAIN.update() with a console warning.",
   "completed_stage": "builder",
-  "timestamp": "2026-03-26T23:32:41.102454+00:00"
+  "timestamp": "2026-03-26T23:46:10.973061+00:00"
 }

@@ -34,6 +34,8 @@ var leakRate = DEFAULT_LEAK_RATE;
 var threshold = DEFAULT_THRESHOLD;
 var refractoryPeriod = DEFAULT_REFRACTORY_PERIOD;
 var running = false;
+var sustainedIndices = null;
+var sustainedIntensities = null;
 var tickCount = 0;
 
 /* ---------- decompressGzip ---------- */
@@ -137,6 +139,16 @@ function tick() {
 		}
 	}
 
+	/* step 1.5 — apply sustained external stimulation */
+	if (sustainedIndices) {
+		for (var k = 0; k < sustainedIndices.length; k++) {
+			var si = sustainedIndices[k];
+			if (si < N && refractory[si] === 0) {
+				V[si] += sustainedIntensities[k];
+			}
+		}
+	}
+
 	/* step 2 — propagate from fired neurons */
 	for (var i = 0; i < N; i++) {
 		if (fired[i] === 0) continue;
@@ -173,7 +185,7 @@ self.onmessage = function (e) {
 			var buffer = e.data.buffer;
 
 			function postReady() {
-				self.postMessage({type: 'ready', neuronCount: N, edgeCount: edgeCount});
+				self.postMessage({type: 'ready', neuronCount: N, edgeCount: edgeCount, groupId: groupId});
 			}
 
 			var header = new Uint8Array(buffer, 0, 2);
@@ -216,6 +228,11 @@ self.onmessage = function (e) {
 				V[idx] += intensities[k];
 			}
 		}
+		break;
+
+	case 'setStimulusState':
+		sustainedIndices = e.data.indices;
+		sustainedIntensities = e.data.intensities;
 		break;
 
 	case 'setParams':
