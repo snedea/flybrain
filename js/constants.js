@@ -80,7 +80,7 @@ var weights = {
 		MB_KC: 2,           // weak direct-to-KC path
 	},
 
-	// Olfactory receptor neurons -- danger/noxious odors
+	// Olfactory receptor neurons -- danger/noxious odors (NOTE: weights defined but no user interaction currently sets dangerOdor stimulus)
 	OLF_ORN_DANGER: {
 		OLF_PN: 10,         // strong projection to PN
 		OLF_LN: 5,          // lateral interneurons for contrast
@@ -111,7 +111,7 @@ var weights = {
 		DRIVE_HUNGER: -5,   // eating reduces hunger signal
 	},
 
-	// Bitter taste receptors
+	// Bitter taste receptors (NOTE: weights defined but not yet wired to any user interaction)
 	GUS_GRN_BITTER: {
 		SEZ_FEED: -8,       // suppress feeding
 		MB_DAN_PUN: 7,      // punishment signal
@@ -120,7 +120,7 @@ var weights = {
 		LH_AV: 4,           // innate aversion
 	},
 
-	// Water taste receptors
+	// Water taste receptors (NOTE: weights defined but not yet wired to any user interaction)
 	GUS_GRN_WATER: {
 		SEZ_WATER: 8,       // primary water-drinking trigger
 		SEZ_FEED: 3,        // some overlap with feeding

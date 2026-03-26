@@ -1,182 +1,187 @@
-# Plan: T5.2
+# Plan: T5.3
 
 ## Dependencies
-- list: none
-- commands: none
+- list: [] (no new dependencies)
+- commands: [] (no install commands)
 
 ## File Operations (in execution order)
 
 ### 1. MODIFY js/connectome.js
 - operation: MODIFY
-- reason: Add light-level-dependent drive modulation (fatigue, curiosity) and reduce tonic background activity in darkness
+- reason: Add nociception field to BRAIN.stimulate, remove lightDirection field, add nociception stimulus processing in sensory block, add dormant infrastructure comment to dangerOdor processing
 
-#### Change 1A: Light-dependent fatigue gain rate in BRAIN.updateDrives
-- anchor: `// Fatigue: increases when moving, decreases when resting`
-- This block currently reads (lines 192-197):
+#### Change A: Remove lightDirection and add nociception to BRAIN.stimulate
+- anchor: `lightDirection: 0,     // angle in radians`
+- Replace the line `lightDirection: 0,     // angle in radians` with `nociception: false,   // pain response (triggered by rapid repeated touch)`
+- The resulting BRAIN.stimulate block will have: touch, touchLocation, foodNearby, foodContact, dangerOdor, wind, windStrength, windDirection, lightLevel, nociception, temperature
+
+#### Change B: Add nociception stimulus processing in sensory block
+- anchor: `// Proprioceptive feedback (always-on when moving)` (line 353)
+- Insert the following block BEFORE the `// Proprioceptive feedback` comment (between the temperature block ending at line 351 and the proprioceptive block at line 353):
 ```javascript
-	// Fatigue: increases when moving, decreases when resting
-	if (BRAIN._isMoving) {
-		d.fatigue += 0.003;
-	} else {
-		d.fatigue -= 0.01;
+
+	// Nociception (pain response from repeated rapid touch)
+	if (BRAIN.stimulate.nociception) {
+		BRAIN.dendriteAccumulate('NOCI');
+		BRAIN.stimulate.nociception = false; // single-tick: fire once then auto-clear
 	}
+
 ```
+- This processes the NOCI neuron weights (DN_STARTLE: 10, DRIVE_FEAR: 8, DN_FLIGHT: 6, SEZ_GROOM: 4, SEZ_FEED: -5) for one brain tick and auto-clears
 
-Replace the entire fatigue block with:
-```javascript
-	// Fatigue: increases when moving, decreases when resting
-	// In low light (< 0.3), fatigue accumulates faster (fly winds down in darkness)
-	if (BRAIN._isMoving) {
-		var fatigueGain = BRAIN.stimulate.lightLevel < 0.3 ? 0.006 : 0.003;
-		d.fatigue += fatigueGain;
-	} else {
-		d.fatigue -= 0.01;
-	}
-```
+#### Change C: Add dormant infrastructure comment to dangerOdor processing
+- anchor: `// Danger odor` (line 325)
+- Replace `// Danger odor` with `// Danger odor (NOTE: connectome weights are wired but no user interaction currently sets BRAIN.stimulate.dangerOdor)`
 
-Logic:
-1. Declare local variable `fatigueGain`
-2. If `BRAIN.stimulate.lightLevel < 0.3`, set `fatigueGain` to `0.006` (double the normal rate)
-3. Otherwise set `fatigueGain` to `0.003` (the existing normal rate)
-4. Add `fatigueGain` to `d.fatigue`
-5. The rest recovery (`d.fatigue -= 0.01`) remains unchanged
-
-#### Change 1B: Light-dependent curiosity bias in BRAIN.updateDrives
-- anchor: `// Curiosity: random walk`
-- This line currently reads (line 199-200):
-```javascript
-	// Curiosity: random walk
-	d.curiosity += (Math.random() - 0.5) * 0.06;
-```
-
-Replace with:
-```javascript
-	// Curiosity: random walk (reduced range in low light -- less exploratory in darkness)
-	var curiosityRange = BRAIN.stimulate.lightLevel < 0.3 ? 0.02 : 0.06;
-	d.curiosity += (Math.random() - 0.5) * curiosityRange;
-```
-
-Logic:
-1. Declare local variable `curiosityRange`
-2. If `BRAIN.stimulate.lightLevel < 0.3`, set `curiosityRange` to `0.02` (one-third of normal, making the fly less exploratory)
-3. Otherwise set `curiosityRange` to `0.06` (the existing value)
-4. Use `curiosityRange` as the multiplier instead of the hardcoded `0.06`
-
-#### Change 1C: Reduce tonic background activity in complete darkness
-- anchor: `var tonicTargets = ['CX_FC', 'CX_EPG', 'CX_PFN'];`
-- This block currently reads (lines 368-373):
-```javascript
-	var tonicTargets = ['CX_FC', 'CX_EPG', 'CX_PFN'];
-	for (var t = 0; t < tonicTargets.length; t++) {
-		if (BRAIN.postSynaptic[tonicTargets[t]]) {
-			BRAIN.postSynaptic[tonicTargets[t]][BRAIN.nextState] += 8;
-		}
-	}
-```
-
-Replace with:
-```javascript
-	var tonicTargets = ['CX_FC', 'CX_EPG', 'CX_PFN'];
-	var tonicLevel = BRAIN.stimulate.lightLevel === 0 ? 4 : 8;
-	for (var t = 0; t < tonicTargets.length; t++) {
-		if (BRAIN.postSynaptic[tonicTargets[t]]) {
-			BRAIN.postSynaptic[tonicTargets[t]][BRAIN.nextState] += tonicLevel;
-		}
-	}
-```
-
-Logic:
-1. After declaring `tonicTargets`, declare `var tonicLevel`
-2. If `BRAIN.stimulate.lightLevel === 0` (complete darkness), set `tonicLevel` to `4`
-3. Otherwise set `tonicLevel` to `8` (the existing value)
-4. Use `tonicLevel` in place of the hardcoded `8` on the line `BRAIN.postSynaptic[tonicTargets[t]][BRAIN.nextState] += 8;`
-
-### 2. MODIFY js/main.js
+### 2. MODIFY js/constants.js
 - operation: MODIFY
-- reason: (a) Lower rest fatigue threshold in darkness, (b) add dark-mode antenna and leg animation changes
+- reason: Add dormant infrastructure comments to GUS_GRN_WATER, GUS_GRN_BITTER, and OLF_ORN_DANGER weight blocks noting they are not yet wired to user interactions
 
-#### Change 2A: Lower rest fatigue threshold in darkness in evaluateBehaviorEntry
-- anchor: `if (BRAIN.drives.fatigue > BEHAVIOR_THRESHOLDS.restFatigue) {`
-- This line currently reads (line 488):
+#### Change A: Add comment to GUS_GRN_BITTER
+- anchor: `// Bitter taste receptors` (line 114)
+- Replace `// Bitter taste receptors` with `// Bitter taste receptors (NOTE: weights defined but not yet wired to any user interaction)`
+
+#### Change B: Add comment to GUS_GRN_WATER
+- anchor: `// Water taste receptors` (line 123)
+- Replace `// Water taste receptors` with `// Water taste receptors (NOTE: weights defined but not yet wired to any user interaction)`
+
+#### Change C: Add comment to OLF_ORN_DANGER
+- anchor: `// Olfactory receptor neurons -- danger/noxious odors` (line 83)
+- Replace `// Olfactory receptor neurons -- danger/noxious odors` with `// Olfactory receptor neurons -- danger/noxious odors (NOTE: weights defined but no user interaction currently sets dangerOdor stimulus)`
+
+### 3. MODIFY js/main.js
+- operation: MODIFY
+- reason: Add temperature cycle button handler, add nociception detection via rapid touch tracking, update tab-visibility reset, add help overlay entry for temperature
+
+#### Change A: Add temperature state variables after light state variables
+- anchor: `var lightLabels = ['Bright', 'Dim', 'Dark'];` (line 100)
+- Insert the following lines AFTER `var lightLabels = ['Bright', 'Dim', 'Dark'];`:
 ```javascript
-	if (BRAIN.drives.fatigue > BEHAVIOR_THRESHOLDS.restFatigue) {
+var tempStates = [0.5, 0.75, 0.25];
+var tempStateIndex = 0;
+var tempLabels = ['Neutral', 'Warm', 'Cool'];
 ```
 
-Replace with:
+#### Change B: Add touchTimestamps array for nociception detection
+- anchor: `var canvasTouchActive = false;` (line 97)
+- Insert the following line AFTER `var canvasTouchActive = false;`:
 ```javascript
-	var restThreshold = BRAIN.stimulate.lightLevel === 0 ? 0.4 : BEHAVIOR_THRESHOLDS.restFatigue;
-	if (BRAIN.drives.fatigue > restThreshold) {
+var touchTimestamps = [];
 ```
 
-Logic:
-1. Declare local variable `restThreshold`
-2. If `BRAIN.stimulate.lightLevel === 0` (complete darkness), set `restThreshold` to `0.4`
-3. Otherwise use `BEHAVIOR_THRESHOLDS.restFatigue` (which is `0.7`)
-4. Use `restThreshold` in the comparison instead of `BEHAVIOR_THRESHOLDS.restFatigue`
-
-#### Change 2B: Double antenna twitch interval in complete darkness in drawAntennae
-- anchor: `anim.antennaNextInterval = 0.8 + Math.random() * 1.2;` (the one inside the `if (t - anim.antennaTimer > anim.antennaNextInterval)` block, at line 1167)
-- This block currently reads (lines 1165-1169):
+#### Change C: Wire temperature button in the tool button handler loop
+- anchor: `if (tool === 'light') {` (line 139)
+- Replace the block:
 ```javascript
-	if (t - anim.antennaTimer > anim.antennaNextInterval) {
-		anim.antennaTimer = t;
-		anim.antennaNextInterval = 0.8 + Math.random() * 1.2;
-		anim.antennaTargetL = (Math.random() - 0.5) * 0.4;
-		anim.antennaTargetR = (Math.random() - 0.5) * 0.4;
-```
-
-Replace with:
-```javascript
-	if (t - anim.antennaTimer > anim.antennaNextInterval) {
-		anim.antennaTimer = t;
-		var antennaBase = 0.8 + Math.random() * 1.2;
-		anim.antennaNextInterval = BRAIN.stimulate.lightLevel === 0 ? antennaBase * 2 : antennaBase;
-		anim.antennaTargetL = (Math.random() - 0.5) * 0.4;
-		anim.antennaTargetR = (Math.random() - 0.5) * 0.4;
-```
-
-Logic:
-1. Compute the base interval as before: `var antennaBase = 0.8 + Math.random() * 1.2`
-2. If `BRAIN.stimulate.lightLevel === 0`, double it: `antennaBase * 2` (sleepier, slower twitching)
-3. Otherwise use `antennaBase` as-is
-4. Assign the result to `anim.antennaNextInterval`
-5. The random roll happens once when the timer fires (pre-rolled pattern per Known Pattern #1), which is preserved
-
-#### Change 2C: Reduce idle leg jitter intensity by 50% in complete darkness in drawLegs
-- anchor: `// idle / feed / default: normal idle jitter`
-- This block currently reads (lines 1338-1341):
-```javascript
+		if (tool === 'light') {
+			btn.addEventListener('click', cycleLightLevel);
 		} else {
-			// idle / feed / default: normal idle jitter
-			jitter = anim.legJitter[legIdx];
-		}
 ```
-
-Replace with:
+- With:
 ```javascript
+		if (tool === 'light') {
+			btn.addEventListener('click', cycleLightLevel);
+		} else if (tool === 'temp') {
+			btn.addEventListener('click', cycleTempLevel);
 		} else {
-			// idle / feed / default: normal idle jitter (reduced 50% in complete darkness)
-			jitter = anim.legJitter[legIdx] * (BRAIN.stimulate.lightLevel === 0 ? 0.5 : 1.0);
-		}
 ```
 
-Logic:
-1. When in the default/idle branch, multiply `anim.legJitter[legIdx]` by `0.5` if `BRAIN.stimulate.lightLevel === 0`
-2. Otherwise multiply by `1.0` (no change)
-3. This only affects the idle/feed/default case. The resting and bracing cases already have their own jitter multipliers and are unaffected.
+#### Change D: Add nociception detection to applyTouchTool function
+- anchor: `touchResetTime = Math.max(touchResetTime, Date.now() + 2000);` (line 426, the last line before the closing `}` of applyTouchTool)
+- Insert the following block AFTER `touchResetTime = Math.max(touchResetTime, Date.now() + 2000);` and BEFORE the closing `}` of applyTouchTool:
+```javascript
+
+	// Track touch timestamps for nociception (rapid repeated touch = pain)
+	var now = Date.now();
+	touchTimestamps.push(now);
+	// Prune entries older than 4 seconds
+	var cutoff = now - 4000;
+	while (touchTimestamps.length > 0 && touchTimestamps[0] < cutoff) {
+		touchTimestamps.shift();
+	}
+	// 3+ touches within 4 seconds triggers nociception for one brain tick
+	if (touchTimestamps.length >= 3) {
+		BRAIN.stimulate.nociception = true;
+		touchTimestamps.length = 0; // reset to require fresh rapid touches
+	}
+```
+
+#### Change E: Add cycleTempLevel function after cycleLightLevel
+- anchor: `function cycleLightLevel() {` (line 750)
+- The cycleLightLevel function spans lines 750-755. Insert the following function AFTER the closing `}` of cycleLightLevel (after line 755):
+```javascript
+
+function cycleTempLevel() {
+	tempStateIndex = (tempStateIndex + 1) % tempStates.length;
+	BRAIN.stimulate.temperature = tempStates[tempStateIndex];
+	var btn = document.getElementById('tempBtn');
+	if (btn) btn.textContent = 'Temp: ' + tempLabels[tempStateIndex];
+}
+```
+
+#### Change F: Add nociception reset to tab visibility handler
+- anchor: `BRAIN.stimulate.foodContact = false;` (line 262, inside the visibility change handler)
+- Insert the following line AFTER `BRAIN.stimulate.foodContact = false;`:
+```javascript
+		BRAIN.stimulate.nociception = false;
+```
+- Also insert `touchTimestamps.length = 0;` AFTER the existing `touchResetTime = 0;` (line 264):
+```javascript
+		touchTimestamps.length = 0;
+```
+
+### 4. MODIFY index.html
+- operation: MODIFY
+- reason: Add temperature cycle button to toolbar, add help overlay entry for temperature, update touch help text
+
+#### Change A: Add temperature button to toolbar after lightBtn
+- anchor: `<button class="tool-btn" data-tool="light" id="lightBtn">Light: Bright</button>` (line 15)
+- Insert the following line AFTER the lightBtn line:
+```html
+            <button class="tool-btn" data-tool="temp" id="tempBtn">Temp: Neutral</button>
+```
+
+#### Change B: Add temperature help entry and update touch help entry
+- anchor: `<div class="help-item"><strong>Light</strong> -- Cycles through Bright, Dim, and Dark. The fly exhibits phototaxis toward light.</div>` (line 35)
+- Insert the following line AFTER the Light help item:
+```html
+        <div class="help-item"><strong>Temp</strong> -- Cycles through Neutral, Warm, and Cool. Warm makes the fly more active and avoidant. Cool makes it exploratory.</div>
+```
+- Also modify the existing Touch help item. Replace:
+```html
+        <div class="help-item"><strong>Touch</strong> -- Click on the fly to touch it. Location matters: head, thorax, abdomen, or leg each triggers different grooming.</div>
+```
+- With:
+```html
+        <div class="help-item"><strong>Touch</strong> -- Click on the fly to touch it. Location matters: head, thorax, abdomen, or leg each triggers different grooming. Tap 3+ times in 4 seconds for a pain response.</div>
+```
+
+### 5. NO CHANGES to css/main.css
+- reason: The temperature button uses existing .tool-btn class styling. The cycle button pattern (same as Light) does not need active-class management per Known Pattern #2. No new CSS is required.
 
 ## Verification
-- build: no build step (vanilla JS loaded via script tags)
-- lint: no linter configured
-- test: no existing tests
-- smoke: Open index.html in a browser. Click the Light toggle until it shows "Dark" (lightLevel = 0). Observe: (1) the fly should become less active and settle into rest state significantly sooner than in bright mode (fatigue threshold drops from 0.7 to 0.4), (2) antennae should twitch at roughly half the frequency compared to bright mode, (3) idle leg jitter should be visibly reduced, (4) toggling back to Bright should restore normal activity levels within a few brain ticks. Also test Dim mode (lightLevel = 0.5): verify the fatigue gain rate is doubled (lightLevel 0.5 >= 0.3 so it should NOT be doubled — only < 0.3 triggers it). Then test with lightLevel = 0 (Dark): curiosity should stabilize near its current value rather than fluctuating widely.
+- build: No build step (plain browser JS loaded via script tags)
+- lint: No linter configured
+- test: No existing tests
+- smoke: Open index.html in a browser and verify:
+  1. Temperature button appears in toolbar after Light button, displays "Temp: Neutral"
+  2. Clicking Temp button cycles: Neutral -> Warm -> Cool -> Neutral
+  3. In Warm mode, the fly should become more active/avoidant (THERMO_WARM fires with warmIntensity=0.5, activating LH_AV and DRIVE_FEAR)
+  4. In Cool mode, the fly should be more exploratory (THERMO_COOL fires with coolIntensity=0.5, activating LH_APP and DRIVE_CURIOSITY)
+  5. Temp button does NOT deselect Feed/Touch/Air tools (it is a cycle button, not an active tool)
+  6. Touch tool: rapidly clicking the fly 3+ times within 4 seconds triggers an intense escape response (nociception via NOCI neuron: DN_STARTLE 10, DRIVE_FEAR 8, DN_FLIGHT 6)
+  7. Single touch still produces normal startle/grooming (nociception does NOT fire for fewer than 3 rapid touches)
+  8. lightDirection property no longer exists in BRAIN.stimulate
+  9. Comments present in constants.js for GUS_GRN_WATER, GUS_GRN_BITTER, OLF_ORN_DANGER
+  10. Comment present in connectome.js for dangerOdor processing
 
 ## Constraints
-- Do not modify SPEC.md, TASKS.md, CLAUDE.md, or any files in .buildloop/ other than current-plan.md
-- Do not add new files — all changes are within the two existing files js/connectome.js and js/main.js
-- Do not add any new dependencies or imports
-- Do not modify any behavior state machine logic beyond the restThreshold change in evaluateBehaviorEntry — the brace behavior, startle, fly, groom, feed, walk, explore, phototaxis states must remain unchanged
-- Do not change the BEHAVIOR_THRESHOLDS.restFatigue constant itself (0.7) — the darkness override is local to evaluateBehaviorEntry
-- Do not change the lightLevel values associated with the light toggle states (1, 0.5, 0) — those are existing UI state
-- Preserve the pre-rolled timer interval pattern (Known Pattern #1): the antenna interval is re-rolled only when the timer fires, not every frame. The dark-mode scaling must happen at re-roll time, not in the timer check condition
-- Use `=== 0` (strict equality) for complete darkness checks, and `< 0.3` (less-than comparison) for low-light checks, matching the thresholds specified in the task description
+- Do NOT modify SPEC.md, TASKS.md, or CLAUDE.md
+- Do NOT add any new CSS rules -- use existing .tool-btn styles
+- Do NOT modify the existing temperature processing logic in connectome.js lines 343-351 (it already handles the 0.75/0.25/0.5 values correctly)
+- Do NOT wire GUS_GRN_WATER, GUS_GRN_BITTER, or OLF_ORN_DANGER to user interactions -- only add comments
+- Do NOT modify any existing NOCI, THERMO_WARM, or THERMO_COOL weights in constants.js
+- The nociception stimulus must auto-clear after exactly one brain tick (cleared inside BRAIN.update after processing, not via setTimeout)
+- The temperature button must use the cycle-button pattern (separate click handler, no active-class management) per Known Pattern #2
+- touchTimestamps array is self-bounding: pruned to 4-second window on each push, and cleared to empty after triggering nociception
+- Do NOT add any files

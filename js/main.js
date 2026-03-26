@@ -95,9 +95,13 @@ var activeTool = 'feed';
 var isDragging = false;
 var dragStart = { x: 0, y: 0 };
 var canvasTouchActive = false;
+var touchTimestamps = [];
 var lightStates = [1, 0.5, 0];
 var lightStateIndex = 0;
 var lightLabels = ['Bright', 'Dim', 'Dark'];
+var tempStates = [0.5, 0.75, 0.25];
+var tempStateIndex = 0;
+var tempLabels = ['Neutral', 'Warm', 'Cool'];
 
 // Region-based neuron color map (built after BRAIN.setup)
 var neuronColorMap = {};
@@ -138,12 +142,14 @@ for (var i = 0; i < toolButtons.length; i++) {
 		var tool = btn.getAttribute('data-tool');
 		if (tool === 'light') {
 			btn.addEventListener('click', cycleLightLevel);
+		} else if (tool === 'temp') {
+			btn.addEventListener('click', cycleTempLevel);
 		} else {
 			btn.addEventListener('click', function () {
 				activeTool = tool;
 				for (var j = 0; j < toolButtons.length; j++) {
 					var t = toolButtons[j].getAttribute('data-tool');
-					if (t !== 'light') {
+					if (t !== 'light' && t !== 'temp') {
 						toolButtons[j].classList.remove('active');
 					}
 				}
@@ -260,8 +266,10 @@ document.addEventListener('visibilitychange', function () {
 		BRAIN.stimulate.windDirection = 0;
 		BRAIN.stimulate.foodNearby = false;
 		BRAIN.stimulate.foodContact = false;
+		BRAIN.stimulate.nociception = false;
 		touchResetTime = 0;
 		windResetTime = 0;
+		touchTimestamps.length = 0;
 
 		// Reset drag/interaction state that may be stale from a mid-drag tab hide
 		isDragging = false;
@@ -424,6 +432,20 @@ function applyTouchTool(cx, cy) {
 	BRAIN.stimulate.touchLocation = location;
 
 	touchResetTime = Math.max(touchResetTime, Date.now() + 2000);
+
+	// Track touch timestamps for nociception (rapid repeated touch = pain)
+	var now = Date.now();
+	touchTimestamps.push(now);
+	// Prune entries older than 4 seconds
+	var cutoff = now - 4000;
+	while (touchTimestamps.length > 0 && touchTimestamps[0] < cutoff) {
+		touchTimestamps.shift();
+	}
+	// 3+ touches within 4 seconds triggers nociception for one brain tick
+	if (touchTimestamps.length >= 3) {
+		BRAIN.stimulate.nociception = true;
+		touchTimestamps.length = 0; // reset to require fresh rapid touches
+	}
 }
 
 /**
@@ -752,6 +774,13 @@ function cycleLightLevel() {
 	BRAIN.stimulate.lightLevel = lightStates[lightStateIndex];
 	var btn = document.getElementById('lightBtn');
 	if (btn) btn.textContent = 'Light: ' + lightLabels[lightStateIndex];
+}
+
+function cycleTempLevel() {
+	tempStateIndex = (tempStateIndex + 1) % tempStates.length;
+	BRAIN.stimulate.temperature = tempStates[tempStateIndex];
+	var btn = document.getElementById('tempBtn');
+	if (btn) btn.textContent = 'Temp: ' + tempLabels[tempStateIndex];
 }
 
 function drawFood() {

@@ -13,6 +13,7 @@
             <button class="tool-btn" data-tool="touch">Touch</button>
             <button class="tool-btn" data-tool="air">Air</button>
             <button class="tool-btn" data-tool="light" id="lightBtn">Light: Bright</button>
+            <button class="tool-btn" data-tool="temp" id="tempBtn">Temp: Neutral</button>
             <button class="tool-btn" id="helpBtn">?</button>
         </div>
         <div class="toolbar-right">
@@ -30,9 +31,10 @@
             <button class="help-close-btn" id="helpCloseBtn">&times;</button>
         </div>
         <div class="help-item"><strong>Feed</strong> -- Click on the canvas to place food. The fly will seek and eat it when hungry.</div>
-        <div class="help-item"><strong>Touch</strong> -- Click on the fly to touch it. Location matters: head, thorax, abdomen, or leg each triggers different grooming.</div>
+        <div class="help-item"><strong>Touch</strong> -- Click on the fly to touch it. Location matters: head, thorax, abdomen, or leg each triggers different grooming. Tap 3+ times in 4 seconds for a pain response.</div>
         <div class="help-item"><strong>Air</strong> -- Click and drag near the fly to blow wind. Drag distance controls wind strength.</div>
         <div class="help-item"><strong>Light</strong> -- Cycles through Bright, Dim, and Dark. The fly exhibits phototaxis toward light.</div>
+        <div class="help-item"><strong>Temp</strong> -- Cycles through Neutral, Warm, and Cool. Warm makes the fly more active and avoidant. Cool makes it exploratory.</div>
     </div>
     <canvas id='canvas'></canvas>
     <div id="bottom-panel">

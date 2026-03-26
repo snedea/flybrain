@@ -141,7 +141,7 @@ BRAIN.stimulate = {
 	windStrength: 0,       // 0-1
 	windDirection: 0,      // radians, direction wind is blowing FROM (math convention: 0=right, PI/2=up)
 	lightLevel: 1,         // 0-1 (0=dark, 1=bright)
-	lightDirection: 0,     // angle in radians
+	nociception: false,   // pain response (triggered by rapid repeated touch)
 	temperature: 0.5,      // 0-1 (0=cold, 1=hot), 0.5 = preferred
 };
 
@@ -322,7 +322,7 @@ BRAIN.update = function () {
 		BRAIN.dendriteAccumulate('GUS_GRN_SWEET');
 	}
 
-	// Danger odor
+	// Danger odor (NOTE: connectome weights are wired but no user interaction currently sets BRAIN.stimulate.dangerOdor)
 	if (BRAIN.stimulate.dangerOdor) {
 		BRAIN.dendriteAccumulate('OLF_ORN_DANGER');
 	}
@@ -348,6 +348,12 @@ BRAIN.update = function () {
 		// Cool stimulus
 		var coolIntensity = (0.5 - BRAIN.stimulate.temperature) * 2;
 		BRAIN.dendriteAccumulateScaled('THERMO_COOL', coolIntensity);
+	}
+
+	// Nociception (pain response from repeated rapid touch)
+	if (BRAIN.stimulate.nociception) {
+		BRAIN.dendriteAccumulate('NOCI');
+		BRAIN.stimulate.nociception = false; // single-tick: fire once then auto-clear
 	}
 
 	// Proprioceptive feedback (always-on when moving)
