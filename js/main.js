@@ -83,6 +83,7 @@ var behavior = {
 	cooldowns: {},
 	startlePhase: 'none',
 	startleFreezeEnd: 0,
+	groomLocation: null,
 };
 
 // --- Tool state ---
@@ -447,6 +448,11 @@ function updateBehaviorState() {
 		} else {
 			behavior.startlePhase = 'none';
 		}
+
+		// Groom: snapshot the touch location that triggered grooming
+		if (newState === 'groom') {
+			behavior.groomLocation = BRAIN.stimulate.touchLocation || 'thorax';
+		}
 	}
 
 	syncBrainFlags();
@@ -595,26 +601,32 @@ function applyBehaviorMovement(dtScale) {
  * Called every frame (60fps). Smoothly interpolates animation parameters
  * toward their targets based on the current behavior state.
  */
-function updateAnimForBehavior() {
+function updateAnimForBehavior(dtScale) {
 	var state = behavior.current;
 
-	// Wing spread target
+	// Wing spread target (exponential interpolation for frame-rate independence)
 	var targetWingSpread = 0;
 	if (state === 'fly' || (state === 'startle' && behavior.startlePhase === 'burst')) {
 		targetWingSpread = 1;
 	}
-	anim.wingSpread += (targetWingSpread - anim.wingSpread) * 0.15;
+	anim.wingSpread += (targetWingSpread - anim.wingSpread) * (1 - Math.pow(0.85, dtScale));
 
-	// Proboscis extension target
+	// Proboscis extension target (exponential interpolation for frame-rate independence)
 	var targetProboscis = 0;
 	if (state === 'feed') {
 		targetProboscis = 1;
 	}
-	anim.proboscisExtend += (targetProboscis - anim.proboscisExtend) * 0.1;
+	anim.proboscisExtend += (targetProboscis - anim.proboscisExtend) * (1 - Math.pow(0.9, dtScale));
 
-	// Groom phase advances when grooming
+	// Groom phase advances when grooming (linear dt scaling for phase accumulator)
 	if (state === 'groom') {
-		anim.groomPhase += 0.12;
+		anim.groomPhase += 0.12 * dtScale;
+	}
+
+	// Walk phase advances when walking (linear dt scaling for phase accumulator)
+	if (state === 'walk' || state === 'explore' || state === 'phototaxis') {
+		var spd = Math.abs(speed);
+		anim.walkPhase += spd * 0.5 * dtScale;
 	}
 }
 
@@ -829,12 +841,6 @@ function drawFlyBody() {
 	var state = behavior.current;
 	var isWalking = (state === 'walk' || state === 'explore' || state === 'phototaxis');
 
-	// Update walk animation phase only when walking
-	if (isWalking) {
-		var spd = Math.abs(speed);
-		anim.walkPhase += spd * 0.5;
-	}
-
 	// --- Wings (drawn first, behind body) ---
 	drawWing(-1); // left
 	drawWing(1);  // right
@@ -936,7 +942,7 @@ function drawAbdomen() {
 
 	// Abdomen curl during abdomen-specific grooming
 	var abdomenCurl = 0;
-	if (behavior.current === 'groom' && (BRAIN.stimulate.touchLocation === 'abdomen' || BRAIN.stimulate.touchLocation === null)) {
+	if (behavior.current === 'groom' && (behavior.groomLocation === 'abdomen' || behavior.groomLocation === 'thorax')) {
 		abdomenCurl = Math.sin(anim.groomPhase * 0.8) * 2;
 	}
 	ay += abdomenCurl;
@@ -1159,7 +1165,7 @@ function drawLegs(state) {
 			var legPhase = anim.walkPhase + (inGroupA ? 0 : Math.PI);
 			walkOffset = Math.sin(legPhase) * 0.35;
 		} else if (isGrooming) {
-			var groomLoc = BRAIN.stimulate.touchLocation || 'thorax';
+			var groomLoc = behavior.groomLocation || 'thorax';
 			if (groomLoc === 'head' && pairIdx === 0) {
 				// Front legs rub the head area: swing forward and inward
 				hipMod = -0.9 + Math.sin(anim.groomPhase) * 0.4;
@@ -1380,7 +1386,7 @@ function update(dt) {
 	}
 
 	frameCount++;
-	updateAnimForBehavior();
+	updateAnimForBehavior(dtScale);
 }
 
 // --- Draw ---
