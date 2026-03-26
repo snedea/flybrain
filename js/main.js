@@ -282,7 +282,7 @@ function handleCanvasMousedown(event) {
 function handleCanvasMousemove(event) {
 	currentMousePos.x = event.clientX;
 	currentMousePos.y = event.clientY;
-	if (!isDragging || activeTool !== 'air') return;
+	if (!isDragging || dragToolOrigin !== 'air') return;
 	var dx = event.clientX - dragStart.x;
 	var dy = event.clientY - dragStart.y;
 	var dragDist = Math.sqrt(dx * dx + dy * dy);
@@ -707,7 +707,7 @@ function drawRipples() {
  * Arrow points from dragStart to current mouse position.
  */
 function drawWindArrow() {
-	if (!isDragging || activeTool !== 'air' || !windArrowEnd) return;
+	if (!isDragging || dragToolOrigin !== 'air' || !windArrowEnd) return;
 	var dx = windArrowEnd.x - dragStart.x;
 	var dy = windArrowEnd.y - dragStart.y;
 	var dist = Math.sqrt(dx * dx + dy * dy);
@@ -771,6 +771,10 @@ var anim = {
 	wingMicro: 0,
 	wingMicroTarget: 0,
 	wingMicroTimer: 0,
+	// Pre-rolled next intervals (frame-rate-independent timer frequency)
+	antennaNextInterval: 0.8 + Math.random() * 1.2,
+	legJitterNextInterval: 1.5 + Math.random() * 2.0,
+	wingMicroNextInterval: 2.0 + Math.random() * 3.0,
 	// Behavior animation state (T2.1)
 	groomPhase: 0,
 	proboscisExtend: 0,
@@ -1061,8 +1065,9 @@ function drawEyes() {
  */
 function drawAntennae(t, dtScale) {
 	// Update antenna twitch targets periodically
-	if (t - anim.antennaTimer > 0.8 + Math.random() * 1.2) {
+	if (t - anim.antennaTimer > anim.antennaNextInterval) {
 		anim.antennaTimer = t;
+		anim.antennaNextInterval = 0.8 + Math.random() * 1.2;
 		anim.antennaTargetL = (Math.random() - 0.5) * 0.4;
 		anim.antennaTargetR = (Math.random() - 0.5) * 0.4;
 	}
@@ -1137,8 +1142,9 @@ function drawLegs(state, dtScale) {
 	var isResting = (state === 'rest');
 
 	// Update idle jitter targets periodically
-	if (t - anim.legJitterTimer > 1.5 + Math.random() * 2.0) {
+	if (t - anim.legJitterTimer > anim.legJitterNextInterval) {
 		anim.legJitterTimer = t;
+		anim.legJitterNextInterval = 1.5 + Math.random() * 2.0;
 		for (var j = 0; j < 6; j++) {
 			anim.legJitterTarget[j] = (Math.random() - 0.5) * 0.15;
 		}
@@ -1148,8 +1154,9 @@ function drawLegs(state, dtScale) {
 	}
 
 	// Update wing micro-movement
-	if (t - anim.wingMicroTimer > 2.0 + Math.random() * 3.0) {
+	if (t - anim.wingMicroTimer > anim.wingMicroNextInterval) {
 		anim.wingMicroTimer = t;
+		anim.wingMicroNextInterval = 2.0 + Math.random() * 3.0;
 		anim.wingMicroTarget = (Math.random() - 0.5) * 2;
 	}
 	anim.wingMicro += (anim.wingMicroTarget - anim.wingMicro) * (1 - Math.pow(0.97, dtScale));
@@ -1451,7 +1458,7 @@ function draw() {
 	canvas.style.width = window.innerWidth + 'px';
 	canvas.style.height = window.innerHeight + 'px';
 	ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-	window.onresize = resize;
+	window.addEventListener('resize', resize);
 })();
 
 // --- Main loop (requestAnimationFrame with delta-time) ---

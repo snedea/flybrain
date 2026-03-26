@@ -1,34 +1,29 @@
-# Build Claims -- D5.1
+# Build Claims -- D6.1
 
 ## Files Changed
-- [MODIFY] js/main.js -- Replace frame-count-based stimulus timers with Date.now() timestamps, fix feeding timer leak on behavior exit, replace while-loop angle normalization with normalizeAngle() calls, remove dead frameCount variable
+- [MODIFY] js/main.js -- Fix frame-rate-dependent idle animation timer frequencies, replace window.onresize with addEventListener, and fix mid-drag tool-switch bugs
 
 ## Verification Results
-- Build: PASS (vanilla JS, no build step -- file parses without syntax errors based on structural review)
-- Tests: SKIPPED (no automated tests exist)
-- Lint: PASS (`grep -n 'touchResetFrame\|windResetFrame' js/main.js` -- zero matches)
-- Lint: PASS (`grep -n 'frameCount' js/main.js` -- zero matches)
-- Lint: PASS (`grep -n 'while (angleDiff' js/main.js` -- zero matches)
+- Build: PASS (no build step -- static HTML/JS project)
+- Tests: SKIPPED (no existing tests)
+- Lint: SKIPPED (no lint configured)
 
 ## Claims
-- [ ] Claim 1: `touchResetFrame` and `windResetFrame` variables (line 25-26) renamed to `touchResetTime` and `windResetTime`; `frameCount` variable declaration removed entirely
-- [ ] Claim 2: `windResetTime = 0` clears pending wind reset when air drag begins (handleCanvasMousedown, ~line 274)
-- [ ] Claim 3: `windResetTime = Date.now() + 2000` sets wall-clock expiry on air drag end (handleCanvasMouseup, ~line 306)
-- [ ] Claim 4: `touchResetTime = Math.max(touchResetTime, Date.now() + 2000)` in applyTouchTool (~line 342) replaces frame-based touch expiry
-- [ ] Claim 5: Food-seeking angleDiffToFood normalization (previously two while loops at ~line 513) replaced with single `angleDiffToFood = normalizeAngle(angleDiffToFood)` call
-- [ ] Claim 6: In updateBehaviorState(), when transitioning OUT of 'feed' state, all food items have feedStart reset to 0 and radius reset to 10 (inserted between behavior.previous assignment and behavior.current assignment, ~lines 441-449)
-- [ ] Claim 7: Edge avoidance angleDiffEdge normalization (previously two while loops at ~line 1312) replaced with single `angleDiffEdge = normalizeAngle(angleDiffEdge)` call
-- [ ] Claim 8a: All 4 wall-collision touchResetFrame assignments (~lines 1329, 1333, 1338, 1342) replaced with `touchResetTime = Math.max(touchResetTime, Date.now() + 2000)`
-- [ ] Claim 8b: Touch reset check (~line 1391-1396) uses `touchResetTime > 0 && Date.now() >= touchResetTime` instead of frameCount comparison
-- [ ] Claim 8c: Wind reset check (~line 1398-1403) uses `windResetTime > 0 && Date.now() >= windResetTime` instead of frameCount comparison
-- [ ] Claim 8d: `frameCount` variable declaration and `frameCount++` increment both removed -- no references to frameCount remain in the file
-- [ ] Claim 9: Zero occurrences of `touchResetFrame`, `windResetFrame`, `frameCount`, or `while (angleDiff` remain in js/main.js
-- [ ] Claim 10: The normalizeAngle() helper function (lines 31-36) was NOT modified
-- [ ] Claim 11: Stimulus duration remains 2000ms (same behavioral timing, wall-clock instead of frame-count)
-- [ ] Claim 12: No files other than js/main.js were modified
+- [ ] Claim 1: `anim` object (line 774-777) has three new fields: `antennaNextInterval`, `legJitterNextInterval`, `wingMicroNextInterval`, each initialized with the same random range as the original inline expressions
+- [ ] Claim 2: `drawAntennae` (line 1068) checks `anim.antennaNextInterval` instead of `0.8 + Math.random() * 1.2`, and re-rolls `anim.antennaNextInterval` on line 1070 after the timer fires
+- [ ] Claim 3: `drawLegs` leg jitter timer (line 1145) checks `anim.legJitterNextInterval` instead of `1.5 + Math.random() * 2.0`, and re-rolls `anim.legJitterNextInterval` on line 1147 after the timer fires
+- [ ] Claim 4: `drawLegs` wing micro timer (line 1157) checks `anim.wingMicroNextInterval` instead of `2.0 + Math.random() * 3.0`, and re-rolls `anim.wingMicroNextInterval` on line 1159 after the timer fires
+- [ ] Claim 5: No inline `Math.random()` calls remain in any timer condition check -- all three timers use pre-rolled interval fields
+- [ ] Claim 6: Timer threshold constants are unchanged (0.8, 1.2, 1.5, 2.0, 3.0) -- same minimum and range values
+- [ ] Claim 7: `window.onresize = resize` (was line 1454) replaced with `window.addEventListener('resize', resize)` (now line 1461)
+- [ ] Claim 8: `handleCanvasMousemove` (line 285) checks `dragToolOrigin !== 'air'` instead of `activeTool !== 'air'`
+- [ ] Claim 9: `drawWindArrow` (line 710) checks `dragToolOrigin !== 'air'` instead of `activeTool !== 'air'`
+- [ ] Claim 10: No remaining references to `activeTool !== 'air'` exist in the file
+- [ ] Claim 11: No remaining references to `window.onresize` exist in the file
+- [ ] Claim 12: The `Math.pow` exponential interpolation lines (lerp smoothing) are untouched
+- [ ] Claim 13: `handleCanvasMouseup` is unmodified
 
 ## Gaps and Assumptions
-- No automated tests exist; all verification is structural (grep-based) not behavioral
-- The feedStart reset in updateBehaviorState uses `food[fi].radius = 10` assuming 10 is the initial/full radius -- this matches the food creation at line 268 (`radius: 10`) and the out-of-range reset at line 1386 (`food[i].radius = 10`)
-- Smoke testing (browser interaction) was not performed -- claims about runtime behavior (stimulus clearing after 2s, feeding timer leak fix) are based on code review
-- The `normalizeAngle()` helper handles values up to 2*PI away from [-PI,PI] via if-statements (not modular for arbitrary multiples) but this is sufficient for angle differences which are always within one revolution
+- No runtime testing performed (browser-only project, no test harness)
+- Assumed `dragToolOrigin` is always set before `isDragging` becomes true (verified by reading D4.1 mousedown handler -- dragToolOrigin is set in the same handler that sets isDragging)
+- The initial random intervals in the anim object are generated once at page load; if the page loads but the animation loop doesn't start immediately, the first interval may be slightly shorter than intended (negligible impact)
