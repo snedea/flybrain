@@ -143,11 +143,6 @@ BRAIN.stimulate = {
 	temperature: 0.5,      // 0-1 (0=cold, 1=hot), 0.5 = preferred
 };
 
-// Backward-compatible flags (old worm-sim interface)
-BRAIN.stimulateHungerNeurons = true;
-BRAIN.stimulateNoseTouchNeurons = false;
-BRAIN.stimulateFoodSenseNeurons = false;
-
 // ============================================================
 // INTERNAL DRIVES
 // ============================================================
@@ -268,14 +263,6 @@ BRAIN.setup = function () {
 // ============================================================
 
 BRAIN.update = function () {
-	// --- Map old flags to new stimulate object for backward compat ---
-	if (BRAIN.stimulateNoseTouchNeurons) {
-		BRAIN.stimulate.touch = true;
-	}
-	if (BRAIN.stimulateFoodSenseNeurons) {
-		BRAIN.stimulate.foodNearby = true;
-	}
-
 	// --- Update internal drives ---
 	BRAIN.updateDrives();
 

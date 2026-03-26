@@ -23,6 +23,7 @@ var targetSpeed = 0;
 var speedChangeInterval = 0;
 var food = [];
 var frameCount = 0;
+var wallTouchResetFrame = 0;
 
 // ============================================================
 // BEHAVIOR STATE MACHINE
@@ -1003,45 +1004,50 @@ function drawLegs(state) {
 }
 
 // --- Movement update (same interface as worm-sim) ---
-function update() {
+function update(dt) {
 	applyBehaviorMovement();
 
-	speed += speedChangeInterval;
+	var dtScale = dt / (1000 / 60);
+	speed += speedChangeInterval * dtScale;
 
 	var facingMinusTarget = facingDir - targetDir;
 	var angleDiff = facingMinusTarget;
 
-	if (Math.abs(facingMinusTarget) > 180) {
+	if (Math.abs(facingMinusTarget) > Math.PI) {
 		if (facingDir > targetDir) {
-			angleDiff = -1 * (360 - facingDir + targetDir);
+			angleDiff = -1 * (2 * Math.PI - facingDir + targetDir);
 		} else {
-			angleDiff = 360 - targetDir + facingDir;
+			angleDiff = 2 * Math.PI - targetDir + facingDir;
 		}
 	}
 
 	if (angleDiff > 0) {
-		facingDir -= 0.1;
+		facingDir -= 0.1 * dtScale;
 	} else if (angleDiff < 0) {
-		facingDir += 0.1;
+		facingDir += 0.1 * dtScale;
 	}
 
 	fly.x += Math.cos(facingDir) * speed;
 	fly.y -= Math.sin(facingDir) * speed;
 
-	// Screen bounds
+	// Screen bounds (clamped to visible area: toolbar=44px top, panel=90px bottom)
 	if (fly.x < 0) {
 		fly.x = 0;
-		BRAIN.stimulateNoseTouchNeurons = true;
+		BRAIN.stimulate.touch = true;
+		wallTouchResetFrame = frameCount + 120;
 	} else if (fly.x > window.innerWidth) {
 		fly.x = window.innerWidth;
-		BRAIN.stimulateNoseTouchNeurons = true;
+		BRAIN.stimulate.touch = true;
+		wallTouchResetFrame = frameCount + 120;
 	}
-	if (fly.y < 0) {
-		fly.y = 0;
-		BRAIN.stimulateNoseTouchNeurons = true;
-	} else if (fly.y > window.innerHeight) {
-		fly.y = window.innerHeight;
-		BRAIN.stimulateNoseTouchNeurons = true;
+	if (fly.y < 44) {
+		fly.y = 44;
+		BRAIN.stimulate.touch = true;
+		wallTouchResetFrame = frameCount + 120;
+	} else if (fly.y > window.innerHeight - 90) {
+		fly.y = window.innerHeight - 90;
+		BRAIN.stimulate.touch = true;
+		wallTouchResetFrame = frameCount + 120;
 	}
 
 	// Food proximity
@@ -1050,7 +1056,6 @@ function update() {
 	for (var i = 0; i < food.length; i++) {
 		var dist = Math.hypot(fly.x - food[i].x, fly.y - food[i].y);
 		if (dist <= 50) {
-			BRAIN.stimulateFoodSenseNeurons = true;
 			BRAIN.stimulate.foodNearby = true;
 			if (dist <= 20) {
 				BRAIN.stimulate.foodContact = true;
@@ -1062,12 +1067,11 @@ function update() {
 		}
 	}
 
-	// Reset legacy neuron stimulation flags after 2 seconds
-	setTimeout(function () {
-		BRAIN.stimulateHungerNeurons = true;
-		BRAIN.stimulateNoseTouchNeurons = false;
-		BRAIN.stimulateFoodSenseNeurons = false;
-	}, 2000);
+	// Reset wall-touch stimulus after 120 frames (~2 seconds at 60fps)
+	if (wallTouchResetFrame > 0 && frameCount >= wallTouchResetFrame) {
+		BRAIN.stimulate.touch = false;
+		wallTouchResetFrame = 0;
+	}
 
 	frameCount++;
 	updateAnimForBehavior();
@@ -1085,7 +1089,7 @@ function draw() {
 		canvas.style.backgroundColor = '#080808';
 	}
 
-	ctx.clearRect(0, 0, canvas.width, canvas.height);
+	ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
 	drawFood();
 
 	// Draw fly at its position, rotated to face movement direction
@@ -1109,15 +1113,26 @@ function draw() {
 	ctx.fill();
 }
 
-// --- Resize ---
+// --- Resize (with high-DPI support) ---
 (function resize() {
-	canvas.width = window.innerWidth;
-	canvas.height = window.innerHeight;
+	var dpr = window.devicePixelRatio || 1;
+	canvas.width = window.innerWidth * dpr;
+	canvas.height = window.innerHeight * dpr;
+	canvas.style.width = window.innerWidth + 'px';
+	canvas.style.height = window.innerHeight + 'px';
+	ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 	window.onresize = resize;
 })();
 
-// --- Main loop ---
-setInterval(function () {
-	update();
+// --- Main loop (requestAnimationFrame with delta-time) ---
+var lastTime = 0;
+function loop(timestamp) {
+	var dt = timestamp - lastTime;
+	lastTime = timestamp;
+	// Clamp dt to 100ms to prevent huge jumps after tab-backgrounding
+	if (dt > 100) dt = 100;
+	update(dt);
 	draw();
-}, 1e3 / 60);
+	requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
