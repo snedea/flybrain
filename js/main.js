@@ -25,6 +25,14 @@ var food = [];
 var frameCount = 0;
 var wallTouchResetFrame = 0;
 
+// Normalize angle to [-PI, PI] range
+function normalizeAngle(a) {
+	a = a % (2 * Math.PI);
+	if (a > Math.PI) a -= 2 * Math.PI;
+	if (a < -Math.PI) a += 2 * Math.PI;
+	return a;
+}
+
 // Visual feedback effects
 var ripples = [];
 var windArrowEnd = null;
@@ -527,7 +535,7 @@ function computeMovementForBehavior() {
  * Handles frame-rate-dependent overrides: startle freeze/burst transitions,
  * and speed clamping for stationary behaviors.
  */
-function applyBehaviorMovement() {
+function applyBehaviorMovement(dtScale) {
 	if (behavior.current === 'startle') {
 		var now = Date.now();
 		if (behavior.startlePhase === 'freeze') {
@@ -546,7 +554,7 @@ function applyBehaviorMovement() {
 	if (behavior.current === 'feed' || behavior.current === 'groom' ||
 		behavior.current === 'rest' || behavior.current === 'idle') {
 		if (speed > 0.05) {
-			speed *= 0.92;
+			speed *= Math.pow(0.92, dtScale);
 		} else {
 			speed = 0;
 		}
@@ -1214,9 +1222,9 @@ function drawLegs(state) {
 
 // --- Movement update (same interface as worm-sim) ---
 function update(dt) {
-	applyBehaviorMovement();
-
 	var dtScale = dt / (1000 / 60);
+	applyBehaviorMovement(dtScale);
+
 	speed += speedChangeInterval * dtScale;
 
 	var facingMinusTarget = facingDir - targetDir;
@@ -1264,8 +1272,12 @@ function update(dt) {
 		// Normalize to [-PI, PI]
 		while (angleDiffEdge > Math.PI) angleDiffEdge -= 2 * Math.PI;
 		while (angleDiffEdge < -Math.PI) angleDiffEdge += 2 * Math.PI;
-		targetDir += angleDiffEdge * awayStrength * 0.3;
+		targetDir += angleDiffEdge * awayStrength * 0.3 * dtScale;
 	}
+
+	// Normalize angles to [-PI, PI] to prevent unbounded growth
+	facingDir = normalizeAngle(facingDir);
+	targetDir = normalizeAngle(targetDir);
 
 	fly.x += Math.cos(facingDir) * speed;
 	fly.y -= Math.sin(facingDir) * speed;
@@ -1389,8 +1401,14 @@ function draw() {
 })();
 
 // --- Main loop (requestAnimationFrame with delta-time) ---
-var lastTime = 0;
+var lastTime = -1;
 function loop(timestamp) {
+	if (lastTime < 0) {
+		lastTime = timestamp;
+		draw();
+		requestAnimationFrame(loop);
+		return;
+	}
 	var dt = timestamp - lastTime;
 	lastTime = timestamp;
 	// Clamp dt to 100ms to prevent huge jumps after tab-backgrounding

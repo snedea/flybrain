@@ -1,0 +1,6 @@
+{
+  "task_id": "D1.1",
+  "task_desc": "Fix movement timing and angle-wrapping bugs in update() -- (1) first-frame speed burst: lastTime initialized to 0 at main.js:1392 means the first RAF callback computes dt = timestamp - 0 which is the full time since page load, clamped to 100ms giving dtScale ~6 and a visible initial jump/burst of movement on every page load; fix by initializing lastTime from the first callback timestamp before running update(), (2) unbounded facingDir and targetDir growth: neither angle is ever normalized to a bounded range like [-PI, PI] after modification -- over extended sessions both values grow without bound, eventually degrading floating-point precision and causing subtle direction/wrapping errors, (3) frame-rate-dependent edge avoidance: the bias at main.js:1267 (targetDir += angleDiffEdge * awayStrength * 0.3) is applied per-frame without dt scaling so it pushes twice as hard at 120fps vs 60fps, (4) frame-rate-dependent deceleration: speed *= 0.92 in applyBehaviorMovement() at main.js:549 is per-frame without dt scaling so the fly decelerates faster on high-refresh-rate displays. Files: js/main.js.",
+  "completed_stage": "builder",
+  "timestamp": "2026-03-26T04:01:02.714774+00:00"
+}

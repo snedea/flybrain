@@ -1,331 +1,248 @@
-# Plan: T4.2
+# Plan: D1.1
+
+Fix movement timing and angle-wrapping bugs in update().
+
+Four bugs, one file: `js/main.js`.
 
 ## Dependencies
-- list: [] (no new dependencies -- vanilla JS project with no build step)
-- commands: [] (none)
+- list: []
+- commands: []
 
 ## File Operations (in execution order)
 
-### 1. MODIFY index.html
+### 1. MODIFY js/main.js
 - operation: MODIFY
-- reason: Add help button (?) to toolbar-left, add connectome toggle button to bottom panel, add help overlay HTML element
+- reason: Fix all 4 bugs: first-frame speed burst, unbounded angle growth, frame-rate-dependent edge avoidance, frame-rate-dependent deceleration
 
-#### Changes
+---
 
-**Change 1: Add help button to toolbar-left, after the Light button**
-- anchor: `<button class="tool-btn" data-tool="light" id="lightBtn">Light: Bright</button>`
-- After that line (still inside `.toolbar-left` div), insert:
-```html
-<button class="tool-btn" id="helpBtn">?</button>
-```
+#### Bug 1: First-frame speed burst (lastTime initialized to 0)
 
-**Change 2: Add help overlay element, between the closing `</div>` of `#toolbar` and the `<canvas>` tag**
-- anchor: `<canvas id='canvas'></canvas>`
-- Before the `<canvas>` tag, insert:
-```html
-<div id="helpOverlay" class="help-overlay" style="display:none;">
-    <div class="help-overlay-header">
-        <span>Interaction Guide</span>
-        <button class="help-close-btn" id="helpCloseBtn">&times;</button>
-    </div>
-    <div class="help-item"><strong>Feed</strong> -- Click on the canvas to place food. The fly will seek and eat it when hungry.</div>
-    <div class="help-item"><strong>Touch</strong> -- Click on the fly to touch it. Location matters: head, thorax, abdomen, or leg each triggers different grooming.</div>
-    <div class="help-item"><strong>Air</strong> -- Click and drag near the fly to blow wind. Drag distance controls wind strength.</div>
-    <div class="help-item"><strong>Light</strong> -- Cycles through Bright, Dim, and Dark. The fly exhibits phototaxis toward light.</div>
-</div>
-```
+**Problem:** `var lastTime = 0;` at line 1392 means the first RAF callback computes `dt = timestamp - 0`, which equals the full elapsed time since page load. Even with the 100ms clamp, dtScale is ~6, producing a visible jump.
 
-**Change 3: Add connectome toggle button inside #connectome-panel, after the connectome-label span**
-- anchor: `<span class="connectome-label">Connectome</span>`
-- Replace that line with:
-```html
-<div class="connectome-header">
-    <span class="connectome-label">Connectome</span>
-    <button class="connectome-toggle-btn" id="connectomeToggleBtn">Hide</button>
-</div>
-```
+**Fix:** Set `lastTime = timestamp` on the first frame, then skip update() for that frame.
 
-### 2. MODIFY css/main.css
-- operation: MODIFY
-- reason: Add styles for help overlay, help button, connectome toggle button, connectome-header row
+- anchor: `var lastTime = 0;`
 
-#### Changes
-
-**Change 1: Add new CSS rules at the end of the file (after the `.behavior-state` block)**
-- anchor: (append after last line -- after closing `}` of `.behavior-state`)
-- Append the following CSS:
-
-```css
-
-/* --- Help Overlay --- */
-.help-overlay {
-    position: fixed;
-    top: 54px;
-    left: 1rem;
-    width: 280px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 0.75rem 1rem;
-    z-index: 30;
-    font-family: system-ui, -apple-system, sans-serif;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-}
-
-.help-overlay-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 0.5rem;
-    color: var(--text);
-    font-size: 0.85rem;
-    font-weight: 600;
-}
-
-.help-close-btn {
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    font-size: 1.1rem;
-    cursor: pointer;
-    padding: 0 0.25rem;
-    line-height: 1;
-}
-
-.help-close-btn:hover {
-    color: var(--text);
-}
-
-.help-item {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    margin-bottom: 0.4rem;
-    line-height: 1.4;
-}
-
-.help-item strong {
-    color: var(--accent);
-}
-
-/* --- Connectome Header (label + toggle) --- */
-.connectome-header {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    flex-shrink: 0;
-}
-
-.connectome-toggle-btn {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    color: var(--text-muted);
-    padding: 0 0.4rem;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 0.6rem;
-    font-family: system-ui, -apple-system, sans-serif;
-    transition: border-color 0.2s ease;
-    line-height: 1.4;
-}
-
-.connectome-toggle-btn:hover {
-    border-color: var(--accent);
-    color: var(--text);
-}
-
-#nodeHolder.hidden {
-    display: none;
-}
-```
-
-### 3. MODIFY js/main.js
-- operation: MODIFY
-- reason: Add help button toggle logic, connectome toggle logic, touch-location-specific grooming animation, touch event handlers on canvas, edge avoidance behavior
-
-#### Imports / Dependencies
-- None (vanilla JS, all DOM elements accessed by ID)
-
-#### Change 1: Add help button and connectome toggle handlers after the existing tool button handler block
-- anchor: `})(toolButtons[i]);` (line 139, the closing of the tool-button handler IIFE loop)
-- After the closing `}` of the for loop (after line 140), insert the following block:
-
+**Changes at line 1392:**
+Replace:
 ```js
-
-// --- Help overlay toggle ---
-var helpOverlay = document.getElementById('helpOverlay');
-var helpBtn = document.getElementById('helpBtn');
-var helpCloseBtn = document.getElementById('helpCloseBtn');
-
-helpBtn.addEventListener('click', function () {
-	var isVisible = helpOverlay.style.display !== 'none';
-	helpOverlay.style.display = isVisible ? 'none' : 'block';
-});
-
-helpCloseBtn.addEventListener('click', function () {
-	helpOverlay.style.display = 'none';
-});
-
-// Close help overlay when clicking outside of it
-document.addEventListener('click', function (e) {
-	if (helpOverlay.style.display !== 'none' &&
-		!helpOverlay.contains(e.target) &&
-		e.target !== helpBtn) {
-		helpOverlay.style.display = 'none';
+var lastTime = 0;
+function loop(timestamp) {
+	var dt = timestamp - lastTime;
+	lastTime = timestamp;
+	// Clamp dt to 100ms to prevent huge jumps after tab-backgrounding
+	if (dt > 100) dt = 100;
+	update(dt);
+	draw();
+	requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+```
+With:
+```js
+var lastTime = -1;
+function loop(timestamp) {
+	if (lastTime < 0) {
+		lastTime = timestamp;
+		draw();
+		requestAnimationFrame(loop);
+		return;
 	}
-});
-
-// --- Connectome panel toggle ---
-var connectomeToggleBtn = document.getElementById('connectomeToggleBtn');
-var nodeHolder = document.getElementById('nodeHolder');
-
-connectomeToggleBtn.addEventListener('click', function () {
-	var isHidden = nodeHolder.classList.contains('hidden');
-	if (isHidden) {
-		nodeHolder.classList.remove('hidden');
-		connectomeToggleBtn.textContent = 'Hide';
-	} else {
-		nodeHolder.classList.add('hidden');
-		connectomeToggleBtn.textContent = 'Show';
-	}
-});
+	var dt = timestamp - lastTime;
+	lastTime = timestamp;
+	// Clamp dt to 100ms to prevent huge jumps after tab-backgrounding
+	if (dt > 100) dt = 100;
+	update(dt);
+	draw();
+	requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
 ```
 
-#### Change 2: Add touch event handlers on canvas, immediately after the existing mouse event listeners
-- anchor: `canvas.addEventListener('mouseup', handleCanvasMouseup, false);` (line 184)
-- After that line, insert:
+**Logic:**
+1. Initialize `lastTime` to `-1` (sentinel value meaning "not yet set").
+2. On the first call to `loop(timestamp)`, check `if (lastTime < 0)`.
+3. If true: set `lastTime = timestamp`, call `draw()` only (so the fly is visible immediately but does not move), request next frame, and `return` early (skipping `update()`).
+4. On all subsequent calls, proceed as before: compute `dt = timestamp - lastTime`, clamp, update, draw.
 
+---
+
+#### Bug 2: Unbounded facingDir and targetDir growth
+
+**Problem:** `facingDir` and `targetDir` are modified throughout the code (lines 1234-1236 for facingDir, lines 468/472/485/495/501/511/539/1267 for targetDir) but never normalized. Over long sessions, their magnitudes grow without bound, degrading floating-point precision.
+
+**Fix:** Add a `normalizeAngle` helper function near the top of the file, then normalize both `facingDir` and `targetDir` once per frame inside `update()`, after all modifications are complete but before position update.
+
+##### Helper function
+
+- anchor: `var wallTouchResetFrame = 0;` (line 26)
+
+**Insert AFTER line 26 (after the `wallTouchResetFrame` declaration), BEFORE line 28 (`// Visual feedback effects`):**
 ```js
 
-// --- Touch event handlers (mobile/tablet support) ---
-canvas.addEventListener('touchstart', function (event) {
-	event.preventDefault();
-	var touch = event.touches[0];
-	handleCanvasMousedown({ clientX: touch.clientX, clientY: touch.clientY });
-}, { passive: false });
-
-canvas.addEventListener('touchmove', function (event) {
-	event.preventDefault();
-	var touch = event.touches[0];
-	handleCanvasMousemove({ clientX: touch.clientX, clientY: touch.clientY });
-}, { passive: false });
-
-canvas.addEventListener('touchend', function (event) {
-	event.preventDefault();
-	// Use changedTouches for the touch that was lifted
-	var touch = event.changedTouches[0];
-	handleCanvasMouseup({ clientX: touch.clientX, clientY: touch.clientY });
-}, { passive: false });
+// Normalize angle to [-PI, PI] range
+function normalizeAngle(a) {
+	a = a % (2 * Math.PI);
+	if (a > Math.PI) a -= 2 * Math.PI;
+	if (a < -Math.PI) a += 2 * Math.PI;
+	return a;
+}
 ```
 
-#### Change 3: Replace the grooming branch in drawLegs() to use touch-location-specific animation
-- anchor: `} else if (isGrooming && pairIdx === 0) {` (line 1058)
-- Replace the current grooming block (lines 1058-1061):
-```js
-		} else if (isGrooming && pairIdx === 0) {
-			// Front legs: grooming rub -- swing inward and oscillate
-			hipMod = -0.2 + Math.sin(anim.groomPhase) * 0.5;
-			kneeMod = -0.6 + Math.sin(anim.groomPhase * 1.3) * 0.2;
-```
-- With the following expanded grooming animation:
-```js
-		} else if (isGrooming) {
-			var groomLoc = BRAIN.stimulate.touchLocation || 'thorax';
-			if (groomLoc === 'head' && pairIdx === 0) {
-				// Front legs rub the head area: swing forward and inward
-				hipMod = -0.9 + Math.sin(anim.groomPhase) * 0.4;
-				kneeMod = -0.8 + Math.sin(anim.groomPhase * 1.5) * 0.25;
-			} else if (groomLoc === 'abdomen' && pairIdx === 2) {
-				// Rear legs reach back to abdomen: swing backward
-				hipMod = 1.0 + Math.sin(anim.groomPhase * 0.8) * 0.3;
-				kneeMod = 0.5 + Math.sin(anim.groomPhase * 1.2) * 0.2;
-			} else if (groomLoc === 'thorax' && pairIdx === 0) {
-				// Full bilateral front-leg grooming: wide symmetric rub
-				hipMod = -0.2 + Math.sin(anim.groomPhase) * 0.5;
-				kneeMod = -0.6 + Math.sin(anim.groomPhase * 1.3) * 0.2;
-			} else if (groomLoc === 'leg') {
-				// Targeted single-leg cleaning: only the leg on the touched side moves
-				// Use side-based targeting: left legs clean when side=-1 touch
-				var targetPair = pairIdx; // all legs may participate
-				if (pairIdx === 1) {
-					// Middle legs do the cleaning motion
-					hipMod = 0.1 + Math.sin(anim.groomPhase * 1.1) * 0.4;
-					kneeMod = 0.3 + Math.sin(anim.groomPhase * 1.4) * 0.3;
-				}
-			}
-```
-Note: The old code only animated front legs (pairIdx === 0) during groom. The new code checks `isGrooming` without restricting to pairIdx === 0, then dispatches to the correct pair based on `groomLoc`. Legs not matched by any groomLoc branch fall through to the else block (idle jitter), which is the correct behavior -- non-grooming legs stay at rest.
+**Logic:**
+1. Use modulo to bring the angle into the (-2PI, 2PI) range.
+2. If the result is greater than PI, subtract 2PI.
+3. If less than -PI, add 2PI.
+4. Return the normalized value.
 
-#### Change 4: Add abdomen curl animation during abdomen grooming in drawAbdomen()
-- anchor: `function drawAbdomen() {` (line 835)
-- Inside drawAbdomen(), after the line `var ry = BODY.abdomenRadiusY;` (line 839), insert:
+##### Normalize both angles in update()
 
+- anchor: `targetDir += angleDiffEdge * awayStrength * 0.3;` (line 1267)
+
+**Insert two normalization lines AFTER line 1268 (`}` closing the `if (edgeBias !== 0 || edgeBiasY !== 0)` block), BEFORE line 1270 (`fly.x += Math.cos(facingDir) * speed;`).**
+
+Insert these exact lines between the closing `}` of the edge avoidance block and the `fly.x +=` line:
 ```js
 
-	// Abdomen curl during abdomen-specific grooming
-	var abdomenCurl = 0;
-	if (behavior.current === 'groom' && (BRAIN.stimulate.touchLocation === 'abdomen' || BRAIN.stimulate.touchLocation === null)) {
-		abdomenCurl = Math.sin(anim.groomPhase * 0.8) * 2;
-	}
-	ay += abdomenCurl;
+	// Normalize angles to [-PI, PI] to prevent unbounded growth
+	facingDir = normalizeAngle(facingDir);
+	targetDir = normalizeAngle(targetDir);
 ```
 
-#### Change 5: Add edge avoidance in update() -- bias targetDir away from screen edges
-- anchor: `fly.x += Math.cos(facingDir) * speed;` (line 1154)
-- Before that line (i.e., after `facingDir += 0.1 * dtScale;` closing bracket), insert the edge avoidance block:
-
+The resulting code sequence should be:
 ```js
-
-	// Edge avoidance: bias targetDir away from screen edges when within 50px
-	var edgeMargin = 50;
-	var edgeBias = 0;
-	var edgeBiasY = 0;
-	var topBound = 44;
-	var bottomBound = window.innerHeight - 90;
-	var leftBound = 0;
-	var rightBound = window.innerWidth;
-
-	if (fly.x - leftBound < edgeMargin) {
-		edgeBias += (edgeMargin - (fly.x - leftBound)) / edgeMargin; // push right (+x)
-	} else if (rightBound - fly.x < edgeMargin) {
-		edgeBias -= (edgeMargin - (rightBound - fly.x)) / edgeMargin; // push left (-x)
-	}
-	if (fly.y - topBound < edgeMargin) {
-		edgeBiasY -= (edgeMargin - (fly.y - topBound)) / edgeMargin; // push down (-y, but facingDir uses -sin for y)
-	} else if (bottomBound - fly.y < edgeMargin) {
-		edgeBiasY += (edgeMargin - (bottomBound - fly.y)) / edgeMargin; // push up
-	}
-
-	if (edgeBias !== 0 || edgeBiasY !== 0) {
-		// Compute desired direction away from edges
-		var awayAngle = Math.atan2(edgeBiasY, edgeBias);
-		var awayStrength = Math.min(1, Math.sqrt(edgeBias * edgeBias + edgeBiasY * edgeBiasY));
-		var angleDiffEdge = awayAngle - targetDir;
-		// Normalize to [-PI, PI]
-		while (angleDiffEdge > Math.PI) angleDiffEdge -= 2 * Math.PI;
-		while (angleDiffEdge < -Math.PI) angleDiffEdge += 2 * Math.PI;
 		targetDir += angleDiffEdge * awayStrength * 0.3;
 	}
+
+	// Normalize angles to [-PI, PI] to prevent unbounded growth
+	facingDir = normalizeAngle(facingDir);
+	targetDir = normalizeAngle(targetDir);
+
+	fly.x += Math.cos(facingDir) * speed;
+	fly.y -= Math.sin(facingDir) * speed;
 ```
 
-This block is inserted BEFORE the `fly.x += ...` movement line so that the bias affects the fly's direction before position is updated. The strength scales linearly from 0 at 50px to 1 at the edge. The 0.3 multiplier makes the turn gradual (not instant).
+---
+
+#### Bug 3: Frame-rate-dependent edge avoidance
+
+**Problem:** Line 1267: `targetDir += angleDiffEdge * awayStrength * 0.3;` is applied once per frame without dt scaling. At 120fps this applies twice per 60fps-equivalent interval, doubling the bias strength.
+
+**Fix:** Multiply by `dtScale`. The `dtScale` variable is already computed at line 1219 (`var dtScale = dt / (1000 / 60);`), but it is local to `update()` so it is accessible at line 1267.
+
+- anchor: `targetDir += angleDiffEdge * awayStrength * 0.3;`
+
+**Replace line 1267:**
+```js
+		targetDir += angleDiffEdge * awayStrength * 0.3;
+```
+With:
+```js
+		targetDir += angleDiffEdge * awayStrength * 0.3 * dtScale;
+```
+
+---
+
+#### Bug 4: Frame-rate-dependent deceleration
+
+**Problem:** Line 549: `speed *= 0.92;` is applied once per frame in `applyBehaviorMovement()`. At 120fps it applies twice per 60fps interval: `0.92^2 = 0.8464`, much faster deceleration than intended `0.92`.
+
+**Fix:** Convert the per-frame exponential decay to a dt-scaled version. The formula `speed *= factor^(dtScale)` preserves the same decay rate regardless of frame rate. However, `applyBehaviorMovement()` does not currently receive `dt` as a parameter. We need to pass `dt` to it.
+
+##### Step 1: Change function signature
+
+- anchor: `function applyBehaviorMovement() {` (line 530)
+
+**Replace:**
+```js
+function applyBehaviorMovement() {
+```
+With:
+```js
+function applyBehaviorMovement(dtScale) {
+```
+
+##### Step 2: Change the call site
+
+- anchor: `applyBehaviorMovement();` (line 1217, inside `update(dt)`)
+
+**Replace:**
+```js
+	applyBehaviorMovement();
+```
+With:
+```js
+	applyBehaviorMovement(dtScale);
+```
+
+**But wait** -- `dtScale` is computed at line 1219, AFTER the call at line 1217. We need to move the `dtScale` computation before the call.
+
+**The actual change in update():** Replace lines 1217-1220:
+```js
+	applyBehaviorMovement();
+
+	var dtScale = dt / (1000 / 60);
+	speed += speedChangeInterval * dtScale;
+```
+With:
+```js
+	var dtScale = dt / (1000 / 60);
+	applyBehaviorMovement(dtScale);
+
+	speed += speedChangeInterval * dtScale;
+```
+
+##### Step 3: Apply dt-scaled deceleration
+
+- anchor: `speed *= 0.92;` (line 549)
+
+**Replace:**
+```js
+			speed *= 0.92;
+```
+With:
+```js
+			speed *= Math.pow(0.92, dtScale);
+```
+
+**Logic:** `Math.pow(0.92, dtScale)` produces:
+- dtScale=1 (60fps): `0.92^1 = 0.92` (same as before)
+- dtScale=0.5 (120fps): `0.92^0.5 = 0.9592` (less decay per frame, but applied twice = 0.92)
+- dtScale=2 (30fps): `0.92^2 = 0.8464` (more decay per frame, compensating for fewer frames)
+
+---
+
+## Execution Order Summary
+
+Apply changes in this exact order to avoid line-number conflicts:
+
+1. **Insert `normalizeAngle` helper** after line 26 (top of file, before `// Visual feedback effects`). This is an insertion only, no deletions.
+
+2. **Modify `applyBehaviorMovement` signature** at line 530: add `dtScale` parameter.
+
+3. **Modify deceleration** at line 549: change `speed *= 0.92` to `speed *= Math.pow(0.92, dtScale)`.
+
+4. **Modify `update()` function** starting at line 1216:
+   a. Move `dtScale` computation before `applyBehaviorMovement()` call (reorder lines 1217-1220).
+   b. Pass `dtScale` to `applyBehaviorMovement(dtScale)`.
+
+5. **Modify edge avoidance** at line 1267: multiply by `dtScale`.
+
+6. **Insert angle normalization** between the edge avoidance block's closing `}` and the `fly.x +=` line.
+
+7. **Modify RAF loop** at lines 1392-1402: change `lastTime = 0` to `lastTime = -1`, add first-frame guard.
 
 ## Verification
-- build: No build step -- open `index.html` in a browser directly
-- lint: No linter configured
-- test: No existing tests
-- smoke: Open `index.html` in a browser and verify:
-  1. Help button (?) appears in toolbar after Light button; clicking it shows an overlay with tool descriptions; clicking X or outside closes it
-  2. "Hide" button appears next to "Connectome" label; clicking it hides the node visualization dots and changes text to "Show"; clicking again restores them
-  3. Touch the fly on different body parts (head, thorax, abdomen, leg) and observe grooming -- front legs should rub head for head touch, rear legs reach back for abdomen touch, bilateral front-leg rub for thorax, middle-leg cleaning for leg
-  4. Open browser DevTools, toggle device toolbar (mobile emulation), touch/tap on canvas -- feed/touch/air tools should all work via touch events
-  5. Observe the fly near screen edges -- it should gently steer away from the edges rather than hitting the wall and triggering touch neurons
+- build: no build step (vanilla JS, open index.html in browser)
+- lint: no linter configured
+- test: no existing tests
+- smoke: open `index.html` in a browser. Verify: (1) the fly does NOT jump/burst on initial page load -- it should start moving smoothly from a standstill, (2) after 10+ seconds of running, the fly still turns and moves correctly (angle normalization working), (3) the fly turns away from edges at consistent speed regardless of monitor refresh rate (manual observation -- edge avoidance should feel the same), (4) the fly decelerates smoothly when entering feed/groom/rest/idle states.
 
 ## Constraints
-- Do NOT modify SPEC.md, TASKS.md, CLAUDE.md, or any file in .buildloop/ other than build-claims.md
-- Do NOT modify js/connectome.js or js/constants.js -- all changes are in index.html, css/main.css, and js/main.js only
-- Do NOT add external dependencies, build tools, or module imports
-- Do NOT change the existing mouse event handler function signatures (handleCanvasMousedown, handleCanvasMousemove, handleCanvasMouseup) -- the touch handlers delegate to them
-- Do NOT use em-dashes in comments or prose (use -- instead)
-- Do NOT add gradients, glow effects, or glassmorphism to CSS -- follow the established design system using CSS custom properties
-- The edge avoidance must NOT prevent the fly from being clamped at bounds -- it biases direction only; the hard clamp at lines 1158-1175 remains as a safety net
-- Preserve the `touchLocation` value in `BRAIN.stimulate.touchLocation` so it persists during grooming -- do NOT clear it at the start of the groom state; it is cleared by the existing setTimeout in applyTouchTool
+- Do NOT modify any file other than `js/main.js`.
+- Do NOT change the brain tick interval (`setInterval(updateBrain, 500)`).
+- Do NOT change position update scaling (`fly.x += Math.cos(facingDir) * speed` and `fly.y -= Math.sin(facingDir) * speed`) -- those are not in scope for D1.1.
+- Do NOT change the `computeMovementForBehavior()` function -- it sets targetDir values which will be normalized by the new code in `update()`.
+- Do NOT add or remove any other features. This is a pure bugfix task.
+- Preserve all existing comments. Only add comments where noted above.
