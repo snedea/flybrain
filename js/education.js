@@ -153,7 +153,25 @@
                     }
                 }
                 html += '</div>';
-                html += '<div class="edu-population">' + region.populationEstimate + '</div>';
+                var eduPopTotal = 0;
+                if (typeof neuronPopulations !== 'undefined') {
+                    for (var pi = 0; pi < region.neurons.length; pi++) {
+                        eduPopTotal += (neuronPopulations[region.neurons[pi]] || 0);
+                    }
+                    if (region.collectMNPrefix && typeof BRAIN !== 'undefined' && BRAIN.postSynaptic) {
+                        var mnKeys = Object.keys(BRAIN.postSynaptic);
+                        for (var mi = 0; mi < mnKeys.length; mi++) {
+                            if (mnKeys[mi].indexOf('MN_') === 0 && region.neurons.indexOf(mnKeys[mi]) === -1) {
+                                eduPopTotal += (neuronPopulations[mnKeys[mi]] || 0);
+                            }
+                        }
+                    }
+                }
+                if (eduPopTotal > 0) {
+                    html += '<div class="edu-population">' + region.neurons.length + ' neuron groups representing ~' + eduPopTotal.toLocaleString() + ' real neurons</div>';
+                } else {
+                    html += '<div class="edu-population">' + region.populationEstimate + '</div>';
+                }
                 html += '</div>';
             }
 

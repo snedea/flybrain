@@ -333,8 +333,17 @@ window.Brain3D = {
 
         if (intersects.length > 0) {
             var region = intersects[0].object.userData.region;
+            var regionPopTotal = 0;
+            if (typeof neuronPopulations !== 'undefined') {
+                for (var p = 0; p < region.neurons.length; p++) {
+                    regionPopTotal += (neuronPopulations[region.neurons[p]] || 0);
+                }
+            }
             var html = '<div class="b3d-tip-name">' + region.name + '</div>';
             html += '<div class="b3d-tip-desc">' + region.description + '</div>';
+            if (regionPopTotal > 0) {
+                html += '<div class="b3d-tip-pop" style="font-size:0.7rem;color:#8892a4;margin:2px 0 4px;">' + region.neurons.length + ' groups representing ~' + regionPopTotal.toLocaleString() + ' neurons</div>';
+            }
             html += '<div class="b3d-tip-type">' + region.type.charAt(0).toUpperCase() + region.type.slice(1) + '</div>';
             html += '<div class="b3d-tip-neurons">';
             for (var i = 0; i < region.neurons.length; i++) {

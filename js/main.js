@@ -155,6 +155,69 @@ var neuronDescriptions = {
 	MN_ABDOMEN: 'Motor: abdomen',
 };
 
+// Approximate real neuron counts per functional group (FlyWire data)
+var neuronPopulations = {
+	VIS_R1R6: 6000,
+	VIS_R7R8: 1600,
+	VIS_ME: 39000,
+	VIS_LO: 9000,
+	VIS_LC: 3500,
+	VIS_LPTC: 900,
+	OLF_ORN_FOOD: 1100,
+	OLF_ORN_DANGER: 700,
+	OLF_LN: 400,
+	OLF_PN: 400,
+	GUS_GRN_SWEET: 800,
+	GUS_GRN_BITTER: 600,
+	GUS_GRN_WATER: 600,
+	MECH_BRISTLE: 2200,
+	MECH_JO: 480,
+	MECH_CHORD: 500,
+	ANTENNAL_MECH: 320,
+	THERMO_WARM: 30,
+	THERMO_COOL: 30,
+	NOCI: 100,
+	MB_KC: 2000,
+	MB_APL: 1,
+	MB_MBON_APP: 35,
+	MB_MBON_AV: 35,
+	MB_DAN_REW: 165,
+	MB_DAN_PUN: 165,
+	LH_APP: 700,
+	LH_AV: 700,
+	CX_EPG: 50,
+	CX_PFN: 400,
+	CX_FC: 2200,
+	CX_HDELTA: 350,
+	SEZ_FEED: 2500,
+	SEZ_GROOM: 1800,
+	SEZ_WATER: 700,
+	GNG_DESC: 3000,
+	DN_WALK: 50,
+	DN_FLIGHT: 40,
+	DN_TURN: 30,
+	DN_BACKUP: 20,
+	DN_STARTLE: 15,
+	VNC_CPG: 14400,
+	CLOCK_DN: 150,
+	DRIVE_HUNGER: 200,
+	DRIVE_FEAR: 150,
+	DRIVE_FATIGUE: 100,
+	DRIVE_CURIOSITY: 100,
+	DRIVE_GROOM: 100,
+	MN_LEG_L1: 50,
+	MN_LEG_R1: 50,
+	MN_LEG_L2: 50,
+	MN_LEG_R2: 50,
+	MN_LEG_L3: 50,
+	MN_LEG_R3: 50,
+	MN_WING_L: 45,
+	MN_WING_R: 45,
+	MN_PROBOSCIS: 30,
+	MN_HEAD: 40,
+	MN_ABDOMEN: 60
+};
+
 // --- Brain setup ---
 BRAIN.setup();
 
@@ -171,6 +234,21 @@ for (var ps in BRAIN.connectome) {
 	document.getElementById('nodeHolder').appendChild(newBox);
 }
 
+// Inject connectome compression summary into header
+(function () {
+	var groupCount = Object.keys(neuronPopulations).length;
+	var summarySpan = document.createElement('span');
+	summarySpan.className = 'connectome-summary';
+	summarySpan.style.fontSize = '0.6rem';
+	summarySpan.style.color = '#8892a4';
+	summarySpan.style.marginLeft = '0.3rem';
+	summarySpan.textContent = groupCount + ' groups / ~130K neurons';
+	var headerLabel = document.querySelector('.connectome-label');
+	if (headerLabel) {
+		headerLabel.parentNode.insertBefore(summarySpan, headerLabel.nextSibling);
+	}
+})();
+
 // Build neuron -> color lookup from BRAIN.neuronRegions
 for (var region in BRAIN.neuronRegions) {
 	var neurons = BRAIN.neuronRegions[region];
@@ -186,7 +264,9 @@ document.getElementById('nodeHolder').addEventListener('mouseover', function (e)
 	if (!node) return;
 	var id = node.getAttribute('data-neuron');
 	var desc = neuronDescriptions[id] || id;
-	neuronTooltip.textContent = desc;
+	var pop = neuronPopulations[id];
+	var popText = pop ? ' \u2014 represents ~' + pop.toLocaleString() + ' neurons' : '';
+	neuronTooltip.textContent = desc + popText;
 	neuronTooltip.style.display = 'block';
 });
 document.getElementById('nodeHolder').addEventListener('mousemove', function (e) {
