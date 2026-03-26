@@ -1,30 +1,30 @@
-# Build Claims -- D3.2
+# Build Claims -- D4.1
 
 ## Files Changed
-- [MODIFY] js/main.js -- Fix frame-rate-dependent animation interpolations and groom-state location amnesia
+- [MODIFY] js/main.js -- Fix wind stimulus setTimeout race condition, conditional wind=true on mouseup, and dt-scale three idle animation interpolations
 
 ## Verification Results
-- Build: PASS (no build step -- static HTML/JS project)
-- Tests: SKIPPED (no existing tests)
+- Build: PASS (no build step -- vanilla JS, open index.html in browser)
+- Tests: SKIPPED (no test suite configured)
 - Lint: SKIPPED (no linter configured)
 
 ## Claims
-- [ ] Claim 1: `behavior` object at js/main.js:79 now has a `groomLocation: null` field
-- [ ] Claim 2: When entering groom state (js/main.js:453-455), `behavior.groomLocation` is set to `BRAIN.stimulate.touchLocation || 'thorax'`, snapshotting the trigger location before touchResetFrame clears it
-- [ ] Claim 3: `updateAnimForBehavior()` at js/main.js:604 now accepts a `dtScale` parameter
-- [ ] Claim 4: `anim.wingSpread` interpolation at js/main.js:612 uses exponential interpolation `(1 - Math.pow(0.85, dtScale))` instead of fixed `* 0.15`; at dtScale=1.0 (60Hz) this equals 0.15 (identical to original behavior)
-- [ ] Claim 5: `anim.proboscisExtend` interpolation at js/main.js:619 uses exponential interpolation `(1 - Math.pow(0.9, dtScale))` instead of fixed `* 0.1`; at dtScale=1.0 (60Hz) this equals 0.1 (identical to original behavior)
-- [ ] Claim 6: `anim.groomPhase` increment at js/main.js:623 uses `0.12 * dtScale` for linear dt scaling
-- [ ] Claim 7: `anim.walkPhase` increment moved from `drawFlyBody()` into `updateAnimForBehavior()` at js/main.js:627-629, now uses `spd * 0.5 * dtScale` for linear dt scaling
-- [ ] Claim 8: The walkPhase update block (old lines 832-836 in drawFlyBody) is removed; only `var isWalking = ...` declaration remains at js/main.js:842
-- [ ] Claim 9: `drawAbdomen()` at js/main.js:945 reads `behavior.groomLocation` instead of `BRAIN.stimulate.touchLocation`; checks for `'abdomen'` or `'thorax'` (replacing the old `null` check, since groomLocation defaults to `'thorax'`)
-- [ ] Claim 10: `drawLegs()` at js/main.js:1168 reads `behavior.groomLocation || 'thorax'` instead of `BRAIN.stimulate.touchLocation || 'thorax'`
-- [ ] Claim 11: The call site at js/main.js:1389 passes `dtScale` to `updateAnimForBehavior(dtScale)`
-- [ ] Claim 12: `BRAIN.stimulate.touchLocation` is no longer read in any drawing/animation code; remaining references are the write in `applyTouchTool` (line 336), the snapshot in groom-entry (line 454), and the reset in `update()` (line 1384) -- all correct
-- [ ] Claim 13: The touchResetFrame logic (lines 1381-1385) is unmodified -- it still clears touchLocation to null, but drawing code no longer depends on it
+- [ ] Claim 1: `windResetFrame` variable added at line 27, replaces `setTimeout` for wind stimulus expiry with a frame-counted timer (120 frames ~2s at 60fps), matching the `touchResetFrame` pattern
+- [ ] Claim 2: `dragToolOrigin` variable added at line 28, set to `'air'` in handleCanvasMousedown air branch (line 274), reset to `null` in handleCanvasMouseup (line 310)
+- [ ] Claim 3: New air drag start cancels any pending wind reset by setting `windResetFrame = 0` (line 275), preventing stale timer from clearing wind mid-drag
+- [ ] Claim 4: `handleCanvasMouseup` wind strength calculation and `wind = true` are now gated inside `if (dragToolOrigin === 'air')` (line 296), so releasing a drag that started as air but was switched to another tool does NOT set wind=true
+- [ ] Claim 5: `isDragging = false` remains unconditional in handleCanvasMouseup (line 309), preserving D3.1 invariant
+- [ ] Claim 6: The `setTimeout` at the old lines 303-306 has been completely removed -- `grep -n setTimeout.*wind js/main.js` returns no matches
+- [ ] Claim 7: Wind reset frame check added in `update()` at lines 1394-1399, parallel to touch reset block, clears `BRAIN.stimulate.wind` and `windStrength` when `frameCount >= windResetFrame`
+- [ ] Claim 8: `drawAntennae(t, dtScale)` uses exponential interpolation `1 - Math.pow(0.92, dtScale)` for antenna twitch lerps (lines 1057-1058), equivalent to original 0.08 multiplier at dtScale=1
+- [ ] Claim 9: `drawLegs(state, dtScale)` uses exponential interpolation `1 - Math.pow(0.95, dtScale)` for leg jitter lerps (line 1142), equivalent to original 0.05 multiplier at dtScale=1
+- [ ] Claim 10: Wing micro-movement lerp uses `1 - Math.pow(0.97, dtScale)` (line 1150), equivalent to original 0.03 multiplier at dtScale=1
+- [ ] Claim 11: `currentDtScale` module-level variable (line 29) is set in `update()` (line 1267) and passed through `drawFlyBody(currentDtScale)` -> `drawLegs(state, dtScale)` and `drawAntennae(t, dtScale)`
+- [ ] Claim 12: `handleCanvasMousemove` was NOT modified (constraint from plan)
+- [ ] Claim 13: `drawWindArrow` was NOT modified (constraint from plan)
+- [ ] Claim 14: No files other than js/main.js were modified
 
 ## Gaps and Assumptions
-- No automated tests exist; all verification is manual browser testing
-- The exponential interpolation formula assumes the original `* 0.15` and `* 0.1` factors were tuned for 60fps; if the original was tuned at a different refresh rate, the visual feel at 60Hz will be identical but the cross-rate correction may differ from designer intent
-- If groom state is entered through a code path that bypasses `updateBehaviorState()`, `behavior.groomLocation` would remain stale from a previous groom; the `|| 'thorax'` fallback in drawLegs mitigates this
-- walkPhase is now updated in `updateAnimForBehavior()` which runs at the end of `update()` rather than at the start of `drawFlyBody()`; since draw happens after update in the RAF loop, this means walkPhase updates one frame earlier relative to rendering -- functionally negligible
+- No automated tests exist to verify the race condition fix; requires manual browser testing per plan smoke-test instructions
+- The 120-frame wind reset duration is approximate (~2s at 60fps) but will scale with actual frame rate, unlike the original 2000ms setTimeout which was wall-clock time; this is a deliberate design choice matching the touchResetFrame pattern
+- Frame-rate independence of idle animations cannot be verified without a 120Hz display or artificially throttled requestAnimationFrame

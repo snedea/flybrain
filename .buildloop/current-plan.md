@@ -1,285 +1,284 @@
-# Plan: D3.2
+# Plan: D4.1
 
 ## Dependencies
-- list: [] (no new dependencies)
-- commands: [] (no install commands)
+- list: none
+- commands: none
 
 ## File Operations (in execution order)
 
 ### 1. MODIFY js/main.js
 - operation: MODIFY
-- reason: Fix four frame-rate-dependent animation interpolations and groom-state location amnesia
+- reason: Fix wind stimulus setTimeout race condition, conditional wind=true on mouseup, and dt-scale three idle animation interpolations
 
-There are 6 discrete changes in this file, described below in the order they should be applied. All anchors reference the file as it currently exists.
-
----
-
-#### Change 1: Add `groomLocation` field to the behavior state object
-
-- anchor: line 79-86, the block starting with `var behavior = {`
-
-**What to do:** Add a `groomLocation` field initialized to `null` to the `behavior` object.
-
-Replace:
-```js
-var behavior = {
-	current: 'idle',
-	previous: 'idle',
-	enterTime: Date.now(),
-	cooldowns: {},
-	startlePhase: 'none',
-	startleFreezeEnd: 0,
-};
-```
-
-With:
-```js
-var behavior = {
-	current: 'idle',
-	previous: 'idle',
-	enterTime: Date.now(),
-	cooldowns: {},
-	startlePhase: 'none',
-	startleFreezeEnd: 0,
-	groomLocation: null,
-};
-```
+There are 5 discrete changes to this file, listed in order from top to bottom of the file.
 
 ---
 
-#### Change 2: Store touchLocation in behavior when entering groom state
+#### Change 1: Add `windResetFrame` and `dragToolOrigin` state variables
 
-- anchor: line 440-449, inside `updateBehaviorState()`, the block `if (newState === 'startle') {`
+- anchor: `var touchResetFrame = 0;` (line 26)
 
-**What to do:** Add an `else if` clause for `newState === 'groom'` that captures `BRAIN.stimulate.touchLocation` into `behavior.groomLocation`. If `touchLocation` is `null` at that moment, default to `'thorax'`.
+**Action:** Immediately after `var touchResetFrame = 0;`, add two new lines:
 
-Replace:
 ```js
-		// Startle: initialize freeze phase and drain DN_STARTLE
-		if (newState === 'startle') {
-			behavior.startlePhase = 'freeze';
-			behavior.startleFreezeEnd = now + 200;
-			if (BRAIN.postSynaptic['DN_STARTLE']) {
-				BRAIN.postSynaptic['DN_STARTLE'][BRAIN.thisState] = 0;
-				BRAIN.postSynaptic['DN_STARTLE'][BRAIN.nextState] = 0;
-			}
-		} else {
-			behavior.startlePhase = 'none';
-		}
+var windResetFrame = 0;
+var dragToolOrigin = null;
 ```
 
-With:
-```js
-		// Startle: initialize freeze phase and drain DN_STARTLE
-		if (newState === 'startle') {
-			behavior.startlePhase = 'freeze';
-			behavior.startleFreezeEnd = now + 200;
-			if (BRAIN.postSynaptic['DN_STARTLE']) {
-				BRAIN.postSynaptic['DN_STARTLE'][BRAIN.thisState] = 0;
-				BRAIN.postSynaptic['DN_STARTLE'][BRAIN.nextState] = 0;
-			}
-		} else {
-			behavior.startlePhase = 'none';
-		}
-
-		// Groom: snapshot the touch location that triggered grooming
-		if (newState === 'groom') {
-			behavior.groomLocation = BRAIN.stimulate.touchLocation || 'thorax';
-		}
-```
+`windResetFrame` mirrors the `touchResetFrame` pattern (frame-counted timer instead of setTimeout).
+`dragToolOrigin` records which tool was active when the drag started, so mouseup can conditionally apply wind stimulus.
 
 ---
 
-#### Change 3: Make `updateAnimForBehavior()` accept `dtScale` and apply dt-scaling to wingSpread, proboscisExtend, and groomPhase
+#### Change 2: Record the originating tool when air drag starts
 
-- anchor: line 598, `function updateAnimForBehavior() {`
-
-**What to do:**
-1. Change the function signature to accept `dtScale` parameter
-2. For `anim.wingSpread`: replace the per-frame lerp `+= (target - current) * 0.15` with exponential interpolation using `Math.pow(1 - 0.15, dtScale)` as the retention factor
-3. For `anim.proboscisExtend`: replace the per-frame lerp `+= (target - current) * 0.1` with exponential interpolation using `Math.pow(1 - 0.1, dtScale)` as the retention factor
-4. For `anim.groomPhase`: multiply the increment `0.12` by `dtScale`
-
-Replace:
+- anchor: lines 269-275, the `else if (activeTool === 'air')` block in `handleCanvasMousedown`:
 ```js
-function updateAnimForBehavior() {
-	var state = behavior.current;
-
-	// Wing spread target
-	var targetWingSpread = 0;
-	if (state === 'fly' || (state === 'startle' && behavior.startlePhase === 'burst')) {
-		targetWingSpread = 1;
+	} else if (activeTool === 'air') {
+		isDragging = true;
+		dragStart.x = cx;
+		dragStart.y = cy;
+		BRAIN.stimulate.wind = true;
+		BRAIN.stimulate.windStrength = 0.3;
 	}
-	anim.wingSpread += (targetWingSpread - anim.wingSpread) * 0.15;
+```
 
-	// Proboscis extension target
-	var targetProboscis = 0;
-	if (state === 'feed') {
-		targetProboscis = 1;
+**Action:** Add `dragToolOrigin = 'air';` after `isDragging = true;`. Also reset `windResetFrame = 0;` to cancel any pending frame-counted wind reset from a prior drag. The full replacement block:
+
+```js
+	} else if (activeTool === 'air') {
+		isDragging = true;
+		dragToolOrigin = 'air';
+		windResetFrame = 0;
+		dragStart.x = cx;
+		dragStart.y = cy;
+		BRAIN.stimulate.wind = true;
+		BRAIN.stimulate.windStrength = 0.3;
 	}
-	anim.proboscisExtend += (targetProboscis - anim.proboscisExtend) * 0.1;
+```
 
-	// Groom phase advances when grooming
-	if (state === 'groom') {
-		anim.groomPhase += 0.12;
+---
+
+#### Change 3: Make wind=true conditional on dragToolOrigin, replace setTimeout with frame-counted timer
+
+- anchor: the entire `handleCanvasMouseup` function at lines 289-308:
+```js
+function handleCanvasMouseup(event) {
+	if (isDragging) {
+		var dx = event.clientX - dragStart.x;
+		var dy = event.clientY - dragStart.y;
+		var dragDist = Math.sqrt(dx * dx + dy * dy);
+		if (dragDist < 5) {
+			var distToFly = Math.hypot(event.clientX - fly.x, event.clientY - fly.y);
+			BRAIN.stimulate.windStrength = Math.max(0.1, Math.min(1, 1 - distToFly / 200));
+		} else {
+			BRAIN.stimulate.windStrength = Math.min(1, dragDist / 150);
+		}
+		BRAIN.stimulate.wind = true;
+		isDragging = false;
+		windArrowEnd = null;
+		setTimeout(function () {
+			BRAIN.stimulate.wind = false;
+			BRAIN.stimulate.windStrength = 0;
+		}, 2000);
 	}
 }
 ```
 
-With:
+**Replace with:**
+
 ```js
-function updateAnimForBehavior(dtScale) {
-	var state = behavior.current;
-
-	// Wing spread target (exponential interpolation for frame-rate independence)
-	var targetWingSpread = 0;
-	if (state === 'fly' || (state === 'startle' && behavior.startlePhase === 'burst')) {
-		targetWingSpread = 1;
-	}
-	anim.wingSpread += (targetWingSpread - anim.wingSpread) * (1 - Math.pow(0.85, dtScale));
-
-	// Proboscis extension target (exponential interpolation for frame-rate independence)
-	var targetProboscis = 0;
-	if (state === 'feed') {
-		targetProboscis = 1;
-	}
-	anim.proboscisExtend += (targetProboscis - anim.proboscisExtend) * (1 - Math.pow(0.9, dtScale));
-
-	// Groom phase advances when grooming (linear dt scaling for phase accumulator)
-	if (state === 'groom') {
-		anim.groomPhase += 0.12 * dtScale;
-	}
-
-	// Walk phase advances when walking (linear dt scaling for phase accumulator)
-	if (state === 'walk' || state === 'explore' || state === 'phototaxis') {
-		var spd = Math.abs(speed);
-		anim.walkPhase += spd * 0.5 * dtScale;
+function handleCanvasMouseup(event) {
+	if (isDragging) {
+		if (dragToolOrigin === 'air') {
+			var dx = event.clientX - dragStart.x;
+			var dy = event.clientY - dragStart.y;
+			var dragDist = Math.sqrt(dx * dx + dy * dy);
+			if (dragDist < 5) {
+				var distToFly = Math.hypot(event.clientX - fly.x, event.clientY - fly.y);
+				BRAIN.stimulate.windStrength = Math.max(0.1, Math.min(1, 1 - distToFly / 200));
+			} else {
+				BRAIN.stimulate.windStrength = Math.min(1, dragDist / 150);
+			}
+			BRAIN.stimulate.wind = true;
+			windResetFrame = frameCount + 120;
+		}
+		isDragging = false;
+		dragToolOrigin = null;
+		windArrowEnd = null;
 	}
 }
 ```
 
-**Explanation of the exponential interpolation:**
-- At 60fps, dtScale = 1.0, so `1 - Math.pow(0.85, 1) = 0.15` (same as the original `* 0.15`)
-- At 120fps, dtScale = 0.5, so `1 - Math.pow(0.85, 0.5) = 0.0774` (two of these per 60fps frame = 0.149, approximately the same)
-- At 30fps, dtScale = 2.0, so `1 - Math.pow(0.85, 2) = 0.2775` (one of these per 60fps pair = similar convergence)
-- Similarly for proboscis: `Math.pow(0.9, dtScale)` preserves the per-60fps-frame behavior of `* 0.1`
-
-**Walk phase moved here:** The `walkPhase` increment is moved from `drawFlyBody()` into `updateAnimForBehavior()` where `dtScale` is available. This avoids needing to pass dtScale into the draw path.
+Key changes:
+1. The wind strength calculation and `wind = true` are now inside `if (dragToolOrigin === 'air')` -- only fires when the drag was originally started with the air tool.
+2. `setTimeout` is replaced with `windResetFrame = frameCount + 120` (120 frames = ~2 seconds at 60fps, matching the original 2000ms timeout).
+3. `dragToolOrigin` is reset to `null` on every mouseup.
+4. `isDragging = false` and `windArrowEnd = null` remain unconditional (outside the air check).
 
 ---
 
-#### Change 4: Remove walkPhase increment from drawFlyBody()
+#### Change 4: Add dtScale parameter to drawFlyBody, drawAntennae, and drawLegs; apply exponential interpolation to the three idle lerps
 
-- anchor: line 830-836, inside `function drawFlyBody()`:
+This change touches three functions: `drawFlyBody`, `drawAntennae`, and `drawLegs`.
+
+##### 4a: Modify `drawFlyBody` to accept and pass `dtScale`
+
+- anchor: `function drawFlyBody() {` (line 839)
+
+**Replace** `function drawFlyBody() {` with `function drawFlyBody(dtScale) {`
+
+- anchor: `drawLegs(state);` (line 849)
+
+**Replace** `drawLegs(state);` with `drawLegs(state, dtScale);`
+
+- anchor: `drawAntennae(t);` (line 864)
+
+**Replace** `drawAntennae(t);` with `drawAntennae(t, dtScale);`
+
+##### 4b: Modify `drawAntennae` to accept `dtScale` and use exponential interpolation
+
+- anchor: `function drawAntennae(t) {` (line 1044)
+
+**Replace** `function drawAntennae(t) {` with `function drawAntennae(t, dtScale) {`
+
+- anchor: the two lerp lines at 1052-1053:
 ```js
-	var isWalking = (state === 'walk' || state === 'explore' || state === 'phototaxis');
+	anim.antennaTwitchL += (anim.antennaTargetL - anim.antennaTwitchL) * 0.08;
+	anim.antennaTwitchR += (anim.antennaTargetR - anim.antennaTwitchR) * 0.08;
+```
 
-	// Update walk animation phase only when walking
-	if (isWalking) {
-		var spd = Math.abs(speed);
-		anim.walkPhase += spd * 0.5;
+**Replace with:**
+```js
+	anim.antennaTwitchL += (anim.antennaTargetL - anim.antennaTwitchL) * (1 - Math.pow(0.92, dtScale));
+	anim.antennaTwitchR += (anim.antennaTargetR - anim.antennaTwitchR) * (1 - Math.pow(0.92, dtScale));
+```
+
+Derivation: original multiplier is 0.08. The complement-based formula is `1 - Math.pow(1 - 0.08, dtScale)` = `1 - Math.pow(0.92, dtScale)`. At dtScale=1 (60fps), this equals 0.08 -- identical to the original. This matches the pattern from D3.2 (see line 612: `1 - Math.pow(0.85, dtScale)`).
+
+##### 4c: Modify `drawLegs` to accept `dtScale` and use exponential interpolation for leg jitter
+
+- anchor: `function drawLegs(state) {` (line 1120)
+
+**Replace** `function drawLegs(state) {` with `function drawLegs(state, dtScale) {`
+
+- anchor: the lerp at line 1137:
+```js
+		anim.legJitter[j] += (anim.legJitterTarget[j] - anim.legJitter[j]) * 0.05;
+```
+
+**Replace with:**
+```js
+		anim.legJitter[j] += (anim.legJitterTarget[j] - anim.legJitter[j]) * (1 - Math.pow(0.95, dtScale));
+```
+
+Derivation: original multiplier is 0.05. `1 - Math.pow(1 - 0.05, dtScale)` = `1 - Math.pow(0.95, dtScale)`. At dtScale=1, equals 0.05.
+
+##### 4d: Apply exponential interpolation for wing micro-movement in `drawLegs`
+
+- anchor: the lerp at line 1145 (inside drawLegs, after the wing micro-movement timer check):
+```js
+	anim.wingMicro += (anim.wingMicroTarget - anim.wingMicro) * 0.03;
+```
+
+**Replace with:**
+```js
+	anim.wingMicro += (anim.wingMicroTarget - anim.wingMicro) * (1 - Math.pow(0.97, dtScale));
+```
+
+Derivation: original multiplier is 0.03. `1 - Math.pow(1 - 0.03, dtScale)` = `1 - Math.pow(0.97, dtScale)`. At dtScale=1, equals 0.03.
+
+---
+
+#### Change 5: Pass `dtScale` to `drawFlyBody()` in the draw call, and add `windResetFrame` check in `update()`
+
+##### 5a: Store dtScale as a module-level variable so draw() can access it
+
+- anchor: `var touchResetFrame = 0;` (line 26, same area as Change 1)
+
+After adding the variables from Change 1, also add:
+
+```js
+var currentDtScale = 1;
+```
+
+So the full variable block after line 26 reads:
+```js
+var touchResetFrame = 0;
+var windResetFrame = 0;
+var dragToolOrigin = null;
+var currentDtScale = 1;
+```
+
+##### 5b: Set `currentDtScale` in `update()`
+
+- anchor: `var dtScale = dt / (1000 / 60);` (line 1261)
+
+**After** this line, add:
+```js
+	currentDtScale = dtScale;
+```
+
+##### 5c: Pass `currentDtScale` to `drawFlyBody()` in `draw()`
+
+- anchor: `drawFlyBody();` (line 1420)
+
+**Replace** `drawFlyBody();` with `drawFlyBody(currentDtScale);`
+
+##### 5d: Add wind reset frame check in `update()`
+
+- anchor: the touch reset block at lines 1381-1386:
+```js
+	// Reset wall-touch stimulus after 120 frames (~2 seconds at 60fps)
+	if (touchResetFrame > 0 && frameCount >= touchResetFrame) {
+		BRAIN.stimulate.touch = false;
+		BRAIN.stimulate.touchLocation = null;
+		touchResetFrame = 0;
 	}
 ```
 
-**What to do:** Remove the walkPhase update from drawFlyBody since it was moved to updateAnimForBehavior. Keep the `isWalking` variable declaration since it is used later in the function (for drawing).
+**Immediately after** this block (before `frameCount++;` at line 1388), add:
 
-Replace:
 ```js
-	var isWalking = (state === 'walk' || state === 'explore' || state === 'phototaxis');
-
-	// Update walk animation phase only when walking
-	if (isWalking) {
-		var spd = Math.abs(speed);
-		anim.walkPhase += spd * 0.5;
+	// Reset wind stimulus after 120 frames (~2 seconds at 60fps)
+	if (windResetFrame > 0 && frameCount >= windResetFrame) {
+		BRAIN.stimulate.wind = false;
+		BRAIN.stimulate.windStrength = 0;
+		windResetFrame = 0;
 	}
 ```
 
-With:
-```js
-	var isWalking = (state === 'walk' || state === 'explore' || state === 'phototaxis');
-```
-
 ---
 
-#### Change 5: Replace live touchLocation reads in drawAbdomen() with behavior.groomLocation
+## Summary of all changes
 
-- anchor: line 939, inside `function drawAbdomen()`:
-```js
-	if (behavior.current === 'groom' && (BRAIN.stimulate.touchLocation === 'abdomen' || BRAIN.stimulate.touchLocation === null)) {
-```
-
-**What to do:** Replace `BRAIN.stimulate.touchLocation` with `behavior.groomLocation` in the abdomen curl check. Since `behavior.groomLocation` defaults to `'thorax'` when null (set at groom entry in Change 2), the null check becomes unnecessary -- but we should keep the check for `'abdomen'` and also allow `'thorax'` (thorax groom should also curl abdomen, matching the original null fallback behavior) plus allow null as a safety fallback.
-
-Replace:
-```js
-	if (behavior.current === 'groom' && (BRAIN.stimulate.touchLocation === 'abdomen' || BRAIN.stimulate.touchLocation === null)) {
-```
-
-With:
-```js
-	if (behavior.current === 'groom' && (behavior.groomLocation === 'abdomen' || behavior.groomLocation === 'thorax')) {
-```
-
-**Rationale:** Previously, `touchLocation === null` was the fallback that triggered the abdomen curl during thorax/default grooming. Now `behavior.groomLocation` is `'thorax'` by default (set at groom entry), so we match `'thorax'` explicitly instead of null. This makes the behavior identical: abdomen curls during abdomen-specific and thorax/default grooming.
-
----
-
-#### Change 6: Replace live touchLocation reads in drawLegs() with behavior.groomLocation
-
-- anchor: line 1162, inside `drawLegs()`:
-```js
-		} else if (isGrooming) {
-			var groomLoc = BRAIN.stimulate.touchLocation || 'thorax';
-```
-
-**What to do:** Replace the live touchLocation read with `behavior.groomLocation`.
-
-Replace:
-```js
-			var groomLoc = BRAIN.stimulate.touchLocation || 'thorax';
-```
-
-With:
-```js
-			var groomLoc = behavior.groomLocation || 'thorax';
-```
-
-The `|| 'thorax'` fallback is kept as a safety net for the case where `behavior.groomLocation` is somehow null (e.g., groom state entered through a code path that doesn't set it), but under normal operation `behavior.groomLocation` will already be set to a valid value by Change 2.
-
----
-
-#### Change 7: Pass dtScale to updateAnimForBehavior() at the call site
-
-- anchor: line 1383, inside `update(dt)`:
-```js
-	updateAnimForBehavior();
-```
-
-**What to do:** Pass `dtScale` (which is already a local variable in `update()`, computed at line 1255 as `var dtScale = dt / (1000 / 60);`) to the function.
-
-Replace:
-```js
-	updateAnimForBehavior();
-```
-
-With:
-```js
-	updateAnimForBehavior(dtScale);
-```
-
----
+| # | What | Where | Why |
+|---|------|-------|-----|
+| 1 | Add `windResetFrame`, `dragToolOrigin`, `currentDtScale` vars | After line 26 | State for frame-counted wind timer, drag origin tracking, and dtScale passthrough to draw |
+| 2 | Set `dragToolOrigin = 'air'` and `windResetFrame = 0` on air drag start | `handleCanvasMousedown` air branch | Track which tool started the drag; cancel pending wind reset on new drag |
+| 3 | Gate wind=true on `dragToolOrigin === 'air'`, replace setTimeout with windResetFrame, reset dragToolOrigin | `handleCanvasMouseup` | Fix race condition and conditional wind assignment |
+| 4a | Add `dtScale` parameter to `drawFlyBody` | `drawFlyBody` signature | Pass dtScale to child draw functions |
+| 4b | Add `dtScale` parameter to `drawAntennae`, use exponential interp | `drawAntennae` signature + lerp lines | Frame-rate-independent antenna twitch |
+| 4c | Add `dtScale` parameter to `drawLegs`, use exponential interp for leg jitter | `drawLegs` signature + lerp line | Frame-rate-independent leg jitter |
+| 4d | Use exponential interp for wing micro-movement | `drawLegs` lerp line for wingMicro | Frame-rate-independent wing micro-movement |
+| 5a | Set `currentDtScale = dtScale` in update() | After dtScale computation in `update()` | Make dtScale available to draw path |
+| 5b | Pass `currentDtScale` to `drawFlyBody()` | `draw()` function | Propagate dtScale into draw tree |
+| 5c | Add windResetFrame check | After touchResetFrame check in `update()` | Frame-counted wind stimulus expiry |
 
 ## Verification
-- build: "No build step -- open index.html in a browser"
-- lint: "No linter configured"
-- test: "No existing tests"
-- smoke: "Open index.html in browser. Verify: (1) wing spread/fold animation plays at the same visual speed regardless of display refresh rate (if possible, test on 60Hz and 120Hz or use browser devtools to throttle), (2) proboscis extension/retraction animation plays smoothly, (3) grooming leg animation does not snap to thorax-mode mid-groom after ~2 seconds -- touch the fly to trigger groom, observe that the groom animation for the touched body part persists for the full groom duration, (4) abdomen curl during groom persists for the full groom duration and does not stop abruptly after ~2 seconds, (5) walk animation phase (leg movement speed) is proportional to fly speed and not double-speed on high-refresh displays"
+- build: No build step. Open `index.html` in a browser.
+- lint: No linter configured.
+- test: No existing tests.
+- smoke: Open `index.html` in browser. Perform these checks:
+  1. **Wind race condition (bug 1):** Select air tool, drag and release on canvas. Within 1 second, start a new air drag and hold it. Verify the fly continues reacting to wind (BRAIN panel should show wind=true while dragging). Release. Verify wind clears after ~2 seconds.
+  2. **Conditional wind on tool switch (bug 2):** Select air tool, start a drag on canvas, then click the touch tool in the toolbar (switching tools mid-drag). Release the mouse. Verify BRAIN.stimulate.wind does NOT become true (check the connectome panel or console).
+  3. **Frame-rate-independent idle animations (bug 3):** Observe the fly in idle state. Antenna twitches, leg jitters, and wing micro-movements should animate smoothly. If testing on a 120Hz display, animations should run at the same visual speed as on a 60Hz display.
 
 ## Constraints
-- Do NOT modify SPEC.md, CLAUDE.md, TASKS.md, or any file in .buildloop/ other than current-plan.md and build-claims.md
-- Do NOT add new files -- all changes are within js/main.js
-- Do NOT modify the brain tick interval (setInterval at 500ms) or the RAF loop structure
-- Do NOT change the touchResetFrame logic itself (line 1376-1380) -- it should still clear BRAIN.stimulate.touchLocation to null. The fix is that drawing code reads from behavior.groomLocation instead of the live stimulus, so the reset no longer causes visual glitches.
-- Do NOT modify the `applyTouchTool` function or the wall-collision touch stimulus code
-- The exponential interpolation math must use `(1 - Math.pow(retentionFactor, dtScale))` as the lerp factor, NOT `originalFactor * dtScale` (linear scaling of lerp factors is mathematically wrong for exponential decay)
-- For phase accumulators (groomPhase, walkPhase), linear `* dtScale` is correct because these are additive per-frame increments, not decay/convergence rates
+- Do NOT modify any file other than `js/main.js`.
+- Do NOT modify SPEC.md, TASKS.md, CLAUDE.md, or any files in `.buildloop/` other than this plan.
+- Do NOT add any new dependencies or imports.
+- Do NOT change the `handleCanvasMousemove` function -- the existing `activeTool !== 'air'` guard there is correct because it governs real-time drag visual feedback, not cleanup.
+- Do NOT change the `drawWindArrow` function -- it correctly gates on `isDragging && activeTool === 'air'`.
+- The `drawWing` function does NOT need changes -- `anim.wingMicro` is computed in `drawLegs` and consumed by `drawWing` via the shared `anim` object; the dt-scaling happens at the write site (drawLegs), not the read site (drawWing).
+- Preserve the unconditional `isDragging = false` in `handleCanvasMouseup` (D3.1 requirement).

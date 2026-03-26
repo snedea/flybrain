@@ -24,6 +24,9 @@ var speedChangeInterval = 0;
 var food = [];
 var frameCount = 0;
 var touchResetFrame = 0;
+var windResetFrame = 0;
+var dragToolOrigin = null;
+var currentDtScale = 1;
 
 // Normalize angle to [-PI, PI] range
 function normalizeAngle(a) {
@@ -268,6 +271,8 @@ function handleCanvasMousedown(event) {
 		ripples.push({ x: cx, y: cy, startTime: Date.now() });
 	} else if (activeTool === 'air') {
 		isDragging = true;
+		dragToolOrigin = 'air';
+		windResetFrame = 0;
 		dragStart.x = cx;
 		dragStart.y = cy;
 		BRAIN.stimulate.wind = true;
@@ -288,22 +293,22 @@ function handleCanvasMousemove(event) {
 
 function handleCanvasMouseup(event) {
 	if (isDragging) {
-		var dx = event.clientX - dragStart.x;
-		var dy = event.clientY - dragStart.y;
-		var dragDist = Math.sqrt(dx * dx + dy * dy);
-		if (dragDist < 5) {
-			var distToFly = Math.hypot(event.clientX - fly.x, event.clientY - fly.y);
-			BRAIN.stimulate.windStrength = Math.max(0.1, Math.min(1, 1 - distToFly / 200));
-		} else {
-			BRAIN.stimulate.windStrength = Math.min(1, dragDist / 150);
+		if (dragToolOrigin === 'air') {
+			var dx = event.clientX - dragStart.x;
+			var dy = event.clientY - dragStart.y;
+			var dragDist = Math.sqrt(dx * dx + dy * dy);
+			if (dragDist < 5) {
+				var distToFly = Math.hypot(event.clientX - fly.x, event.clientY - fly.y);
+				BRAIN.stimulate.windStrength = Math.max(0.1, Math.min(1, 1 - distToFly / 200));
+			} else {
+				BRAIN.stimulate.windStrength = Math.min(1, dragDist / 150);
+			}
+			BRAIN.stimulate.wind = true;
+			windResetFrame = frameCount + 120;
 		}
-		BRAIN.stimulate.wind = true;
 		isDragging = false;
+		dragToolOrigin = null;
 		windArrowEnd = null;
-		setTimeout(function () {
-			BRAIN.stimulate.wind = false;
-			BRAIN.stimulate.windStrength = 0;
-		}, 2000);
 	}
 }
 
@@ -836,7 +841,7 @@ var COLORS = {
  * Draws the complete fly body at (0,0) facing up (-Y direction).
  * Canvas should be translated/rotated before calling.
  */
-function drawFlyBody() {
+function drawFlyBody(dtScale) {
 	var t = Date.now() / 1000;
 	var state = behavior.current;
 	var isWalking = (state === 'walk' || state === 'explore' || state === 'phototaxis');
@@ -846,7 +851,7 @@ function drawFlyBody() {
 	drawWing(1);  // right
 
 	// --- Legs (behind body) ---
-	drawLegs(state);
+	drawLegs(state, dtScale);
 
 	// --- Abdomen ---
 	drawAbdomen();
@@ -861,7 +866,7 @@ function drawFlyBody() {
 	drawEyes();
 
 	// --- Antennae ---
-	drawAntennae(t);
+	drawAntennae(t, dtScale);
 
 	// --- Proboscis (shown when extending) ---
 	if (anim.proboscisExtend > 0.01) {
@@ -1041,7 +1046,7 @@ function drawEyes() {
 /**
  * Draws antennae with idle twitching animation.
  */
-function drawAntennae(t) {
+function drawAntennae(t, dtScale) {
 	// Update antenna twitch targets periodically
 	if (t - anim.antennaTimer > 0.8 + Math.random() * 1.2) {
 		anim.antennaTimer = t;
@@ -1049,8 +1054,8 @@ function drawAntennae(t) {
 		anim.antennaTargetR = (Math.random() - 0.5) * 0.4;
 	}
 	// Smooth interpolation toward targets
-	anim.antennaTwitchL += (anim.antennaTargetL - anim.antennaTwitchL) * 0.08;
-	anim.antennaTwitchR += (anim.antennaTargetR - anim.antennaTwitchR) * 0.08;
+	anim.antennaTwitchL += (anim.antennaTargetL - anim.antennaTwitchL) * (1 - Math.pow(0.92, dtScale));
+	anim.antennaTwitchR += (anim.antennaTargetR - anim.antennaTwitchR) * (1 - Math.pow(0.92, dtScale));
 
 	for (var side = -1; side <= 1; side += 2) {
 		var bx = BODY.antennaBaseX * side;
@@ -1117,7 +1122,7 @@ function drawProboscis(extend) {
  * grooming rub (groom), tucked (fly/rest), jump pose (startle burst),
  * idle jitter (idle/feed).
  */
-function drawLegs(state) {
+function drawLegs(state, dtScale) {
 	var t = Date.now() / 1000;
 	var isWalking = (state === 'walk' || state === 'explore' || state === 'phototaxis');
 	var isGrooming = (state === 'groom');
@@ -1134,7 +1139,7 @@ function drawLegs(state) {
 		}
 	}
 	for (var j = 0; j < 6; j++) {
-		anim.legJitter[j] += (anim.legJitterTarget[j] - anim.legJitter[j]) * 0.05;
+		anim.legJitter[j] += (anim.legJitterTarget[j] - anim.legJitter[j]) * (1 - Math.pow(0.95, dtScale));
 	}
 
 	// Update wing micro-movement
@@ -1142,7 +1147,7 @@ function drawLegs(state) {
 		anim.wingMicroTimer = t;
 		anim.wingMicroTarget = (Math.random() - 0.5) * 2;
 	}
-	anim.wingMicro += (anim.wingMicroTarget - anim.wingMicro) * 0.03;
+	anim.wingMicro += (anim.wingMicroTarget - anim.wingMicro) * (1 - Math.pow(0.97, dtScale));
 
 	// Tripod groups
 	var groupA = [0, 3, 4];
@@ -1259,6 +1264,7 @@ function drawLegs(state) {
 // --- Movement update (same interface as worm-sim) ---
 function update(dt) {
 	var dtScale = dt / (1000 / 60);
+	currentDtScale = dtScale;
 	applyBehaviorMovement(dtScale);
 
 	speed += speedChangeInterval * dtScale;
@@ -1385,6 +1391,13 @@ function update(dt) {
 		touchResetFrame = 0;
 	}
 
+	// Reset wind stimulus after 120 frames (~2 seconds at 60fps)
+	if (windResetFrame > 0 && frameCount >= windResetFrame) {
+		BRAIN.stimulate.wind = false;
+		BRAIN.stimulate.windStrength = 0;
+		windResetFrame = 0;
+	}
+
 	frameCount++;
 	updateAnimForBehavior(dtScale);
 }
@@ -1417,7 +1430,7 @@ function draw() {
 	// rotation = -facingDir + PI/2
 	ctx.rotate(-facingDir + Math.PI / 2);
 	ctx.scale(BODY.scale, BODY.scale);
-	drawFlyBody();
+	drawFlyBody(currentDtScale);
 	ctx.restore();
 
 	// Small dot showing fly's "nose" target for debugging (very faint)
