@@ -466,7 +466,7 @@ BRAIN.motorcontrol = function () {
 	var abdomen = readMotor('MN_ABDOMEN');
 	var head = readMotor('MN_HEAD');
 	BRAIN.accumHead = head;
-	BRAIN.accumGroom = abdomen + head + Math.min(legL1, legR1);
+	BRAIN.accumGroom = abdomen + (abdomen > 0 ? head : 0) + Math.min(legL1, legR1);
 
 	// Startle is derived from DN_STARTLE neuron state (not a motor neuron per se,
 	// but we track its activation level for behavior selection)
