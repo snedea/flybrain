@@ -1,56 +1,52 @@
-# Plan: D1.3
+# Plan: D2.1
 
 ## Dependencies
-- list: none
-- commands: none
-
-## Context
-
-The `#drive-meters` container has 6 rows (1 State + 5 drive bars) inside `#bottom-panel` which has `height: 90px` and `padding: 0.5rem 1rem`. The usable content height is 90 - 2*8 = 74px. But 6 rows at ~14px each + 5 gaps of 0.4rem (~6.4px) = ~116px, causing overflow that clips the Groom meter.
-
-**Strategy**: Reduce gap, bar height, line-height, and vertical padding so all 6 rows fit within the 90px panel. This avoids changing the panel height and avoids any JS changes (the `innerHeight - 90` constants remain correct).
-
-**Math**: With gap `0.15rem` (2.4px), bar height `6px`, line-height `1`, padding `0.25rem` top/bottom (4px each):
-- Content space: 90 - 8 = 82px
-- Row height: max(0.7rem * 1.0, 6px) = 11.2px
-- Total: 6 * 11.2 + 5 * 2.4 = 67.2 + 12 = 79.2px
-- Margin: 2.8px to spare
-
-No HTML changes. No JS changes.
+- list: [] (no new dependencies)
+- commands: [] (nothing to install)
 
 ## File Operations (in execution order)
 
-### 1. MODIFY css/main.css
+### 1. MODIFY js/main.js
 - operation: MODIFY
-- reason: Reduce drive meter row/gap/padding sizing so all 6 rows fit within the 90px bottom panel without overflow
+- reason: Two bugs to fix: (1) position update missing dtScale, (2) speed can go negative after idle/groom/rest deceleration when stale speedChangeInterval is applied
 
-#### Change A: Reduce bottom panel vertical padding
-- anchor: `padding: 0.5rem 1rem;` (inside `#bottom-panel` rule at line 152)
-- action: Change `padding: 0.5rem 1rem;` to `padding: 0.25rem 1rem;`
+#### Change 1: Multiply position increments by dtScale
 
-#### Change B: Reduce drive-meters gap
-- anchor: `gap: 0.4rem;` (inside `#drive-meters` rule at line 177)
-- action: Change `gap: 0.4rem;` to `gap: 0.15rem;`
+- anchor: the two lines at approximately line 1306-1307:
+  ```js
+  fly.x += Math.cos(facingDir) * speed;
+  fly.y -= Math.sin(facingDir) * speed;
+  ```
+- action: Replace those two lines with:
+  ```js
+  fly.x += Math.cos(facingDir) * speed * dtScale;
+  fly.y -= Math.sin(facingDir) * speed * dtScale;
+  ```
+- rationale: `speed` is already dt-scaled (via `speed += speedChangeInterval * dtScale` at line 1252 and `speed *= Math.pow(0.92, dtScale)` in `applyBehaviorMovement`), but those scale the *rate of change* of speed, not the *displacement*. The displacement `position += velocity * dt` must also include the time factor. Without `dtScale`, a 120Hz display applies the same per-frame displacement twice as often as 60Hz, doubling distance-per-second.
 
-#### Change C: Add line-height to drive-row
-- anchor: `gap: 0.5rem;` (inside `.drive-row` rule at line 183)
-- action: Add `line-height: 1;` after `gap: 0.5rem;` inside the `.drive-row` rule
+#### Change 2: Floor speed at 0 after speedChangeInterval application
 
-#### Change D: Reduce drive bar height
-- anchor: `height: 8px;` (inside `.drive-bar-bg` rule at line 197)
-- action: Change `height: 8px;` to `height: 6px;`
+- anchor: the line at approximately line 1252:
+  ```js
+  speed += speedChangeInterval * dtScale;
+  ```
+- action: Insert one line immediately after `speed += speedChangeInterval * dtScale;`:
+  ```js
+  if (speed < 0) speed = 0;
+  ```
+- rationale: When `applyBehaviorMovement()` sets `speed = 0` (idle/groom/rest states at line 568), `speedChangeInterval` may still hold a stale negative value from the previous 500ms brain tick (e.g. `speedChangeInterval = -speed * 0.1` computed when speed was nonzero). The next frame applies `speed += negativeValue * dtScale`, producing a negative speed. Negative speed causes the fly to briefly jitter backward (cos/sin displacement reverses). The floor prevents this. Using `if (speed < 0) speed = 0;` is equivalent to `speed = Math.max(0, speed)` but avoids a function call per frame.
+- important: Place this line AFTER `speed += speedChangeInterval * dtScale;` and BEFORE the `var facingMinusTarget = facingDir - targetDir;` line. Do NOT place it before the speed increment or inside `applyBehaviorMovement()`.
 
 ## Verification
-- build: No build step (vanilla HTML/CSS/JS)
-- lint: No linter configured
-- test: No automated tests
-- smoke: Open `index.html` in a browser. Verify that all 6 rows in the bottom-right drive meters panel are fully visible: State, Hunger, Fear, Fatigue, Curiosity, and Groom. None should be clipped or hidden by overflow. The bottom panel should not visually change its overall height (remains 90px). The fly should still be unable to walk behind the bottom panel (the `innerHeight - 90` bound is unchanged).
+- build: No build step. Open `index.html` in a browser.
+- lint: No linter configured.
+- test: No existing tests.
+- smoke: Open `index.html` in a browser. Observe: (1) the fly moves at a consistent apparent speed regardless of monitor refresh rate (if only one display available, verify the position update lines include `* dtScale` by reading the code), (2) when the fly enters idle/groom/rest state (stops walking), it should decelerate smoothly to zero without any backward jitter or vibration. Watch for the transition from walk to idle -- the fly should stop cleanly, not twitch backward.
 
 ## Constraints
-- Do NOT modify index.html
-- Do NOT modify js/main.js -- the panel height stays at 90px so the `innerHeight - 90` Y-bound constants remain correct
-- Do NOT change the panel height (`height: 90px` on `#bottom-panel`)
-- Do NOT add `overflow: auto` or scrollbars to the drive meters
-- Do NOT change the width of `#drive-meters` (stays at 180px)
-- Do NOT change colors or visual identity of the drive bars
-- Do NOT restructure the HTML layout (no 2-column grid) -- pure CSS sizing adjustments only
+- Do NOT modify any file other than `js/main.js`
+- Do NOT modify the `applyBehaviorMovement()` function
+- Do NOT modify the `speedChangeInterval` computation in `updateBrainTick()` or any of the behavior state blocks that set `speedChangeInterval`
+- Do NOT change the angle wrapping, edge avoidance, or screen bounds code
+- Do NOT add new variables or functions -- both fixes are single-line changes to existing code
+- The total diff should be exactly 3 changed lines (2 modified position lines + 1 inserted speed floor line)

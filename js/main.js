@@ -1250,6 +1250,7 @@ function update(dt) {
 	applyBehaviorMovement(dtScale);
 
 	speed += speedChangeInterval * dtScale;
+	if (speed < 0) speed = 0;
 
 	var facingMinusTarget = facingDir - targetDir;
 	var angleDiff = facingMinusTarget;
@@ -1303,8 +1304,8 @@ function update(dt) {
 	facingDir = normalizeAngle(facingDir);
 	targetDir = normalizeAngle(targetDir);
 
-	fly.x += Math.cos(facingDir) * speed;
-	fly.y -= Math.sin(facingDir) * speed;
+	fly.x += Math.cos(facingDir) * speed * dtScale;
+	fly.y -= Math.sin(facingDir) * speed * dtScale;
 
 	// Screen bounds (clamped to visible area: toolbar=44px top, panel=90px bottom)
 	if (fly.x < 0) {

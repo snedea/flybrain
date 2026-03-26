@@ -1,0 +1,6 @@
+{
+  "task_id": "D2.1",
+  "task_desc": "Fix frame-rate-dependent position update and speed negativity in update() -- (1) the position step at main.js:1306-1307 (fly.x += cos(facingDir) * speed, fly.y -= sin(facingDir) * speed) is not multiplied by dtScale, so the fly traverses twice as many pixels per second on a 120Hz display as on 60Hz despite D1.1 having dt-scaled speed interpolation, deceleration, and edge avoidance in the same function; multiply both position increments by dtScale to make distance-per-second frame-rate-independent, (2) after applyBehaviorMovement() sets speed to 0 at main.js:568 (idle/groom/rest deceleration) the subsequent speed += speedChangeInterval * dtScale at main.js:1252 subtracts a stale negative speedChangeInterval left over from the previous 500ms brain tick, driving speed below zero and causing brief backward jitter; add a Math.max(0, speed) floor after the speedChangeInterval application at main.js:1252. Files: js/main.js.",
+  "completed_stage": "builder",
+  "timestamp": "2026-03-26T04:15:38.881550+00:00"
+}
