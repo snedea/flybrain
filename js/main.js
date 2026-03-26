@@ -367,7 +367,8 @@ document.addEventListener('click', function (e) {
     if (typeof EducationPanel !== 'undefined' && EducationPanel.active) {
         var panel = document.getElementById('education-panel');
         var learnBtnEl = document.getElementById('learnBtn');
-        if (panel && !panel.contains(e.target) && e.target !== learnBtnEl) {
+        var brain3dOverlay = document.getElementById('brain3d-overlay');
+        if (panel && !panel.contains(e.target) && e.target !== learnBtnEl && (!brain3dOverlay || !brain3dOverlay.contains(e.target))) {
             EducationPanel.hide();
             if (learnBtnEl) learnBtnEl.classList.remove('active');
         }

@@ -274,12 +274,14 @@ window.Brain3D = {
         }
         Brain3D.active = true;
         window.addEventListener('resize', Brain3D._onResize);
+        Brain3D._renderer.domElement.addEventListener('mouseleave', Brain3D._onMouseLeave);
         Brain3D._onResize();
         Brain3D._renderLoop();
     },
 
     hide: function () {
         window.removeEventListener('resize', Brain3D._onResize);
+        Brain3D._renderer.domElement.removeEventListener('mouseleave', Brain3D._onMouseLeave);
         Brain3D._container.style.display = 'none';
         Brain3D.active = false;
         Brain3D._tooltipEl.style.display = 'none';
@@ -413,6 +415,10 @@ window.Brain3D = {
         } else {
             Brain3D._tooltipEl.style.display = 'none';
         }
+    },
+
+    _onMouseLeave: function () {
+        Brain3D._tooltipEl.style.display = 'none';
     },
 
     _onResize: function () {

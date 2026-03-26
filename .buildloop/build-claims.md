@@ -1,27 +1,23 @@
-# Build Claims -- D19.1
+# Build Claims -- D20.1
 
 ## Files Changed
-- MODIFY js/connectome.js -- Moved GUS_GRN_SWEET, GUS_GRN_BITTER, GUS_GRN_WATER from sensory to central array in BRAIN.neuronRegions
-- MODIFY js/brain3d.js -- Added HIGHLIGHT_OPACITY/HIGHLIGHT_EMISSIVE/HIGHLIGHT_FADE_MS constants; refactored update() to compute opacity/emissiveIntensity before highlight check and added 300ms fade-out interpolation after highlight timer expires; updated highlightRegion() to use named constants
+- MODIFY js/brain3d.js -- Added _onMouseLeave handler and mouseleave listener registration in show()/removal in hide() to fix ghost tooltip
+- MODIFY js/main.js -- Added brain3d-overlay to education panel outside-click exclusion check
 
 ## Verification Results
-- Build: PASS (node -c js/connectome.js && node -c js/brain3d.js)
+- Build: SKIPPED (vanilla JS, no build step)
 - Tests: SKIPPED (no existing tests)
 - Lint: SKIPPED (no linter configured)
 
 ## Claims
-- [ ] Claim 1: GUS_GRN_SWEET, GUS_GRN_BITTER, GUS_GRN_WATER are no longer in BRAIN.neuronRegions.sensory (connectome.js)
-- [ ] Claim 2: GUS_GRN_SWEET, GUS_GRN_BITTER, GUS_GRN_WATER are now in BRAIN.neuronRegions.central, between SEZ_WATER and GNG_DESC (connectome.js:113)
-- [ ] Claim 3: brain3d.js defines three new constants: HIGHLIGHT_OPACITY=0.9, HIGHLIGHT_EMISSIVE=1.5, HIGHLIGHT_FADE_MS=300 (lines 19-21)
-- [ ] Claim 4: In update(), opacity and emissiveIntensity are computed BEFORE the highlight check block, so they are available for fade interpolation (lines 325-326 before the highlight block at line 328)
-- [ ] Claim 5: When region._highlightUntil expires, a 300ms fade-out period linearly interpolates from highlight values (0.9 opacity, 1.5 emissive) toward calculated activation values instead of snapping abruptly
-- [ ] Claim 6: During the active highlight period (now < _highlightUntil), the region is still skipped entirely via continue (unchanged behavior)
-- [ ] Claim 7: After fade-out completes (fadeElapsed >= HIGHLIGHT_FADE_MS), _highlightUntil is set to 0 and normal rendering resumes
-- [ ] Claim 8: highlightRegion() uses HIGHLIGHT_EMISSIVE and HIGHLIGHT_OPACITY constants instead of hardcoded 1.5 and 0.9 (line 368-369)
-- [ ] Claim 9: The highlight duration remains 1200ms (line 366, unchanged)
-- [ ] Claim 10: All code uses ES5 style (var, not const/let)
-- [ ] Claim 11: No other files were modified
+- [ ] Claim 1: Brain3D object has a new named `_onMouseLeave` method (line 420-422) that sets `Brain3D._tooltipEl.style.display = 'none'`
+- [ ] Claim 2: `Brain3D.show()` (line 277) registers a `mouseleave` event listener on `Brain3D._renderer.domElement` using `Brain3D._onMouseLeave`
+- [ ] Claim 3: `Brain3D.hide()` (line 284) removes the `mouseleave` event listener from `Brain3D._renderer.domElement` using `Brain3D._onMouseLeave`
+- [ ] Claim 4: The education panel document click handler in main.js (line 370-371) now gets the `brain3d-overlay` element and checks `(!brain3dOverlay || !brain3dOverlay.contains(e.target))` before closing the education panel
+- [ ] Claim 5: Clicks/drags on the brain3d canvas no longer close the education panel because the click target is inside brain3d-overlay
+- [ ] Claim 6: The tooltip disappears when the mouse leaves the 3D canvas area (mouseleave fires on renderer.domElement)
+- [ ] Claim 7: No other files were modified; no new dependencies added; existing mousemove listener in init() unchanged
 
 ## Gaps and Assumptions
-- No automated tests exist to verify visual behavior; fade-out correctness requires manual browser testing
-- The fade interpolation assumes update() is called frequently enough during the 300ms window for smooth animation (depends on the brain tick interval in main.js)
+- No automated tests exist; verification is manual browser smoke testing only
+- The mouseleave event may not fire if the mouse moves very quickly off-screen on some older browsers, but this is standard DOM behavior and acceptable
