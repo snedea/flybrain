@@ -87,6 +87,7 @@ BRAIN.accumFlight = 0;
 BRAIN.accumFeed = 0;
 BRAIN.accumGroom = 0;
 BRAIN.accumStartle = 0;
+BRAIN.accumHead = 0;
 
 // Backward-compatible left/right accumulators (computed from walk)
 BRAIN.accumleft = 0;
@@ -373,11 +374,6 @@ BRAIN.update = function () {
 	// Always run the connectome after stimulation
 	BRAIN.runconnectome();
 
-	// --- Update behavioral state flags for next tick ---
-	BRAIN._isMoving = (Math.abs(BRAIN.accumWalkLeft) + Math.abs(BRAIN.accumWalkRight) > 5) ||
-	                   (BRAIN.accumFlight > 5);
-	BRAIN._isFeeding = BRAIN.accumFeed > 5;
-	BRAIN._isGrooming = BRAIN.accumGroom > 5;
 };
 
 // ============================================================
@@ -434,6 +430,7 @@ BRAIN.motorcontrol = function () {
 	BRAIN.accumFeed = 0;
 	BRAIN.accumGroom = 0;
 	BRAIN.accumStartle = 0;
+	BRAIN.accumHead = 0;
 
 	// Helper to read and drain a motor neuron
 	var readMotor = function (name) {
@@ -468,7 +465,8 @@ BRAIN.motorcontrol = function () {
 	// or when SEZ_GROOM was the dominant command
 	var abdomen = readMotor('MN_ABDOMEN');
 	var head = readMotor('MN_HEAD');
-	BRAIN.accumGroom = abdomen + Math.min(legL1, legR1);
+	BRAIN.accumHead = head;
+	BRAIN.accumGroom = abdomen + head + Math.min(legL1, legR1);
 
 	// Startle is derived from DN_STARTLE neuron state (not a motor neuron per se,
 	// but we track its activation level for behavior selection)
@@ -483,6 +481,7 @@ BRAIN.motorcontrol = function () {
 	BRAIN.accumFeed = Math.max(0, BRAIN.accumFeed);
 	BRAIN.accumGroom = Math.max(0, BRAIN.accumGroom);
 	BRAIN.accumStartle = Math.max(0, BRAIN.accumStartle);
+	BRAIN.accumHead = Math.max(0, BRAIN.accumHead);
 
 	// --- Backward compatibility: accumleft / accumright ---
 	// These are what main.js reads to compute direction and speed.

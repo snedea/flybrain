@@ -510,6 +510,12 @@ function computeMovementForBehavior() {
 				speedChangeInterval = (targetSpeed - speed) / (scalingFactor * 1.5);
 			}
 		}
+		// Head-turn bias from MN_HEAD (CX_FC orientation signal)
+		if (BRAIN.accumHead > 3) {
+			var headBias = (BRAIN.accumHead / 40) * 0.15;
+			var headSign = (BRAIN.accumWalkLeft - BRAIN.accumWalkRight > 0) ? 1 : -1;
+			targetDir += headBias * headSign;
+		}
 	} else if (state === 'phototaxis') {
 		// Steer toward canvas center (light source placeholder)
 		var dx = window.innerWidth / 2 - fly.x;
@@ -1088,10 +1094,6 @@ function drawAntennae(t, dtScale) {
 
 /**
  * Draws the proboscis (retractable feeding tube).
- * Hidden by default; call this when feeding behavior is active.
- */
-/**
- * Draws the proboscis (retractable feeding tube).
  * @param {number} extend - Extension amount from 0 (retracted) to 1 (fully extended).
  */
 function drawProboscis(extend) {
@@ -1112,10 +1114,6 @@ function drawProboscis(extend) {
 	ctx.fill();
 }
 
-/**
- * Draws all 6 legs with walking or idle animation.
- * Tripod gait: Group A (front-left, mid-right, rear-left) vs Group B.
- */
 /**
  * Draws all 6 legs with behavior-specific animation.
  * State-dependent modes: tripod gait (walk/explore/phototaxis),
