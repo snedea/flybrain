@@ -16,6 +16,9 @@ var BASE_OPACITY = 0.3;
 var MAX_OPACITY = 0.8;
 var BASE_EMISSIVE_INTENSITY = 0.0;
 var MAX_EMISSIVE_INTENSITY = 1.0;
+var HIGHLIGHT_OPACITY = 0.9;
+var HIGHLIGHT_EMISSIVE = 1.5;
+var HIGHLIGHT_FADE_MS = 300;
 
 var REGION_DEFS = [
     {
@@ -319,15 +322,27 @@ window.Brain3D = {
             var normalized = Math.min(1, Math.max(0, avg / ACTIVATION_DIVISOR));
             region.activation = normalized;
 
+            var opacity = BASE_OPACITY + normalized * (MAX_OPACITY - BASE_OPACITY);
+            var emissiveIntensity = BASE_EMISSIVE_INTENSITY + normalized * (MAX_EMISSIVE_INTENSITY - BASE_EMISSIVE_INTENSITY);
+
             if (region._highlightUntil > 0) {
-                if (Date.now() < region._highlightUntil) {
+                var now = Date.now();
+                if (now < region._highlightUntil) {
+                    continue;
+                }
+                var fadeElapsed = now - region._highlightUntil;
+                if (fadeElapsed < HIGHLIGHT_FADE_MS) {
+                    var t = fadeElapsed / HIGHLIGHT_FADE_MS;
+                    var fadeOpacity = HIGHLIGHT_OPACITY + (opacity - HIGHLIGHT_OPACITY) * t;
+                    var fadeEmissive = HIGHLIGHT_EMISSIVE + (emissiveIntensity - HIGHLIGHT_EMISSIVE) * t;
+                    for (var j = 0; j < region.meshes.length; j++) {
+                        region.meshes[j].material.opacity = fadeOpacity;
+                        region.meshes[j].material.emissiveIntensity = fadeEmissive;
+                    }
                     continue;
                 }
                 region._highlightUntil = 0;
             }
-
-            var opacity = BASE_OPACITY + normalized * (MAX_OPACITY - BASE_OPACITY);
-            var emissiveIntensity = BASE_EMISSIVE_INTENSITY + normalized * (MAX_EMISSIVE_INTENSITY - BASE_EMISSIVE_INTENSITY);
 
             for (var j = 0; j < region.meshes.length; j++) {
                 region.meshes[j].material.opacity = opacity;
@@ -350,8 +365,8 @@ window.Brain3D = {
 
         foundRegion._highlightUntil = Date.now() + 1200;
         for (var j = 0; j < foundRegion.meshes.length; j++) {
-            foundRegion.meshes[j].material.emissiveIntensity = 1.5;
-            foundRegion.meshes[j].material.opacity = 0.9;
+            foundRegion.meshes[j].material.emissiveIntensity = HIGHLIGHT_EMISSIVE;
+            foundRegion.meshes[j].material.opacity = HIGHLIGHT_OPACITY;
         }
     },
 

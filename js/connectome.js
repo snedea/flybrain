@@ -101,7 +101,6 @@ BRAIN.neuronRegions = {
 	sensory: [
 		'VIS_R1R6', 'VIS_R7R8', 'VIS_ME', 'VIS_LO', 'VIS_LC', 'VIS_LPTC',
 		'OLF_ORN_FOOD', 'OLF_ORN_DANGER', 'OLF_LN', 'OLF_PN',
-		'GUS_GRN_SWEET', 'GUS_GRN_BITTER', 'GUS_GRN_WATER',
 		'MECH_BRISTLE', 'MECH_JO', 'MECH_CHORD', 'ANTENNAL_MECH',
 		'THERMO_WARM', 'THERMO_COOL',
 		'NOCI',
@@ -111,6 +110,7 @@ BRAIN.neuronRegions = {
 		'LH_APP', 'LH_AV',
 		'CX_EPG', 'CX_PFN', 'CX_FC', 'CX_HDELTA',
 		'SEZ_FEED', 'SEZ_GROOM', 'SEZ_WATER',
+		'GUS_GRN_SWEET', 'GUS_GRN_BITTER', 'GUS_GRN_WATER',
 		'GNG_DESC', 'CLOCK_DN',
 	],
 	drives: [

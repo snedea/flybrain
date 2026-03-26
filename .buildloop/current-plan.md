@@ -1,14 +1,4 @@
-# Plan: D18.2
-
-## Summary
-
-Two related data-consistency fixes across three files:
-
-1. **Add 3 orphaned neuron groups** (NOCI, GNG_DESC, CLOCK_DN) to brain3d.js REGION_DEFS and education.js EDUCATION_REGIONS — they exist in the connectome and fire during simulation but are absent from the 3D brain and education panel.
-
-2. **Fix type classification mismatches** in connectome.js BRAIN.neuronRegions — ANTENNAL_MECH is listed as 'central' but should be 'sensory'; DN_WALK, DN_FLIGHT, DN_TURN, DN_BACKUP, DN_STARTLE, VNC_CPG are listed as 'central' but should be 'motor'. The brain3d.js and education.js already have the correct classifications; only connectome.js needs updating.
-
-After these changes, all three files will be consistent and the education panel's "59 functional neuron groups" claim will match reality (currently only 56 are described in its region sections).
+# Plan: D19.1
 
 ## Dependencies
 - list: none
@@ -18,261 +8,262 @@ After these changes, all three files will be consistent and the education panel'
 
 ### 1. MODIFY js/connectome.js
 - operation: MODIFY
-- reason: Fix ANTENNAL_MECH and DN_*/VNC_CPG type classifications in BRAIN.neuronRegions to match the neuroscientifically accurate categorization already used by brain3d.js and education.js
+- reason: Move GUS_GRN_SWEET, GUS_GRN_BITTER, GUS_GRN_WATER from the sensory array to the central array in BRAIN.neuronRegions so their dot color (purple/central) matches the SEZ region classification in brain3d.js and education.js
+- anchor: `'GUS_GRN_SWEET', 'GUS_GRN_BITTER', 'GUS_GRN_WATER',` on line 104
 
-#### Change A: Move ANTENNAL_MECH from central to sensory
-- anchor: `'THERMO_WARM', 'THERMO_COOL',`
-- In the `sensory` array (lines 101-108), add `'ANTENNAL_MECH'` after `'THERMO_COOL',` and before the closing `],`
+#### Change 1: Remove GUS_GRN_* from sensory array
 
-Replace this exact block (lines 101-108):
+Replace the sensory array (lines 101-108) from:
+
 ```js
-	sensory: [
-		'VIS_R1R6', 'VIS_R7R8', 'VIS_ME', 'VIS_LO', 'VIS_LC', 'VIS_LPTC',
-		'OLF_ORN_FOOD', 'OLF_ORN_DANGER', 'OLF_LN', 'OLF_PN',
-		'GUS_GRN_SWEET', 'GUS_GRN_BITTER', 'GUS_GRN_WATER',
-		'MECH_BRISTLE', 'MECH_JO', 'MECH_CHORD',
-		'THERMO_WARM', 'THERMO_COOL',
-		'NOCI',
-	],
+sensory: [
+    'VIS_R1R6', 'VIS_R7R8', 'VIS_ME', 'VIS_LO', 'VIS_LC', 'VIS_LPTC',
+    'OLF_ORN_FOOD', 'OLF_ORN_DANGER', 'OLF_LN', 'OLF_PN',
+    'GUS_GRN_SWEET', 'GUS_GRN_BITTER', 'GUS_GRN_WATER',
+    'MECH_BRISTLE', 'MECH_JO', 'MECH_CHORD', 'ANTENNAL_MECH',
+    'THERMO_WARM', 'THERMO_COOL',
+    'NOCI',
+],
 ```
 
-With:
+to:
+
 ```js
-	sensory: [
-		'VIS_R1R6', 'VIS_R7R8', 'VIS_ME', 'VIS_LO', 'VIS_LC', 'VIS_LPTC',
-		'OLF_ORN_FOOD', 'OLF_ORN_DANGER', 'OLF_LN', 'OLF_PN',
-		'GUS_GRN_SWEET', 'GUS_GRN_BITTER', 'GUS_GRN_WATER',
-		'MECH_BRISTLE', 'MECH_JO', 'MECH_CHORD', 'ANTENNAL_MECH',
-		'THERMO_WARM', 'THERMO_COOL',
-		'NOCI',
-	],
+sensory: [
+    'VIS_R1R6', 'VIS_R7R8', 'VIS_ME', 'VIS_LO', 'VIS_LC', 'VIS_LPTC',
+    'OLF_ORN_FOOD', 'OLF_ORN_DANGER', 'OLF_LN', 'OLF_PN',
+    'MECH_BRISTLE', 'MECH_JO', 'MECH_CHORD', 'ANTENNAL_MECH',
+    'THERMO_WARM', 'THERMO_COOL',
+    'NOCI',
+],
 ```
 
-Note: ANTENNAL_MECH is moved to the sensory array alongside other MECH_* neurons for logical grouping.
+The line `'GUS_GRN_SWEET', 'GUS_GRN_BITTER', 'GUS_GRN_WATER',` is removed entirely.
 
-#### Change B: Remove ANTENNAL_MECH, DN_*, and VNC_CPG from central; move DN_*/VNC_CPG to motor
-- anchor: `'ANTENNAL_MECH', 'GNG_DESC',`
+#### Change 2: Add GUS_GRN_* to central array
 
-Replace this exact block (lines 109-117):
+Replace the central array (lines 109-115) from:
+
 ```js
-	central: [
-		'MB_KC', 'MB_APL', 'MB_MBON_APP', 'MB_MBON_AV', 'MB_DAN_REW', 'MB_DAN_PUN',
-		'LH_APP', 'LH_AV',
-		'CX_EPG', 'CX_PFN', 'CX_FC', 'CX_HDELTA',
-		'SEZ_FEED', 'SEZ_GROOM', 'SEZ_WATER',
-		'ANTENNAL_MECH', 'GNG_DESC',
-		'DN_WALK', 'DN_FLIGHT', 'DN_TURN', 'DN_BACKUP', 'DN_STARTLE',
-		'VNC_CPG', 'CLOCK_DN',
-	],
+central: [
+    'MB_KC', 'MB_APL', 'MB_MBON_APP', 'MB_MBON_AV', 'MB_DAN_REW', 'MB_DAN_PUN',
+    'LH_APP', 'LH_AV',
+    'CX_EPG', 'CX_PFN', 'CX_FC', 'CX_HDELTA',
+    'SEZ_FEED', 'SEZ_GROOM', 'SEZ_WATER',
+    'GNG_DESC', 'CLOCK_DN',
+],
 ```
 
-With:
+to:
+
 ```js
-	central: [
-		'MB_KC', 'MB_APL', 'MB_MBON_APP', 'MB_MBON_AV', 'MB_DAN_REW', 'MB_DAN_PUN',
-		'LH_APP', 'LH_AV',
-		'CX_EPG', 'CX_PFN', 'CX_FC', 'CX_HDELTA',
-		'SEZ_FEED', 'SEZ_GROOM', 'SEZ_WATER',
-		'GNG_DESC', 'CLOCK_DN',
-	],
+central: [
+    'MB_KC', 'MB_APL', 'MB_MBON_APP', 'MB_MBON_AV', 'MB_DAN_REW', 'MB_DAN_PUN',
+    'LH_APP', 'LH_AV',
+    'CX_EPG', 'CX_PFN', 'CX_FC', 'CX_HDELTA',
+    'SEZ_FEED', 'SEZ_GROOM', 'SEZ_WATER',
+    'GUS_GRN_SWEET', 'GUS_GRN_BITTER', 'GUS_GRN_WATER',
+    'GNG_DESC', 'CLOCK_DN',
+],
 ```
 
-Note: ANTENNAL_MECH removed (moved to sensory above). DN_WALK, DN_FLIGHT, DN_TURN, DN_BACKUP, DN_STARTLE, VNC_CPG removed (will be added to motor below). GNG_DESC and CLOCK_DN remain in central (correct classification).
-
-#### Change C: Add DN_* and VNC_CPG to the motor array
-- anchor: `'MN_PROBOSCIS', 'MN_HEAD', 'MN_ABDOMEN',`
-
-Replace this exact block (lines 122-128):
-```js
-	motor: [
-		'MN_LEG_L1', 'MN_LEG_R1', 'MN_LEG_L2', 'MN_LEG_R2',
-		'MN_LEG_L3', 'MN_LEG_R3',
-		'MN_WING_L', 'MN_WING_R',
-		'MN_PROBOSCIS', 'MN_HEAD', 'MN_ABDOMEN',
-	],
-```
-
-With:
-```js
-	motor: [
-		'DN_WALK', 'DN_FLIGHT', 'DN_TURN', 'DN_BACKUP', 'DN_STARTLE',
-		'VNC_CPG',
-		'MN_LEG_L1', 'MN_LEG_R1', 'MN_LEG_L2', 'MN_LEG_R2',
-		'MN_LEG_L3', 'MN_LEG_R3',
-		'MN_WING_L', 'MN_WING_R',
-		'MN_PROBOSCIS', 'MN_HEAD', 'MN_ABDOMEN',
-	],
-```
-
-Note: DN_* and VNC_CPG are placed before the MN_* entries for logical grouping (descending neurons, then central pattern generator, then motor neurons).
+The line `'GUS_GRN_SWEET', 'GUS_GRN_BITTER', 'GUS_GRN_WATER',` is inserted between `'SEZ_FEED', 'SEZ_GROOM', 'SEZ_WATER',` and `'GNG_DESC', 'CLOCK_DN',`.
 
 ### 2. MODIFY js/brain3d.js
 - operation: MODIFY
-- reason: Add 3 orphaned neuron groups (NOCI, GNG_DESC, CLOCK_DN) to their appropriate REGION_DEFS entries
+- reason: Add a smooth fade-out transition when the highlight timer expires, instead of snapping abruptly from highlight values to calculated activation values
+- anchor: `if (region._highlightUntil > 0) {` at line 322
 
-#### Change A: Add NOCI to Mechanosensory region
-- anchor: `neurons: ['MECH_BRISTLE', 'MECH_JO', 'MECH_CHORD', 'ANTENNAL_MECH'],`
-- This is the neurons array in the Mechanosensory REGION_DEFS entry (line 104)
+#### Constants to add
 
-Replace:
+Add two new constants after the existing constant `var MAX_EMISSIVE_INTENSITY = 1.0;` (line 18):
+
 ```js
-        neurons: ['MECH_BRISTLE', 'MECH_JO', 'MECH_CHORD', 'ANTENNAL_MECH'],
+var HIGHLIGHT_OPACITY = 0.9;
+var HIGHLIGHT_EMISSIVE = 1.5;
+var HIGHLIGHT_FADE_MS = 300;
 ```
 
-With:
+These define the highlight visual values (matching what highlightRegion() already uses at lines 353-354) and the fade-out duration in milliseconds.
+
+#### Modify the highlight-check block in update()
+
+Replace lines 322-327 (the current highlight check block) from:
+
 ```js
-        neurons: ['MECH_BRISTLE', 'MECH_JO', 'MECH_CHORD', 'ANTENNAL_MECH', 'NOCI'],
+            if (region._highlightUntil > 0) {
+                if (Date.now() < region._highlightUntil) {
+                    continue;
+                }
+                region._highlightUntil = 0;
+            }
 ```
 
-#### Change B: Add GNG_DESC to Subesophageal Zone region
-- anchor: `neurons: ['SEZ_FEED', 'SEZ_GROOM', 'SEZ_WATER', 'GUS_GRN_SWEET', 'GUS_GRN_BITTER', 'GUS_GRN_WATER'],`
-- This is the neurons array in the Subesophageal Zone REGION_DEFS entry (line 76)
+to:
 
-Replace:
 ```js
-        neurons: ['SEZ_FEED', 'SEZ_GROOM', 'SEZ_WATER', 'GUS_GRN_SWEET', 'GUS_GRN_BITTER', 'GUS_GRN_WATER'],
+            if (region._highlightUntil > 0) {
+                var now = Date.now();
+                if (now < region._highlightUntil) {
+                    continue;
+                }
+                var fadeElapsed = now - region._highlightUntil;
+                if (fadeElapsed < HIGHLIGHT_FADE_MS) {
+                    var t = fadeElapsed / HIGHLIGHT_FADE_MS;
+                    var fadeOpacity = HIGHLIGHT_OPACITY + (opacity - HIGHLIGHT_OPACITY) * t;
+                    var fadeEmissive = HIGHLIGHT_EMISSIVE + (emissiveIntensity - HIGHLIGHT_EMISSIVE) * t;
+                    for (var j = 0; j < region.meshes.length; j++) {
+                        region.meshes[j].material.opacity = fadeOpacity;
+                        region.meshes[j].material.emissiveIntensity = fadeEmissive;
+                    }
+                    continue;
+                }
+                region._highlightUntil = 0;
+            }
 ```
 
-With:
+Logic explanation:
+1. `now` captures `Date.now()` once for consistency.
+2. If `now < region._highlightUntil`, the highlight is still active — skip this region entirely (existing behavior, unchanged).
+3. If the highlight timer has expired, compute `fadeElapsed = now - region._highlightUntil`. This is how many milliseconds have passed since the highlight expired.
+4. If `fadeElapsed < HIGHLIGHT_FADE_MS` (300ms), we are in the fade-out period. Compute linear interpolation factor `t` (0 to 1). Interpolate from highlight values (HIGHLIGHT_OPACITY=0.9, HIGHLIGHT_EMISSIVE=1.5) toward the calculated target values (`opacity` and `emissiveIntensity`, which are computed on lines 329-330 — these lines must be moved BEFORE this block).
+5. If `fadeElapsed >= HIGHLIGHT_FADE_MS`, the fade is complete. Set `_highlightUntil = 0` and fall through to the normal material assignment below.
+
+**CRITICAL**: The `opacity` and `emissiveIntensity` target values (currently computed at lines 329-330) must be available BEFORE the highlight block uses them for interpolation. Move those two lines to execute before the highlight check.
+
+#### Reorder lines in update() to compute target values before highlight check
+
+The current order in the update() loop body (lines 307-336) is:
+1. Compute activation (lines 309-320)
+2. Highlight check (lines 322-327) — may `continue`
+3. Compute opacity/emissiveIntensity (lines 329-330)
+4. Apply to meshes (lines 332-335)
+
+Change to:
+1. Compute activation (lines 309-320) — unchanged
+2. Compute opacity/emissiveIntensity — moved up from lines 329-330
+3. Highlight check (new fade-out block) — uses opacity/emissiveIntensity for interpolation
+4. Apply to meshes (lines 332-335) — unchanged
+
+The complete replacement for the update() function body (lines 304-337) should be:
+
+Replace from:
 ```js
-        neurons: ['SEZ_FEED', 'SEZ_GROOM', 'SEZ_WATER', 'GUS_GRN_SWEET', 'GUS_GRN_BITTER', 'GUS_GRN_WATER', 'GNG_DESC'],
+    update: function () {
+        if (!Brain3D.active || !Brain3D._initialized) return;
+
+        for (var i = 0; i < Brain3D._regions.length; i++) {
+            var region = Brain3D._regions[i];
+            var sum = 0;
+            var count = 0;
+            for (var n = 0; n < region.neurons.length; n++) {
+                var neuronName = region.neurons[n];
+                if (BRAIN.postSynaptic[neuronName]) {
+                    sum += BRAIN.postSynaptic[neuronName][BRAIN.thisState];
+                    count++;
+                }
+            }
+            var avg = count > 0 ? sum / count : 0;
+            var normalized = Math.min(1, Math.max(0, avg / ACTIVATION_DIVISOR));
+            region.activation = normalized;
+
+            if (region._highlightUntil > 0) {
+                if (Date.now() < region._highlightUntil) {
+                    continue;
+                }
+                region._highlightUntil = 0;
+            }
+
+            var opacity = BASE_OPACITY + normalized * (MAX_OPACITY - BASE_OPACITY);
+            var emissiveIntensity = BASE_EMISSIVE_INTENSITY + normalized * (MAX_EMISSIVE_INTENSITY - BASE_EMISSIVE_INTENSITY);
+
+            for (var j = 0; j < region.meshes.length; j++) {
+                region.meshes[j].material.opacity = opacity;
+                region.meshes[j].material.emissiveIntensity = emissiveIntensity;
+            }
+        }
+    },
 ```
 
-#### Change C: Add CLOCK_DN to Central Complex region
-- anchor: `neurons: ['CX_EPG', 'CX_PFN', 'CX_FC', 'CX_HDELTA'],`
-- This is the neurons array in the Central Complex REGION_DEFS entry (line 57)
-
-Replace:
+to:
 ```js
-        neurons: ['CX_EPG', 'CX_PFN', 'CX_FC', 'CX_HDELTA'],
+    update: function () {
+        if (!Brain3D.active || !Brain3D._initialized) return;
+
+        for (var i = 0; i < Brain3D._regions.length; i++) {
+            var region = Brain3D._regions[i];
+            var sum = 0;
+            var count = 0;
+            for (var n = 0; n < region.neurons.length; n++) {
+                var neuronName = region.neurons[n];
+                if (BRAIN.postSynaptic[neuronName]) {
+                    sum += BRAIN.postSynaptic[neuronName][BRAIN.thisState];
+                    count++;
+                }
+            }
+            var avg = count > 0 ? sum / count : 0;
+            var normalized = Math.min(1, Math.max(0, avg / ACTIVATION_DIVISOR));
+            region.activation = normalized;
+
+            var opacity = BASE_OPACITY + normalized * (MAX_OPACITY - BASE_OPACITY);
+            var emissiveIntensity = BASE_EMISSIVE_INTENSITY + normalized * (MAX_EMISSIVE_INTENSITY - BASE_EMISSIVE_INTENSITY);
+
+            if (region._highlightUntil > 0) {
+                var now = Date.now();
+                if (now < region._highlightUntil) {
+                    continue;
+                }
+                var fadeElapsed = now - region._highlightUntil;
+                if (fadeElapsed < HIGHLIGHT_FADE_MS) {
+                    var t = fadeElapsed / HIGHLIGHT_FADE_MS;
+                    var fadeOpacity = HIGHLIGHT_OPACITY + (opacity - HIGHLIGHT_OPACITY) * t;
+                    var fadeEmissive = HIGHLIGHT_EMISSIVE + (emissiveIntensity - HIGHLIGHT_EMISSIVE) * t;
+                    for (var j = 0; j < region.meshes.length; j++) {
+                        region.meshes[j].material.opacity = fadeOpacity;
+                        region.meshes[j].material.emissiveIntensity = fadeEmissive;
+                    }
+                    continue;
+                }
+                region._highlightUntil = 0;
+            }
+
+            for (var j = 0; j < region.meshes.length; j++) {
+                region.meshes[j].material.opacity = opacity;
+                region.meshes[j].material.emissiveIntensity = emissiveIntensity;
+            }
+        }
+    },
 ```
 
-With:
+#### Update highlightRegion() to use constants
+
+Replace lines 353-354 in highlightRegion() from:
+
 ```js
-        neurons: ['CX_EPG', 'CX_PFN', 'CX_FC', 'CX_HDELTA', 'CLOCK_DN'],
+            foundRegion.meshes[j].material.emissiveIntensity = 1.5;
+            foundRegion.meshes[j].material.opacity = 0.9;
 ```
 
-### 3. MODIFY js/education.js
-- operation: MODIFY
-- reason: Add 3 orphaned neuron groups (NOCI, GNG_DESC, CLOCK_DN) to their appropriate EDUCATION_REGIONS entries, matching the brain3d.js changes
+to:
 
-#### Change A: Add NOCI to Mechanosensory region
-- anchor: `neurons: ['MECH_BRISTLE', 'MECH_JO', 'MECH_CHORD', 'ANTENNAL_MECH'],`
-- This is the neurons array in the Mechanosensory EDUCATION_REGIONS entry (line 87)
-
-Replace:
 ```js
-            neurons: ['MECH_BRISTLE', 'MECH_JO', 'MECH_CHORD', 'ANTENNAL_MECH'],
+            foundRegion.meshes[j].material.emissiveIntensity = HIGHLIGHT_EMISSIVE;
+            foundRegion.meshes[j].material.opacity = HIGHLIGHT_OPACITY;
 ```
 
-With:
-```js
-            neurons: ['MECH_BRISTLE', 'MECH_JO', 'MECH_CHORD', 'ANTENNAL_MECH', 'NOCI'],
-```
-
-#### Change B: Add GNG_DESC to Subesophageal Zone region
-- anchor: `neurons: ['SEZ_FEED', 'SEZ_GROOM', 'SEZ_WATER', 'GUS_GRN_SWEET', 'GUS_GRN_BITTER', 'GUS_GRN_WATER'],`
-- This is the neurons array in the Subesophageal Zone EDUCATION_REGIONS entry (line 56)
-
-Replace:
-```js
-            neurons: ['SEZ_FEED', 'SEZ_GROOM', 'SEZ_WATER', 'GUS_GRN_SWEET', 'GUS_GRN_BITTER', 'GUS_GRN_WATER'],
-```
-
-With:
-```js
-            neurons: ['SEZ_FEED', 'SEZ_GROOM', 'SEZ_WATER', 'GUS_GRN_SWEET', 'GUS_GRN_BITTER', 'GUS_GRN_WATER', 'GNG_DESC'],
-```
-
-#### Change C: Add CLOCK_DN to Central Complex region
-- anchor: `neurons: ['CX_EPG', 'CX_PFN', 'CX_FC', 'CX_HDELTA'],`
-- This is the neurons array in the Central Complex EDUCATION_REGIONS entry (line 36)
-
-Replace:
-```js
-            neurons: ['CX_EPG', 'CX_PFN', 'CX_FC', 'CX_HDELTA'],
-```
-
-With:
-```js
-            neurons: ['CX_EPG', 'CX_PFN', 'CX_FC', 'CX_HDELTA', 'CLOCK_DN'],
-```
+This ensures the highlight values used in highlightRegion() and the fade-out interpolation in update() are always the same constants.
 
 ## Verification
-
-- build: No build step — vanilla JS loaded via script tags
-- lint: No linter configured
-- test: No existing test suite
-- smoke: After all edits, run the following verification script to confirm data consistency:
-
-```bash
-node -e "
-// Load files and verify consistency
-var fs = require('fs');
-
-var connectomeSrc = fs.readFileSync('js/connectome.js', 'utf8');
-var brain3dSrc = fs.readFileSync('js/brain3d.js', 'utf8');
-var educationSrc = fs.readFileSync('js/education.js', 'utf8');
-
-// 1. Verify ANTENNAL_MECH is in sensory, not central in connectome.js
-var sensoryMatch = connectomeSrc.match(/sensory:\s*\[([\s\S]*?)\]/);
-var centralMatch = connectomeSrc.match(/central:\s*\[([\s\S]*?)\]/);
-var motorMatch = connectomeSrc.match(/motor:\s*\[([\s\S]*?)\]/);
-
-var sensoryStr = sensoryMatch[1];
-var centralStr = centralMatch[1];
-var motorStr = motorMatch[1];
-
-// Check ANTENNAL_MECH moved to sensory
-console.assert(sensoryStr.includes('ANTENNAL_MECH'), 'FAIL: ANTENNAL_MECH not in sensory');
-console.assert(!centralStr.includes('ANTENNAL_MECH'), 'FAIL: ANTENNAL_MECH still in central');
-
-// Check DN_*/VNC_CPG moved to motor
-var motorNeurons = ['DN_WALK', 'DN_FLIGHT', 'DN_TURN', 'DN_BACKUP', 'DN_STARTLE', 'VNC_CPG'];
-motorNeurons.forEach(function(n) {
-  console.assert(motorStr.includes(n), 'FAIL: ' + n + ' not in motor');
-  console.assert(!centralStr.includes(n), 'FAIL: ' + n + ' still in central');
-});
-
-// Check GNG_DESC and CLOCK_DN remain in central
-console.assert(centralStr.includes('GNG_DESC'), 'FAIL: GNG_DESC not in central');
-console.assert(centralStr.includes('CLOCK_DN'), 'FAIL: CLOCK_DN not in central');
-
-// 2. Verify orphaned neurons added to brain3d.js
-console.assert(brain3dSrc.includes(\"'NOCI'\"), 'FAIL: NOCI not in brain3d.js');
-console.assert(brain3dSrc.includes(\"'GNG_DESC'\"), 'FAIL: GNG_DESC not in brain3d.js');
-console.assert(brain3dSrc.includes(\"'CLOCK_DN'\"), 'FAIL: CLOCK_DN not in brain3d.js');
-
-// 3. Verify orphaned neurons added to education.js
-console.assert(educationSrc.includes(\"'NOCI'\"), 'FAIL: NOCI not in education.js');
-console.assert(educationSrc.includes(\"'GNG_DESC'\"), 'FAIL: GNG_DESC not in education.js');
-console.assert(educationSrc.includes(\"'CLOCK_DN'\"), 'FAIL: CLOCK_DN not in education.js');
-
-// 4. Count total neuron groups in connectome.js neuronRegions
-var allNeurons = [];
-[sensoryStr, centralStr, motorStr].forEach(function(s) {
-  var matches = s.match(/'([A-Z_0-9]+)'/g);
-  if (matches) allNeurons = allNeurons.concat(matches.map(function(m) { return m.replace(/'/g, ''); }));
-});
-// Add drives
-var drivesMatch = connectomeSrc.match(/drives:\s*\[([\s\S]*?)\]/);
-var drivesMatches = drivesMatch[1].match(/'([A-Z_0-9]+)'/g);
-if (drivesMatches) allNeurons = allNeurons.concat(drivesMatches.map(function(m) { return m.replace(/'/g, ''); }));
-
-console.assert(allNeurons.length === 59, 'FAIL: Expected 59 neuron groups in neuronRegions, got ' + allNeurons.length);
-
-console.log('All verification checks passed. Total neuron groups: ' + allNeurons.length);
-"
-```
+- build: no build step (vanilla JS, loaded via script tags)
+- lint: no linter configured
+- test: no existing tests
+- smoke: Open index.html in a browser. (1) Open the connectome dot panel and verify GUS_GRN_SWEET, GUS_GRN_BITTER, GUS_GRN_WATER dots are purple (central) not blue (sensory). (2) Open Brain 3D view, open the education/Learn panel, click the "Subesophageal Zone" region name to trigger a highlight, and verify the region glows brightly then fades smoothly over ~300ms to its activation level instead of snapping abruptly.
 
 ## Constraints
-- Do NOT modify the neuronPopulations object in main.js — it is correct as-is
-- Do NOT modify the education panel intro text ("59 functional neuron groups") — it will become correct after adding the 3 orphaned neurons
-- Do NOT add new REGION_DEFS entries or EDUCATION_REGIONS entries — only append neurons to existing region entries
-- Do NOT change meshDefs, descriptions, explanations, analogies, or interactions in brain3d.js or education.js
-- Do NOT change any connection weights, firing logic, or simulation behavior in connectome.js
-- Do NOT modify index.html, main.js, or css/main.css
-- NOCI must go in the Mechanosensory region (not a new region)
-- GNG_DESC must go in the Subesophageal Zone region (not a new region)
-- CLOCK_DN must go in the Central Complex region (not Drives)
-- The drives array in connectome.js neuronRegions must NOT be modified
+- Do not modify any file other than js/connectome.js and js/brain3d.js
+- Do not modify SPEC.md, TASKS.md, CLAUDE.md, or any file in .buildloop/ other than current-plan.md
+- Do not add any new dependencies or files
+- Do not change the highlight duration (1200ms) — only add a 300ms fade-out after it expires
+- Do not change the highlight visual values (opacity 0.9, emissiveIntensity 1.5) — only extract them to named constants
+- Do not modify education.js — the SEZ region is already classified as central there
+- Preserve all existing variable naming conventions (var, not const/let — the codebase uses ES5 style)

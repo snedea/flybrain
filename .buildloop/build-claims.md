@@ -1,28 +1,27 @@
-# Build Claims -- D18.2
+# Build Claims -- D19.1
 
 ## Files Changed
-- MODIFY js/connectome.js -- Moved ANTENNAL_MECH from central to sensory array; moved DN_WALK, DN_FLIGHT, DN_TURN, DN_BACKUP, DN_STARTLE, VNC_CPG from central to motor array; GNG_DESC and CLOCK_DN remain in central
-- MODIFY js/brain3d.js -- Added NOCI to Mechanosensory region, GNG_DESC to Subesophageal Zone region, CLOCK_DN to Central Complex region in REGION_DEFS
-- MODIFY js/education.js -- Added NOCI to Mechanosensory region, GNG_DESC to Subesophageal Zone region, CLOCK_DN to Central Complex region in EDUCATION_REGIONS
+- MODIFY js/connectome.js -- Moved GUS_GRN_SWEET, GUS_GRN_BITTER, GUS_GRN_WATER from sensory to central array in BRAIN.neuronRegions
+- MODIFY js/brain3d.js -- Added HIGHLIGHT_OPACITY/HIGHLIGHT_EMISSIVE/HIGHLIGHT_FADE_MS constants; refactored update() to compute opacity/emissiveIntensity before highlight check and added 300ms fade-out interpolation after highlight timer expires; updated highlightRegion() to use named constants
 
 ## Verification Results
-- Build: SKIPPED (vanilla JS, no build step)
-- Tests: SKIPPED (no test suite)
+- Build: PASS (node -c js/connectome.js && node -c js/brain3d.js)
+- Tests: SKIPPED (no existing tests)
 - Lint: SKIPPED (no linter configured)
-- Smoke: PASS (node verification script confirmed all 59 neuron groups present, correct classifications, no orphans)
 
 ## Claims
-- [ ] Claim 1: ANTENNAL_MECH is in the sensory array (not central) in connectome.js BRAIN.neuronRegions, matching brain3d.js and education.js which classify it as type 'sensory'
-- [ ] Claim 2: DN_WALK, DN_FLIGHT, DN_TURN, DN_BACKUP, DN_STARTLE, and VNC_CPG are in the motor array (not central) in connectome.js BRAIN.neuronRegions, matching brain3d.js and education.js which classify them as type 'motor'
-- [ ] Claim 3: NOCI is added to the Mechanosensory region neurons array in both brain3d.js (REGION_DEFS) and education.js (EDUCATION_REGIONS)
-- [ ] Claim 4: GNG_DESC is added to the Subesophageal Zone region neurons array in both brain3d.js (REGION_DEFS) and education.js (EDUCATION_REGIONS)
-- [ ] Claim 5: CLOCK_DN is added to the Central Complex region neurons array in both brain3d.js (REGION_DEFS) and education.js (EDUCATION_REGIONS)
-- [ ] Claim 6: GNG_DESC and CLOCK_DN remain in the central array of connectome.js BRAIN.neuronRegions (not removed, just the other misclassified neurons were moved)
-- [ ] Claim 7: Total neuron groups across all 4 arrays (sensory, central, drives, motor) in BRAIN.neuronRegions equals 59, matching the education panel's "59 functional neuron groups" text
-- [ ] Claim 8: The drives array in connectome.js was NOT modified
-- [ ] Claim 9: No meshDefs, descriptions, explanations, analogies, interactions, or other properties were changed in brain3d.js or education.js -- only neurons arrays were appended to
+- [ ] Claim 1: GUS_GRN_SWEET, GUS_GRN_BITTER, GUS_GRN_WATER are no longer in BRAIN.neuronRegions.sensory (connectome.js)
+- [ ] Claim 2: GUS_GRN_SWEET, GUS_GRN_BITTER, GUS_GRN_WATER are now in BRAIN.neuronRegions.central, between SEZ_WATER and GNG_DESC (connectome.js:113)
+- [ ] Claim 3: brain3d.js defines three new constants: HIGHLIGHT_OPACITY=0.9, HIGHLIGHT_EMISSIVE=1.5, HIGHLIGHT_FADE_MS=300 (lines 19-21)
+- [ ] Claim 4: In update(), opacity and emissiveIntensity are computed BEFORE the highlight check block, so they are available for fade interpolation (lines 325-326 before the highlight block at line 328)
+- [ ] Claim 5: When region._highlightUntil expires, a 300ms fade-out period linearly interpolates from highlight values (0.9 opacity, 1.5 emissive) toward calculated activation values instead of snapping abruptly
+- [ ] Claim 6: During the active highlight period (now < _highlightUntil), the region is still skipped entirely via continue (unchanged behavior)
+- [ ] Claim 7: After fade-out completes (fadeElapsed >= HIGHLIGHT_FADE_MS), _highlightUntil is set to 0 and normal rendering resumes
+- [ ] Claim 8: highlightRegion() uses HIGHLIGHT_EMISSIVE and HIGHLIGHT_OPACITY constants instead of hardcoded 1.5 and 0.9 (line 368-369)
+- [ ] Claim 9: The highlight duration remains 1200ms (line 366, unchanged)
+- [ ] Claim 10: All code uses ES5 style (var, not const/let)
+- [ ] Claim 11: No other files were modified
 
 ## Gaps and Assumptions
-- No automated tests exist for this project; verification relied on the inline node script checking string presence and neuron counts
-- Did not verify rendering behavior in a browser (no browser available); changes are data-only array modifications
-- The education panel intro text "59 functional neuron groups" was not modified per plan instructions -- it was already correct and now matches the 59 neurons described across its region sections
+- No automated tests exist to verify visual behavior; fade-out correctness requires manual browser testing
+- The fade interpolation assumes update() is called frequently enough during the 300ms window for smooth animation (depends on the brain tick interval in main.js)
