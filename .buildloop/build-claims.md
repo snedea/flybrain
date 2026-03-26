@@ -1,26 +1,23 @@
-# Build Claims -- T6.3
+# Build Claims -- D17.1
 
 ## Files Changed
-- MODIFY js/main.js -- Added neuronPopulations data structure (59 groups with FlyWire neuron counts), enhanced connectome dot tooltip with population counts, and injected "59 groups / ~130K neurons" summary into connectome panel header
-- MODIFY js/brain3d.js -- Added per-region population total line to 3D brain hover tooltip showing "N groups representing ~X neurons"
-- MODIFY js/education.js -- Replaced hardcoded populationEstimate display with dynamically computed totals from neuronPopulations, with fallback to original strings
+- MODIFY js/education.js -- Fix two data display bugs: "~70" -> "59" group count in two places, and VNC/Motor neuron group count now includes MN_ prefix neurons
 
 ## Verification Results
-- Build: PASS (no build step — static HTML/JS project)
-- Tests: PASS (node tests/run-node.js — 45 passed / 0 failed / 45 total)
+- Build: PASS (no build step -- vanilla JS project)
+- Tests: PASS (`node tests/run-node.js` -- 45 passed / 0 failed / 45 total)
 - Lint: SKIPPED (no linter configured)
 
 ## Claims
-- [ ] Claim 1: `neuronPopulations` is declared as a `var` at module scope in js/main.js with 59 entries mapping neuron group IDs to approximate real neuron counts
-- [ ] Claim 2: The connectome dot panel tooltip (mouseover on `.brainNode` elements) appends " — represents ~N neurons" with locale-formatted count from neuronPopulations, or empty string if no entry exists
-- [ ] Claim 3: An IIFE after the connectome node loop creates a `<span class="connectome-summary">` displaying "59 groups / ~130K neurons" and inserts it after the `.connectome-label` element in the DOM
-- [ ] Claim 4: In brain3d.js `_onMouseMove`, before building the tooltip HTML, `regionPopTotal` is computed by summing `neuronPopulations` for all neurons in the hovered region; if > 0, a `<div class="b3d-tip-pop">` line is inserted between the description and the type badge
-- [ ] Claim 5: In education.js `_buildContent`, each region's population display is computed dynamically from `neuronPopulations` (including MN_ prefix collection for VNC/Motor region); falls back to `region.populationEstimate` if `neuronPopulations` is undefined or total is 0
-- [ ] Claim 6: No changes made to index.html, css/main.css, js/constants.js, or js/connectome.js
-- [ ] Claim 7: The `populationEstimate` field in EDUCATION_REGIONS is preserved as fallback — not removed
-- [ ] Claim 8: The existing `neuronDescriptions` object is unchanged
+- [ ] Claim 1: Line 131 intro paragraph now says "59 functional neuron groups" instead of "~70 functional neuron groups"
+- [ ] Claim 2: Line 215 "What's Missing" section now says "Our 59-group model" instead of "Our 70-group model"
+- [ ] Claim 3: Line 157 adds `var mnGroupCount = 0;` counter variable initialized to zero
+- [ ] Claim 4: Line 167 increments `mnGroupCount++` inside the MN_ prefix loop (same condition block that sums populations)
+- [ ] Claim 5: Line 173 displays `(region.neurons.length + mnGroupCount)` instead of `region.neurons.length` in the population div, so VNC/Motor shows 17 (6 static + 11 MN_ dynamic) instead of 6
+- [ ] Claim 6: No other files were modified; no new files were created
+- [ ] Claim 7: The population sum calculation logic is unchanged -- only the display count was fixed
+- [ ] Claim 8: All 45 existing tests pass after the change
 
 ## Gaps and Assumptions
-- The "~130K" in the summary header is intentionally hardcoded per plan spec (refers to total Drosophila brain neuron count, not the sum of neuronPopulations)
-- Smoke testing in a browser was not performed (headless environment); verification is limited to Node.js test suite passing
-- The `NOCI`, `GNG_DESC`, and `CLOCK_DN` entries in neuronPopulations are not referenced by any region in brain3d.js or education.js EDUCATION_REGIONS, but they exist in the data structure for completeness per the plan
+- The exact count of 11 MN_ prefix neurons (yielding 6+11=17) depends on BRAIN.postSynaptic containing exactly 11 MN_ keys at runtime; the code dynamically counts them so any change to the connectome data will be reflected automatically
+- Smoke test (opening index.html in browser) was not performed -- only automated node tests were run

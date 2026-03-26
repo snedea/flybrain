@@ -128,7 +128,7 @@
             // Introduction
             html += '<div class="edu-section">';
             html += '<h2 class="edu-section-title">What is this?</h2>';
-            html += '<p class="edu-text">This is a simplified functional model of the Drosophila melanogaster (fruit fly) brain. The real fly brain contains approximately 130,000 neurons forming around 50 million synaptic connections. Our model compresses this into ~70 functional neuron groups \u2014 clusters of neurons that work together for a specific purpose.</p>';
+            html += '<p class="edu-text">This is a simplified functional model of the Drosophila melanogaster (fruit fly) brain. The real fly brain contains approximately 130,000 neurons forming around 50 million synaptic connections. Our model compresses this into 59 functional neuron groups \u2014 clusters of neurons that work together for a specific purpose.</p>';
             html += '<p class="edu-text">A connectome is a complete map of neural connections in a brain. The fly connectome was fully mapped by the FlyWire consortium in 2024, making Drosophila only the second organism (after C. elegans) with a complete wiring diagram.</p>';
             html += '</div>';
 
@@ -154,6 +154,7 @@
                 }
                 html += '</div>';
                 var eduPopTotal = 0;
+                var mnGroupCount = 0;
                 if (typeof neuronPopulations !== 'undefined') {
                     for (var pi = 0; pi < region.neurons.length; pi++) {
                         eduPopTotal += (neuronPopulations[region.neurons[pi]] || 0);
@@ -163,12 +164,13 @@
                         for (var mi = 0; mi < mnKeys.length; mi++) {
                             if (mnKeys[mi].indexOf('MN_') === 0 && region.neurons.indexOf(mnKeys[mi]) === -1) {
                                 eduPopTotal += (neuronPopulations[mnKeys[mi]] || 0);
+                                mnGroupCount++;
                             }
                         }
                     }
                 }
                 if (eduPopTotal > 0) {
-                    html += '<div class="edu-population">' + region.neurons.length + ' neuron groups representing ~' + eduPopTotal.toLocaleString() + ' real neurons</div>';
+                    html += '<div class="edu-population">' + (region.neurons.length + mnGroupCount) + ' neuron groups representing ~' + eduPopTotal.toLocaleString() + ' real neurons</div>';
                 } else {
                     html += '<div class="edu-population">' + region.populationEstimate + '</div>';
                 }
@@ -210,7 +212,7 @@
             // What's Missing section
             html += '<div class="edu-section">';
             html += '<h2 class="edu-section-title">What\'s Missing</h2>';
-            html += '<p class="edu-text">Our 70-group model is a dramatic simplification. Here\'s what we leave out:</p>';
+            html += '<p class="edu-text">Our 59-group model is a dramatic simplification. Here\'s what we leave out:</p>';
             html += '<ul class="edu-list">';
             html += '<li>Individual neuron dynamics \u2014 each of our groups represents hundreds or thousands of real neurons that fire independently</li>';
             html += '<li>Synaptic plasticity \u2014 real synapses strengthen and weaken with use; our connection weights are fixed</li>';
