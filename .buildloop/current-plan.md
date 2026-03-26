@@ -1,248 +1,187 @@
-# Plan: D1.1
+# Plan: D1.2
 
-Fix movement timing and angle-wrapping bugs in update().
-
-Four bugs, one file: `js/main.js`.
+Fix feed state food-contact gap and conflicting touch stimulus timers.
 
 ## Dependencies
-- list: []
-- commands: []
+- list: none (vanilla JS, no packages)
+- commands: none
 
 ## File Operations (in execution order)
 
 ### 1. MODIFY js/main.js
 - operation: MODIFY
-- reason: Fix all 4 bugs: first-frame speed burst, unbounded angle growth, frame-rate-dependent edge avoidance, frame-rate-dependent deceleration
+- reason: Two bugs to fix: (A) feed state stops fly 20-50px from food so it never reaches contact range, (B) user touch setTimeout and wall-collision frame-counter conflict when both active
 
----
+#### Bug A: Feed state food-contact gap
 
-#### Bug 1: First-frame speed burst (lastTime initialized to 0)
+**Problem:** `evaluateBehaviorEntry()` enters feed state when food is within 50px (via `hasNearbyFood()`), but `computeMovementForBehavior()` sets `targetSpeed = 0` for feed state. Gradual feeding only progresses when `dist <= 20px`. So the fly stops at 20-50px with proboscis extended but never reaches the food.
 
-**Problem:** `var lastTime = 0;` at line 1392 means the first RAF callback computes `dt = timestamp - 0`, which equals the full elapsed time since page load. Even with the 100ms clamp, dtScale is ~6, producing a visible jump.
+**Fix:** In `computeMovementForBehavior()`, replace the blanket `targetSpeed = 0` for feed state with a slow drift toward the nearest food item, stopping only when within contact range (20px).
 
-**Fix:** Set `lastTime = timestamp` on the first frame, then skip update() for that frame.
+**Change 1a: Split feed out of the combined stationary branch**
 
-- anchor: `var lastTime = 0;`
+- anchor: `} else if (state === 'feed' || state === 'groom' || state === 'rest') {`  (line 523)
+- Replace the entire block at line 523-525:
+  ```js
+  } else if (state === 'feed' || state === 'groom' || state === 'rest') {
+  	targetSpeed = 0;
+  	speedChangeInterval = -speed * 0.1;
+  ```
+  with:
+  ```js
+  } else if (state === 'feed') {
+  	// Drift toward nearest food until within contact range (20px)
+  	var nf = nearestFood();
+  	if (nf && nf.dist > 20) {
+  		var foodAngle = Math.atan2(-(nf.item.y - fly.y), nf.item.x - fly.x);
+  		targetDir = foodAngle;
+  		targetSpeed = 0.15;
+  		speedChangeInterval = (targetSpeed - speed) / 30;
+  	} else {
+  		targetSpeed = 0;
+  		speedChangeInterval = -speed * 0.1;
+  	}
+  } else if (state === 'groom' || state === 'rest') {
+  	targetSpeed = 0;
+  	speedChangeInterval = -speed * 0.1;
+  ```
 
-**Changes at line 1392:**
-Replace:
-```js
-var lastTime = 0;
-function loop(timestamp) {
-	var dt = timestamp - lastTime;
-	lastTime = timestamp;
-	// Clamp dt to 100ms to prevent huge jumps after tab-backgrounding
-	if (dt > 100) dt = 100;
-	update(dt);
-	draw();
-	requestAnimationFrame(loop);
-}
-requestAnimationFrame(loop);
-```
-With:
-```js
-var lastTime = -1;
-function loop(timestamp) {
-	if (lastTime < 0) {
-		lastTime = timestamp;
-		draw();
-		requestAnimationFrame(loop);
-		return;
-	}
-	var dt = timestamp - lastTime;
-	lastTime = timestamp;
-	// Clamp dt to 100ms to prevent huge jumps after tab-backgrounding
-	if (dt > 100) dt = 100;
-	update(dt);
-	draw();
-	requestAnimationFrame(loop);
-}
-requestAnimationFrame(loop);
-```
+  Logic:
+  1. Call `nearestFood()` to get the nearest food item and its distance
+  2. If food exists and distance > 20px, set `targetDir` to the angle toward the food using `Math.atan2(-(food.y - fly.y), food.x - fly.x)` (note: y is negated because canvas y is inverted relative to math y, matching the convention used in food-seeking at line 486)
+  3. Set `targetSpeed = 0.15` (slow crawl, ~1/2 the normal explore speed)
+  4. Set `speedChangeInterval = (targetSpeed - speed) / 30` for smooth acceleration
+  5. If food is within 20px or no food exists, fall back to `targetSpeed = 0` with `speedChangeInterval = -speed * 0.1` (same as original)
+  6. The `groom` and `rest` states keep the original stationary behavior in a separate `else if`
 
-**Logic:**
-1. Initialize `lastTime` to `-1` (sentinel value meaning "not yet set").
-2. On the first call to `loop(timestamp)`, check `if (lastTime < 0)`.
-3. If true: set `lastTime = timestamp`, call `draw()` only (so the fly is visible immediately but does not move), request next frame, and `return` early (skipping `update()`).
-4. On all subsequent calls, proceed as before: compute `dt = timestamp - lastTime`, clamp, update, draw.
+**Change 1b: Also update `applyBehaviorMovement()` to allow slow movement in feed state**
 
----
+- anchor: `if (behavior.current === 'feed' || behavior.current === 'groom' ||` (line 554)
+- This block forces speed to 0 for feed/groom/rest/idle states every frame, which would override the drift computed in `computeMovementForBehavior()`.
+- Replace lines 554-561:
+  ```js
+  if (behavior.current === 'feed' || behavior.current === 'groom' ||
+  	behavior.current === 'rest' || behavior.current === 'idle') {
+  	if (speed > 0.05) {
+  		speed *= Math.pow(0.92, dtScale);
+  	} else {
+  		speed = 0;
+  	}
+  }
+  ```
+  with:
+  ```js
+  if (behavior.current === 'groom' ||
+  	behavior.current === 'rest' || behavior.current === 'idle') {
+  	if (speed > 0.05) {
+  		speed *= Math.pow(0.92, dtScale);
+  	} else {
+  		speed = 0;
+  	}
+  }
+  if (behavior.current === 'feed') {
+  	var nf = nearestFood();
+  	if (nf && nf.dist > 20) {
+  		// Allow slow drift: clamp speed to max 0.2 so it doesn't overshoot
+  		if (speed > 0.2) {
+  			speed *= Math.pow(0.92, dtScale);
+  		}
+  	} else {
+  		if (speed > 0.05) {
+  			speed *= Math.pow(0.92, dtScale);
+  		} else {
+  			speed = 0;
+  		}
+  	}
+  }
+  ```
 
-#### Bug 2: Unbounded facingDir and targetDir growth
+  Logic:
+  1. Remove `'feed'` from the existing deceleration block that forces speed to 0
+  2. Add a separate `if` block for feed state
+  3. When food exists and is > 20px away, allow speed up to 0.2 (clamp if over, but don't decelerate to 0)
+  4. When food is within 20px or absent, apply the same deceleration to 0 as before (stop at food)
 
-**Problem:** `facingDir` and `targetDir` are modified throughout the code (lines 1234-1236 for facingDir, lines 468/472/485/495/501/511/539/1267 for targetDir) but never normalized. Over long sessions, their magnitudes grow without bound, degrading floating-point precision.
+#### Bug B: Conflicting touch stimulus timers
 
-**Fix:** Add a `normalizeAngle` helper function near the top of the file, then normalize both `facingDir` and `targetDir` once per frame inside `update()`, after all modifications are complete but before position update.
+**Problem:** `applyTouchTool()` uses `setTimeout(2000ms)` to clear `BRAIN.stimulate.touch`. Wall collision uses `wallTouchResetFrame = frameCount + 120`. If both activate, whichever expires first clears the stimulus for both, because they both write to the same `BRAIN.stimulate.touch = false`.
 
-##### Helper function
+**Fix:** Replace the `setTimeout` in `applyTouchTool()` with the same frame-counted mechanism used by wall collision. Rename `wallTouchResetFrame` to `touchResetFrame` since it now serves both sources. Use `Math.max` to ensure the latest-expiring stimulus wins.
+
+**Change 2a: Rename variable declaration**
 
 - anchor: `var wallTouchResetFrame = 0;` (line 26)
+- Replace with: `var touchResetFrame = 0;`
 
-**Insert AFTER line 26 (after the `wallTouchResetFrame` declaration), BEFORE line 28 (`// Visual feedback effects`):**
-```js
+**Change 2b: Replace setTimeout in applyTouchTool with frame-counter**
 
-// Normalize angle to [-PI, PI] range
-function normalizeAngle(a) {
-	a = a % (2 * Math.PI);
-	if (a > Math.PI) a -= 2 * Math.PI;
-	if (a < -Math.PI) a += 2 * Math.PI;
-	return a;
-}
-```
+- anchor: `setTimeout(function () {` (line 331, inside `applyTouchTool`)
+- Replace lines 331-334:
+  ```js
+  setTimeout(function () {
+  	BRAIN.stimulate.touch = false;
+  	BRAIN.stimulate.touchLocation = null;
+  }, 2000);
+  ```
+  with:
+  ```js
+  touchResetFrame = Math.max(touchResetFrame, frameCount + 120);
+  ```
+  Logic:
+  1. Set `touchResetFrame` to at least `frameCount + 120` (120 frames = ~2 seconds at 60fps, same as the old 2000ms setTimeout)
+  2. Using `Math.max` ensures that if a wall collision already set a later expiry, the user touch doesn't shorten it, and vice versa
 
-**Logic:**
-1. Use modulo to bring the angle into the (-2PI, 2PI) range.
-2. If the result is greater than PI, subtract 2PI.
-3. If less than -PI, add 2PI.
-4. Return the normalized value.
+**Change 2c: Update all wall collision references**
 
-##### Normalize both angles in update()
+- anchor: `wallTouchResetFrame = frameCount + 120;` (appears 4 times at lines 1289, 1293, 1298, 1302)
+- Replace each of the 4 occurrences of:
+  ```js
+  wallTouchResetFrame = frameCount + 120;
+  ```
+  with:
+  ```js
+  touchResetFrame = Math.max(touchResetFrame, frameCount + 120);
+  ```
+  This is a global find-and-replace: replace all `wallTouchResetFrame = frameCount + 120;` with `touchResetFrame = Math.max(touchResetFrame, frameCount + 120);`
 
-- anchor: `targetDir += angleDiffEdge * awayStrength * 0.3;` (line 1267)
+**Change 2d: Update the reset check**
 
-**Insert two normalization lines AFTER line 1268 (`}` closing the `if (edgeBias !== 0 || edgeBiasY !== 0)` block), BEFORE line 1270 (`fly.x += Math.cos(facingDir) * speed;`).**
-
-Insert these exact lines between the closing `}` of the edge avoidance block and the `fly.x +=` line:
-```js
-
-	// Normalize angles to [-PI, PI] to prevent unbounded growth
-	facingDir = normalizeAngle(facingDir);
-	targetDir = normalizeAngle(targetDir);
-```
-
-The resulting code sequence should be:
-```js
-		targetDir += angleDiffEdge * awayStrength * 0.3;
-	}
-
-	// Normalize angles to [-PI, PI] to prevent unbounded growth
-	facingDir = normalizeAngle(facingDir);
-	targetDir = normalizeAngle(targetDir);
-
-	fly.x += Math.cos(facingDir) * speed;
-	fly.y -= Math.sin(facingDir) * speed;
-```
-
----
-
-#### Bug 3: Frame-rate-dependent edge avoidance
-
-**Problem:** Line 1267: `targetDir += angleDiffEdge * awayStrength * 0.3;` is applied once per frame without dt scaling. At 120fps this applies twice per 60fps-equivalent interval, doubling the bias strength.
-
-**Fix:** Multiply by `dtScale`. The `dtScale` variable is already computed at line 1219 (`var dtScale = dt / (1000 / 60);`), but it is local to `update()` so it is accessible at line 1267.
-
-- anchor: `targetDir += angleDiffEdge * awayStrength * 0.3;`
-
-**Replace line 1267:**
-```js
-		targetDir += angleDiffEdge * awayStrength * 0.3;
-```
-With:
-```js
-		targetDir += angleDiffEdge * awayStrength * 0.3 * dtScale;
-```
-
----
-
-#### Bug 4: Frame-rate-dependent deceleration
-
-**Problem:** Line 549: `speed *= 0.92;` is applied once per frame in `applyBehaviorMovement()`. At 120fps it applies twice per 60fps interval: `0.92^2 = 0.8464`, much faster deceleration than intended `0.92`.
-
-**Fix:** Convert the per-frame exponential decay to a dt-scaled version. The formula `speed *= factor^(dtScale)` preserves the same decay rate regardless of frame rate. However, `applyBehaviorMovement()` does not currently receive `dt` as a parameter. We need to pass `dt` to it.
-
-##### Step 1: Change function signature
-
-- anchor: `function applyBehaviorMovement() {` (line 530)
-
-**Replace:**
-```js
-function applyBehaviorMovement() {
-```
-With:
-```js
-function applyBehaviorMovement(dtScale) {
-```
-
-##### Step 2: Change the call site
-
-- anchor: `applyBehaviorMovement();` (line 1217, inside `update(dt)`)
-
-**Replace:**
-```js
-	applyBehaviorMovement();
-```
-With:
-```js
-	applyBehaviorMovement(dtScale);
-```
-
-**But wait** -- `dtScale` is computed at line 1219, AFTER the call at line 1217. We need to move the `dtScale` computation before the call.
-
-**The actual change in update():** Replace lines 1217-1220:
-```js
-	applyBehaviorMovement();
-
-	var dtScale = dt / (1000 / 60);
-	speed += speedChangeInterval * dtScale;
-```
-With:
-```js
-	var dtScale = dt / (1000 / 60);
-	applyBehaviorMovement(dtScale);
-
-	speed += speedChangeInterval * dtScale;
-```
-
-##### Step 3: Apply dt-scaled deceleration
-
-- anchor: `speed *= 0.92;` (line 549)
-
-**Replace:**
-```js
-			speed *= 0.92;
-```
-With:
-```js
-			speed *= Math.pow(0.92, dtScale);
-```
-
-**Logic:** `Math.pow(0.92, dtScale)` produces:
-- dtScale=1 (60fps): `0.92^1 = 0.92` (same as before)
-- dtScale=0.5 (120fps): `0.92^0.5 = 0.9592` (less decay per frame, but applied twice = 0.92)
-- dtScale=2 (30fps): `0.92^2 = 0.8464` (more decay per frame, compensating for fewer frames)
-
----
-
-## Execution Order Summary
-
-Apply changes in this exact order to avoid line-number conflicts:
-
-1. **Insert `normalizeAngle` helper** after line 26 (top of file, before `// Visual feedback effects`). This is an insertion only, no deletions.
-
-2. **Modify `applyBehaviorMovement` signature** at line 530: add `dtScale` parameter.
-
-3. **Modify deceleration** at line 549: change `speed *= 0.92` to `speed *= Math.pow(0.92, dtScale)`.
-
-4. **Modify `update()` function** starting at line 1216:
-   a. Move `dtScale` computation before `applyBehaviorMovement()` call (reorder lines 1217-1220).
-   b. Pass `dtScale` to `applyBehaviorMovement(dtScale)`.
-
-5. **Modify edge avoidance** at line 1267: multiply by `dtScale`.
-
-6. **Insert angle normalization** between the edge avoidance block's closing `}` and the `fly.x +=` line.
-
-7. **Modify RAF loop** at lines 1392-1402: change `lastTime = 0` to `lastTime = -1`, add first-frame guard.
+- anchor: `if (wallTouchResetFrame > 0 && frameCount >= wallTouchResetFrame) {` (line 1345)
+- Replace lines 1345-1348:
+  ```js
+  if (wallTouchResetFrame > 0 && frameCount >= wallTouchResetFrame) {
+  	BRAIN.stimulate.touch = false;
+  	wallTouchResetFrame = 0;
+  }
+  ```
+  with:
+  ```js
+  if (touchResetFrame > 0 && frameCount >= touchResetFrame) {
+  	BRAIN.stimulate.touch = false;
+  	BRAIN.stimulate.touchLocation = null;
+  	touchResetFrame = 0;
+  }
+  ```
+  Logic:
+  1. Replace `wallTouchResetFrame` with `touchResetFrame` in the condition and reset
+  2. Add `BRAIN.stimulate.touchLocation = null;` -- the old setTimeout cleared this but the old wall collision reset did not. Now that both sources share a single reset, touchLocation must be cleared here too so user-initiated touches get their location properly cleaned up.
 
 ## Verification
-- build: no build step (vanilla JS, open index.html in browser)
+- build: Open `index.html` in a browser (no build step -- vanilla JS)
 - lint: no linter configured
 - test: no existing tests
-- smoke: open `index.html` in a browser. Verify: (1) the fly does NOT jump/burst on initial page load -- it should start moving smoothly from a standstill, (2) after 10+ seconds of running, the fly still turns and moves correctly (angle normalization working), (3) the fly turns away from edges at consistent speed regardless of monitor refresh rate (manual observation -- edge avoidance should feel the same), (4) the fly decelerates smoothly when entering feed/groom/rest/idle states.
+- smoke: Perform these manual checks in the browser:
+  1. **Feed drift test:** Select the food tool, place food ~40px away from the fly. Wait for the fly to enter feed state (proboscis extends). Verify the fly slowly drifts toward the food and starts feeding (food shrinks) when it reaches contact range (~20px). Previously the fly would stop and never reach the food.
+  2. **Feed stop test:** Place food directly on the fly (within 20px). Verify the fly stops and feeds normally without drifting.
+  3. **Touch timer test:** Select the touch tool, click on the fly. Within 2 seconds, push the fly into a wall (or wait for it to walk into one). Verify the touch stimulus does not clear prematurely (check `BRAIN.stimulate.touch` in the console -- it should stay true for the full ~2 seconds from the latest stimulus event).
+  4. **Wall collision test:** Let the fly walk into a wall normally. Verify `BRAIN.stimulate.touch` becomes true and clears after ~2 seconds.
 
 ## Constraints
-- Do NOT modify any file other than `js/main.js`.
-- Do NOT change the brain tick interval (`setInterval(updateBrain, 500)`).
-- Do NOT change position update scaling (`fly.x += Math.cos(facingDir) * speed` and `fly.y -= Math.sin(facingDir) * speed`) -- those are not in scope for D1.1.
-- Do NOT change the `computeMovementForBehavior()` function -- it sets targetDir values which will be normalized by the new code in `update()`.
-- Do NOT add or remove any other features. This is a pure bugfix task.
-- Preserve all existing comments. Only add comments where noted above.
+- Do NOT modify any file other than `js/main.js`
+- Do NOT modify SPEC.md, CLAUDE.md, TASKS.md, or files in `.buildloop/` other than this plan
+- Do NOT add new dependencies or change the HTML/CSS
+- Do NOT change the `hasNearbyFood()` threshold (keep at 50px) -- the entry threshold is fine; the fix is to make the fly drift in feed state rather than stop
+- Do NOT change the 20px contact distance for gradual feeding
+- Do NOT change the wall collision bounds (44px top, 90px bottom panel)
+- Do NOT rename `wallTouchResetFrame` in a separate step -- do the rename and logic change atomically in a single pass (find-replace all occurrences)
+- The `nearestFood()` function already exists at line 350 and returns `{ item, dist }` or `null` -- do NOT create a new helper

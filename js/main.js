@@ -23,7 +23,7 @@ var targetSpeed = 0;
 var speedChangeInterval = 0;
 var food = [];
 var frameCount = 0;
-var wallTouchResetFrame = 0;
+var touchResetFrame = 0;
 
 // Normalize angle to [-PI, PI] range
 function normalizeAngle(a) {
@@ -328,10 +328,7 @@ function applyTouchTool(cx, cy) {
 	BRAIN.stimulate.touch = true;
 	BRAIN.stimulate.touchLocation = location;
 
-	setTimeout(function () {
-		BRAIN.stimulate.touch = false;
-		BRAIN.stimulate.touchLocation = null;
-	}, 2000);
+	touchResetFrame = Math.max(touchResetFrame, frameCount + 120);
 }
 
 /**
@@ -520,7 +517,19 @@ function computeMovementForBehavior() {
 			targetSpeed = 0.5;
 			speedChangeInterval = (targetSpeed - speed) / 30;
 		}
-	} else if (state === 'feed' || state === 'groom' || state === 'rest') {
+	} else if (state === 'feed') {
+		// Drift toward nearest food until within contact range (20px)
+		var nf = nearestFood();
+		if (nf && nf.dist > 20) {
+			var foodAngle = Math.atan2(-(nf.item.y - fly.y), nf.item.x - fly.x);
+			targetDir = foodAngle;
+			targetSpeed = 0.15;
+			speedChangeInterval = (targetSpeed - speed) / 30;
+		} else {
+			targetSpeed = 0;
+			speedChangeInterval = -speed * 0.1;
+		}
+	} else if (state === 'groom' || state === 'rest') {
 		targetSpeed = 0;
 		speedChangeInterval = -speed * 0.1;
 	} else {
@@ -551,12 +560,27 @@ function applyBehaviorMovement(dtScale) {
 		}
 	}
 
-	if (behavior.current === 'feed' || behavior.current === 'groom' ||
+	if (behavior.current === 'groom' ||
 		behavior.current === 'rest' || behavior.current === 'idle') {
 		if (speed > 0.05) {
 			speed *= Math.pow(0.92, dtScale);
 		} else {
 			speed = 0;
+		}
+	}
+	if (behavior.current === 'feed') {
+		var nf = nearestFood();
+		if (nf && nf.dist > 20) {
+			// Allow slow drift: clamp speed to max 0.2 so it doesn't overshoot
+			if (speed > 0.2) {
+				speed *= Math.pow(0.92, dtScale);
+			}
+		} else {
+			if (speed > 0.05) {
+				speed *= Math.pow(0.92, dtScale);
+			} else {
+				speed = 0;
+			}
 		}
 	}
 }
@@ -1286,20 +1310,20 @@ function update(dt) {
 	if (fly.x < 0) {
 		fly.x = 0;
 		BRAIN.stimulate.touch = true;
-		wallTouchResetFrame = frameCount + 120;
+		touchResetFrame = Math.max(touchResetFrame, frameCount + 120);
 	} else if (fly.x > window.innerWidth) {
 		fly.x = window.innerWidth;
 		BRAIN.stimulate.touch = true;
-		wallTouchResetFrame = frameCount + 120;
+		touchResetFrame = Math.max(touchResetFrame, frameCount + 120);
 	}
 	if (fly.y < 44) {
 		fly.y = 44;
 		BRAIN.stimulate.touch = true;
-		wallTouchResetFrame = frameCount + 120;
+		touchResetFrame = Math.max(touchResetFrame, frameCount + 120);
 	} else if (fly.y > window.innerHeight - 90) {
 		fly.y = window.innerHeight - 90;
 		BRAIN.stimulate.touch = true;
-		wallTouchResetFrame = frameCount + 120;
+		touchResetFrame = Math.max(touchResetFrame, frameCount + 120);
 	}
 
 	// Food proximity
@@ -1342,9 +1366,10 @@ function update(dt) {
 	}
 
 	// Reset wall-touch stimulus after 120 frames (~2 seconds at 60fps)
-	if (wallTouchResetFrame > 0 && frameCount >= wallTouchResetFrame) {
+	if (touchResetFrame > 0 && frameCount >= touchResetFrame) {
 		BRAIN.stimulate.touch = false;
-		wallTouchResetFrame = 0;
+		BRAIN.stimulate.touchLocation = null;
+		touchResetFrame = 0;
 	}
 
 	frameCount++;

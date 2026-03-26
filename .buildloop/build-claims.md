@@ -1,24 +1,26 @@
-# Build Claims -- D1.1
+# Build Claims -- D1.2
 
 ## Files Changed
-- [MODIFY] js/main.js -- Fix 4 movement timing/angle bugs: first-frame speed burst, unbounded angle growth, frame-rate-dependent edge avoidance, frame-rate-dependent deceleration
+- [MODIFY] js/main.js -- Fix feed state food-contact gap and conflicting touch stimulus timers
 
 ## Verification Results
-- Build: PASS (no build step -- vanilla JS, open index.html in browser)
-- Tests: SKIPPED (no existing tests)
+- Build: PASS (`node --check js/main.js` -- no syntax errors)
+- Tests: SKIPPED (no test suite exists)
 - Lint: SKIPPED (no linter configured)
 
 ## Claims
-- [ ] Bug 1 (first-frame burst): `lastTime` initialized to `-1` (line 1404). First RAF callback sets `lastTime = timestamp`, calls only `draw()`, and returns early -- `update()` is never called with a stale dt on the first frame.
-- [ ] Bug 2 (unbounded angles): `normalizeAngle(a)` helper added at line 28-34. Both `facingDir` and `targetDir` are normalized to `[-PI, PI]` every frame at lines 1279-1280, after all modifications (edge avoidance, facing interpolation) but before position update.
-- [ ] Bug 3 (frame-rate-dependent edge avoidance): Edge avoidance bias at line 1275 now multiplied by `dtScale`, making it frame-rate-independent.
-- [ ] Bug 4 (frame-rate-dependent deceleration): `applyBehaviorMovement` now takes `dtScale` parameter (line 538). Deceleration at line 557 changed from `speed *= 0.92` to `speed *= Math.pow(0.92, dtScale)`. The `dtScale` computation (line 1225) was moved before the `applyBehaviorMovement(dtScale)` call (line 1226) to ensure it is available.
-- [ ] No other files were modified. No features added or removed.
-- [ ] `normalizeAngle` uses modulo + bounds check, not a while-loop, so it handles any magnitude in O(1).
-- [ ] Existing comments preserved. Only new comments added where specified by plan.
+- [ ] Claim 1: In `computeMovementForBehavior()`, feed state no longer sets `targetSpeed = 0` unconditionally. When `nearestFood()` returns a food item with `dist > 20`, the fly drifts toward it at `targetSpeed = 0.15` with `targetDir` aimed at the food. When food is within 20px or absent, `targetSpeed = 0` (original behavior). See lines 520-531.
+- [ ] Claim 2: In `applyBehaviorMovement()`, feed state is handled in its own `if` block (line 571) separate from groom/rest/idle. When food exists and is > 20px away, speed is only clamped if > 0.2 (allows the slow drift). When food is within 20px or absent, the original deceleration-to-zero logic applies. See lines 571-584.
+- [ ] Claim 3: The `groom` and `rest` states retain the original `targetSpeed = 0` and deceleration behavior unchanged (lines 532-534 and 563-570).
+- [ ] Claim 4: `wallTouchResetFrame` has been renamed to `touchResetFrame` globally (declaration at line 26, all 6 usage sites). Zero remaining references to `wallTouchResetFrame`.
+- [ ] Claim 5: The `setTimeout(2000ms)` in `applyTouchTool()` that cleared `BRAIN.stimulate.touch` and `touchLocation` has been replaced with `touchResetFrame = Math.max(touchResetFrame, frameCount + 120)` (line 331). No remaining `setTimeout` calls related to touch stimulus.
+- [ ] Claim 6: All 4 wall collision sites now use `touchResetFrame = Math.max(touchResetFrame, frameCount + 120)` instead of direct assignment (lines 1313, 1317, 1322, 1326). The `Math.max` ensures whichever stimulus (user touch or wall collision) expires later wins.
+- [ ] Claim 7: The unified reset check at line 1369 now also clears `BRAIN.stimulate.touchLocation = null` in addition to `BRAIN.stimulate.touch = false`, ensuring user-initiated touch locations are properly cleaned up.
+- [ ] Claim 8: The `hasNearbyFood()` threshold (50px) and gradual feeding contact distance (20px) are unchanged.
+- [ ] Claim 9: No files other than `js/main.js` were modified. No new dependencies or HTML/CSS changes.
 
 ## Gaps and Assumptions
-- Smoke testing (page load, edge avoidance, deceleration smoothness) requires manual browser verification -- not automatable in this project.
-- The `normalizeAngle` function handles the edge case where modulo returns exactly PI or -PI correctly (the `>` and `<` checks exclude the boundary, keeping values in `[-PI, PI]`).
-- The `facingDir` interpolation at lines 1242-1244 (`+= 0.1 * dtScale`) was already dt-scaled before this change and was not modified.
-- Position update (`fly.x += cos * speed`, `fly.y -= sin * speed`) is NOT dt-scaled per the plan constraints -- this is a pre-existing behavior outside D1.1 scope.
+- The `nearestFood()` function is called twice per frame in feed state (once in `computeMovementForBehavior`, once in `applyBehaviorMovement`). This is a minor performance consideration but food arrays are typically small so it should be negligible.
+- The drift speed of 0.15 and clamp of 0.2 were taken from the plan without empirical tuning. If the fly moves too slowly or too quickly toward food, these constants may need adjustment.
+- The `Math.atan2(-(nf.item.y - fly.y), nf.item.x - fly.x)` angle convention (negated y) matches the existing food-seeking code at line 486 but was not independently verified against all movement code paths.
+- Manual smoke testing (feed drift, feed stop, touch timer overlap, wall collision) was not performed -- only syntax validation via `node --check`.
