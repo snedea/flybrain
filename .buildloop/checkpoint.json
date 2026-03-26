@@ -1,6 +1,0 @@
-{
-  "task_id": "D4.2",
-  "task_desc": "Fix MN_HEAD motor neuron signal being silently discarded and clean up dead code in connectome -- (1) readMotor('MN_HEAD') at connectome.js:470 reads and drains the MN_HEAD motor neuron every tick but the result (var head) is never used in any accumulator; MN_HEAD receives real signal from 4 sources in constants.js (SEZ_FEED weight 4 for head lowering toward food, SEZ_GROOM weight 4 for grooming head position, CX_FC weight 4 for head turns, GUS_GRN_SWEET weight 3 for head lowering) but none of this signal has any behavioral effect; either wire head into an accumulator that influences targetDir/orientation or incorporate it into accumGroom (which currently only uses abdomen + min(legL1, legR1) at connectome.js:471), (2) BRAIN._isMoving/_isFeeding/_isGrooming flag assignments at connectome.js:377-380 are dead code because syncBrainFlags() in main.js:466-471 immediately overwrites them after every BRAIN.update() call in updateBrain() at main.js:194-203; remove the dead assignments to prevent confusion, (3) duplicate JSDoc comment blocks for drawProboscis at main.js:1084-1087 (stale copy before the real one at 1088-1091) and drawLegs at main.js:1110-1113 (stale copy before the real one at 1114-1118). Files: js/connectome.js, js/main.js.",
-  "completed_stage": "builder",
-  "timestamp": "2026-03-26T04:39:18.233258+00:00"
-}
