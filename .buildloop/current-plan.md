@@ -1,187 +1,56 @@
-# Plan: D1.2
-
-Fix feed state food-contact gap and conflicting touch stimulus timers.
+# Plan: D1.3
 
 ## Dependencies
-- list: none (vanilla JS, no packages)
+- list: none
 - commands: none
+
+## Context
+
+The `#drive-meters` container has 6 rows (1 State + 5 drive bars) inside `#bottom-panel` which has `height: 90px` and `padding: 0.5rem 1rem`. The usable content height is 90 - 2*8 = 74px. But 6 rows at ~14px each + 5 gaps of 0.4rem (~6.4px) = ~116px, causing overflow that clips the Groom meter.
+
+**Strategy**: Reduce gap, bar height, line-height, and vertical padding so all 6 rows fit within the 90px panel. This avoids changing the panel height and avoids any JS changes (the `innerHeight - 90` constants remain correct).
+
+**Math**: With gap `0.15rem` (2.4px), bar height `6px`, line-height `1`, padding `0.25rem` top/bottom (4px each):
+- Content space: 90 - 8 = 82px
+- Row height: max(0.7rem * 1.0, 6px) = 11.2px
+- Total: 6 * 11.2 + 5 * 2.4 = 67.2 + 12 = 79.2px
+- Margin: 2.8px to spare
+
+No HTML changes. No JS changes.
 
 ## File Operations (in execution order)
 
-### 1. MODIFY js/main.js
+### 1. MODIFY css/main.css
 - operation: MODIFY
-- reason: Two bugs to fix: (A) feed state stops fly 20-50px from food so it never reaches contact range, (B) user touch setTimeout and wall-collision frame-counter conflict when both active
+- reason: Reduce drive meter row/gap/padding sizing so all 6 rows fit within the 90px bottom panel without overflow
 
-#### Bug A: Feed state food-contact gap
+#### Change A: Reduce bottom panel vertical padding
+- anchor: `padding: 0.5rem 1rem;` (inside `#bottom-panel` rule at line 152)
+- action: Change `padding: 0.5rem 1rem;` to `padding: 0.25rem 1rem;`
 
-**Problem:** `evaluateBehaviorEntry()` enters feed state when food is within 50px (via `hasNearbyFood()`), but `computeMovementForBehavior()` sets `targetSpeed = 0` for feed state. Gradual feeding only progresses when `dist <= 20px`. So the fly stops at 20-50px with proboscis extended but never reaches the food.
+#### Change B: Reduce drive-meters gap
+- anchor: `gap: 0.4rem;` (inside `#drive-meters` rule at line 177)
+- action: Change `gap: 0.4rem;` to `gap: 0.15rem;`
 
-**Fix:** In `computeMovementForBehavior()`, replace the blanket `targetSpeed = 0` for feed state with a slow drift toward the nearest food item, stopping only when within contact range (20px).
+#### Change C: Add line-height to drive-row
+- anchor: `gap: 0.5rem;` (inside `.drive-row` rule at line 183)
+- action: Add `line-height: 1;` after `gap: 0.5rem;` inside the `.drive-row` rule
 
-**Change 1a: Split feed out of the combined stationary branch**
-
-- anchor: `} else if (state === 'feed' || state === 'groom' || state === 'rest') {`  (line 523)
-- Replace the entire block at line 523-525:
-  ```js
-  } else if (state === 'feed' || state === 'groom' || state === 'rest') {
-  	targetSpeed = 0;
-  	speedChangeInterval = -speed * 0.1;
-  ```
-  with:
-  ```js
-  } else if (state === 'feed') {
-  	// Drift toward nearest food until within contact range (20px)
-  	var nf = nearestFood();
-  	if (nf && nf.dist > 20) {
-  		var foodAngle = Math.atan2(-(nf.item.y - fly.y), nf.item.x - fly.x);
-  		targetDir = foodAngle;
-  		targetSpeed = 0.15;
-  		speedChangeInterval = (targetSpeed - speed) / 30;
-  	} else {
-  		targetSpeed = 0;
-  		speedChangeInterval = -speed * 0.1;
-  	}
-  } else if (state === 'groom' || state === 'rest') {
-  	targetSpeed = 0;
-  	speedChangeInterval = -speed * 0.1;
-  ```
-
-  Logic:
-  1. Call `nearestFood()` to get the nearest food item and its distance
-  2. If food exists and distance > 20px, set `targetDir` to the angle toward the food using `Math.atan2(-(food.y - fly.y), food.x - fly.x)` (note: y is negated because canvas y is inverted relative to math y, matching the convention used in food-seeking at line 486)
-  3. Set `targetSpeed = 0.15` (slow crawl, ~1/2 the normal explore speed)
-  4. Set `speedChangeInterval = (targetSpeed - speed) / 30` for smooth acceleration
-  5. If food is within 20px or no food exists, fall back to `targetSpeed = 0` with `speedChangeInterval = -speed * 0.1` (same as original)
-  6. The `groom` and `rest` states keep the original stationary behavior in a separate `else if`
-
-**Change 1b: Also update `applyBehaviorMovement()` to allow slow movement in feed state**
-
-- anchor: `if (behavior.current === 'feed' || behavior.current === 'groom' ||` (line 554)
-- This block forces speed to 0 for feed/groom/rest/idle states every frame, which would override the drift computed in `computeMovementForBehavior()`.
-- Replace lines 554-561:
-  ```js
-  if (behavior.current === 'feed' || behavior.current === 'groom' ||
-  	behavior.current === 'rest' || behavior.current === 'idle') {
-  	if (speed > 0.05) {
-  		speed *= Math.pow(0.92, dtScale);
-  	} else {
-  		speed = 0;
-  	}
-  }
-  ```
-  with:
-  ```js
-  if (behavior.current === 'groom' ||
-  	behavior.current === 'rest' || behavior.current === 'idle') {
-  	if (speed > 0.05) {
-  		speed *= Math.pow(0.92, dtScale);
-  	} else {
-  		speed = 0;
-  	}
-  }
-  if (behavior.current === 'feed') {
-  	var nf = nearestFood();
-  	if (nf && nf.dist > 20) {
-  		// Allow slow drift: clamp speed to max 0.2 so it doesn't overshoot
-  		if (speed > 0.2) {
-  			speed *= Math.pow(0.92, dtScale);
-  		}
-  	} else {
-  		if (speed > 0.05) {
-  			speed *= Math.pow(0.92, dtScale);
-  		} else {
-  			speed = 0;
-  		}
-  	}
-  }
-  ```
-
-  Logic:
-  1. Remove `'feed'` from the existing deceleration block that forces speed to 0
-  2. Add a separate `if` block for feed state
-  3. When food exists and is > 20px away, allow speed up to 0.2 (clamp if over, but don't decelerate to 0)
-  4. When food is within 20px or absent, apply the same deceleration to 0 as before (stop at food)
-
-#### Bug B: Conflicting touch stimulus timers
-
-**Problem:** `applyTouchTool()` uses `setTimeout(2000ms)` to clear `BRAIN.stimulate.touch`. Wall collision uses `wallTouchResetFrame = frameCount + 120`. If both activate, whichever expires first clears the stimulus for both, because they both write to the same `BRAIN.stimulate.touch = false`.
-
-**Fix:** Replace the `setTimeout` in `applyTouchTool()` with the same frame-counted mechanism used by wall collision. Rename `wallTouchResetFrame` to `touchResetFrame` since it now serves both sources. Use `Math.max` to ensure the latest-expiring stimulus wins.
-
-**Change 2a: Rename variable declaration**
-
-- anchor: `var wallTouchResetFrame = 0;` (line 26)
-- Replace with: `var touchResetFrame = 0;`
-
-**Change 2b: Replace setTimeout in applyTouchTool with frame-counter**
-
-- anchor: `setTimeout(function () {` (line 331, inside `applyTouchTool`)
-- Replace lines 331-334:
-  ```js
-  setTimeout(function () {
-  	BRAIN.stimulate.touch = false;
-  	BRAIN.stimulate.touchLocation = null;
-  }, 2000);
-  ```
-  with:
-  ```js
-  touchResetFrame = Math.max(touchResetFrame, frameCount + 120);
-  ```
-  Logic:
-  1. Set `touchResetFrame` to at least `frameCount + 120` (120 frames = ~2 seconds at 60fps, same as the old 2000ms setTimeout)
-  2. Using `Math.max` ensures that if a wall collision already set a later expiry, the user touch doesn't shorten it, and vice versa
-
-**Change 2c: Update all wall collision references**
-
-- anchor: `wallTouchResetFrame = frameCount + 120;` (appears 4 times at lines 1289, 1293, 1298, 1302)
-- Replace each of the 4 occurrences of:
-  ```js
-  wallTouchResetFrame = frameCount + 120;
-  ```
-  with:
-  ```js
-  touchResetFrame = Math.max(touchResetFrame, frameCount + 120);
-  ```
-  This is a global find-and-replace: replace all `wallTouchResetFrame = frameCount + 120;` with `touchResetFrame = Math.max(touchResetFrame, frameCount + 120);`
-
-**Change 2d: Update the reset check**
-
-- anchor: `if (wallTouchResetFrame > 0 && frameCount >= wallTouchResetFrame) {` (line 1345)
-- Replace lines 1345-1348:
-  ```js
-  if (wallTouchResetFrame > 0 && frameCount >= wallTouchResetFrame) {
-  	BRAIN.stimulate.touch = false;
-  	wallTouchResetFrame = 0;
-  }
-  ```
-  with:
-  ```js
-  if (touchResetFrame > 0 && frameCount >= touchResetFrame) {
-  	BRAIN.stimulate.touch = false;
-  	BRAIN.stimulate.touchLocation = null;
-  	touchResetFrame = 0;
-  }
-  ```
-  Logic:
-  1. Replace `wallTouchResetFrame` with `touchResetFrame` in the condition and reset
-  2. Add `BRAIN.stimulate.touchLocation = null;` -- the old setTimeout cleared this but the old wall collision reset did not. Now that both sources share a single reset, touchLocation must be cleared here too so user-initiated touches get their location properly cleaned up.
+#### Change D: Reduce drive bar height
+- anchor: `height: 8px;` (inside `.drive-bar-bg` rule at line 197)
+- action: Change `height: 8px;` to `height: 6px;`
 
 ## Verification
-- build: Open `index.html` in a browser (no build step -- vanilla JS)
-- lint: no linter configured
-- test: no existing tests
-- smoke: Perform these manual checks in the browser:
-  1. **Feed drift test:** Select the food tool, place food ~40px away from the fly. Wait for the fly to enter feed state (proboscis extends). Verify the fly slowly drifts toward the food and starts feeding (food shrinks) when it reaches contact range (~20px). Previously the fly would stop and never reach the food.
-  2. **Feed stop test:** Place food directly on the fly (within 20px). Verify the fly stops and feeds normally without drifting.
-  3. **Touch timer test:** Select the touch tool, click on the fly. Within 2 seconds, push the fly into a wall (or wait for it to walk into one). Verify the touch stimulus does not clear prematurely (check `BRAIN.stimulate.touch` in the console -- it should stay true for the full ~2 seconds from the latest stimulus event).
-  4. **Wall collision test:** Let the fly walk into a wall normally. Verify `BRAIN.stimulate.touch` becomes true and clears after ~2 seconds.
+- build: No build step (vanilla HTML/CSS/JS)
+- lint: No linter configured
+- test: No automated tests
+- smoke: Open `index.html` in a browser. Verify that all 6 rows in the bottom-right drive meters panel are fully visible: State, Hunger, Fear, Fatigue, Curiosity, and Groom. None should be clipped or hidden by overflow. The bottom panel should not visually change its overall height (remains 90px). The fly should still be unable to walk behind the bottom panel (the `innerHeight - 90` bound is unchanged).
 
 ## Constraints
-- Do NOT modify any file other than `js/main.js`
-- Do NOT modify SPEC.md, CLAUDE.md, TASKS.md, or files in `.buildloop/` other than this plan
-- Do NOT add new dependencies or change the HTML/CSS
-- Do NOT change the `hasNearbyFood()` threshold (keep at 50px) -- the entry threshold is fine; the fix is to make the fly drift in feed state rather than stop
-- Do NOT change the 20px contact distance for gradual feeding
-- Do NOT change the wall collision bounds (44px top, 90px bottom panel)
-- Do NOT rename `wallTouchResetFrame` in a separate step -- do the rename and logic change atomically in a single pass (find-replace all occurrences)
-- The `nearestFood()` function already exists at line 350 and returns `{ item, dist }` or `null` -- do NOT create a new helper
+- Do NOT modify index.html
+- Do NOT modify js/main.js -- the panel height stays at 90px so the `innerHeight - 90` Y-bound constants remain correct
+- Do NOT change the panel height (`height: 90px` on `#bottom-panel`)
+- Do NOT add `overflow: auto` or scrollbars to the drive meters
+- Do NOT change the width of `#drive-meters` (stays at 180px)
+- Do NOT change colors or visual identity of the drive bars
+- Do NOT restructure the HTML layout (no 2-column grid) -- pure CSS sizing adjustments only

@@ -1,26 +1,26 @@
-# Build Claims -- D1.2
+# Build Claims -- D1.3
 
 ## Files Changed
-- [MODIFY] js/main.js -- Fix feed state food-contact gap and conflicting touch stimulus timers
+- [MODIFY] css/main.css -- Reduced drive meter row/gap/padding sizing so all 6 rows fit within the 90px bottom panel without overflow
 
 ## Verification Results
-- Build: PASS (`node --check js/main.js` -- no syntax errors)
-- Tests: SKIPPED (no test suite exists)
+- Build: PASS (no build step -- vanilla HTML/CSS/JS)
+- Tests: SKIPPED (no automated tests)
 - Lint: SKIPPED (no linter configured)
 
 ## Claims
-- [ ] Claim 1: In `computeMovementForBehavior()`, feed state no longer sets `targetSpeed = 0` unconditionally. When `nearestFood()` returns a food item with `dist > 20`, the fly drifts toward it at `targetSpeed = 0.15` with `targetDir` aimed at the food. When food is within 20px or absent, `targetSpeed = 0` (original behavior). See lines 520-531.
-- [ ] Claim 2: In `applyBehaviorMovement()`, feed state is handled in its own `if` block (line 571) separate from groom/rest/idle. When food exists and is > 20px away, speed is only clamped if > 0.2 (allows the slow drift). When food is within 20px or absent, the original deceleration-to-zero logic applies. See lines 571-584.
-- [ ] Claim 3: The `groom` and `rest` states retain the original `targetSpeed = 0` and deceleration behavior unchanged (lines 532-534 and 563-570).
-- [ ] Claim 4: `wallTouchResetFrame` has been renamed to `touchResetFrame` globally (declaration at line 26, all 6 usage sites). Zero remaining references to `wallTouchResetFrame`.
-- [ ] Claim 5: The `setTimeout(2000ms)` in `applyTouchTool()` that cleared `BRAIN.stimulate.touch` and `touchLocation` has been replaced with `touchResetFrame = Math.max(touchResetFrame, frameCount + 120)` (line 331). No remaining `setTimeout` calls related to touch stimulus.
-- [ ] Claim 6: All 4 wall collision sites now use `touchResetFrame = Math.max(touchResetFrame, frameCount + 120)` instead of direct assignment (lines 1313, 1317, 1322, 1326). The `Math.max` ensures whichever stimulus (user touch or wall collision) expires later wins.
-- [ ] Claim 7: The unified reset check at line 1369 now also clears `BRAIN.stimulate.touchLocation = null` in addition to `BRAIN.stimulate.touch = false`, ensuring user-initiated touch locations are properly cleaned up.
-- [ ] Claim 8: The `hasNearbyFood()` threshold (50px) and gradual feeding contact distance (20px) are unchanged.
-- [ ] Claim 9: No files other than `js/main.js` were modified. No new dependencies or HTML/CSS changes.
+- [ ] `#bottom-panel` padding changed from `0.5rem 1rem` to `0.25rem 1rem` (css/main.css:152), gaining ~8px of vertical content space
+- [ ] `#drive-meters` gap changed from `0.4rem` to `0.15rem` (css/main.css:177), saving ~12.5px across 5 gaps
+- [ ] `.drive-row` now has `line-height: 1` (css/main.css:184), reducing per-row height
+- [ ] `.drive-bar-bg` height changed from `8px` to `6px` (css/main.css:197), reducing bar thickness
+- [ ] Total estimated content height is ~79.2px, fitting within the ~82px available (90px panel - 2*4px padding)
+- [ ] `#bottom-panel` height remains `90px` (css/main.css:147) -- unchanged
+- [ ] `#drive-meters` width remains `180px` (css/main.css:172) -- unchanged
+- [ ] No drive bar colors were changed (driveHunger, driveFear, driveFatigue, driveCuriosity, driveGroom all unchanged)
+- [ ] js/main.js was NOT modified -- `innerHeight - 90` Y-bound constants at lines 1276, 1323-1324 remain correct
+- [ ] index.html was NOT modified -- no HTML restructuring
 
 ## Gaps and Assumptions
-- The `nearestFood()` function is called twice per frame in feed state (once in `computeMovementForBehavior`, once in `applyBehaviorMovement`). This is a minor performance consideration but food arrays are typically small so it should be negligible.
-- The drift speed of 0.15 and clamp of 0.2 were taken from the plan without empirical tuning. If the fly moves too slowly or too quickly toward food, these constants may need adjustment.
-- The `Math.atan2(-(nf.item.y - fly.y), nf.item.x - fly.x)` angle convention (negated y) matches the existing food-seeking code at line 486 but was not independently verified against all movement code paths.
-- Manual smoke testing (feed drift, feed stop, touch timer overlap, wall collision) was not performed -- only syntax validation via `node --check`.
+- No browser testing performed (headless smoke test not available in this environment)
+- Math assumes default browser font metrics for `0.7rem` with `line-height: 1` yielding ~11.2px row height; actual rendering may vary slightly across browsers
+- The 2.8px margin of spare space is tight; very large default font sizes or unusual browser zoom levels could still cause minor clipping

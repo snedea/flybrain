@@ -149,7 +149,7 @@ canvas {
     border-top: 1px solid var(--border);
     display: flex;
     z-index: 20;
-    padding: 0.5rem 1rem;
+    padding: 0.25rem 1rem;
     gap: 1rem;
     font-family: system-ui, -apple-system, sans-serif;
 }
@@ -174,13 +174,14 @@ canvas {
     display: flex;
     flex-direction: column;
     justify-content: center;
-    gap: 0.4rem;
+    gap: 0.15rem;
 }
 
 .drive-row {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    line-height: 1;
 }
 
 .drive-label {
@@ -193,7 +194,7 @@ canvas {
 
 .drive-bar-bg {
     flex: 1;
-    height: 8px;
+    height: 6px;
     background: rgba(255, 255, 255, 0.06);
     border-radius: 4px;
     overflow: hidden;
