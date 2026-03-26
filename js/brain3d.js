@@ -54,7 +54,7 @@ var REGION_DEFS = [
         name: 'Central Complex',
         description: 'Navigation — heading direction, path integration, locomotion coordination',
         type: 'central',
-        neurons: ['CX_EPG', 'CX_PFN', 'CX_FC', 'CX_HDELTA'],
+        neurons: ['CX_EPG', 'CX_PFN', 'CX_FC', 'CX_HDELTA', 'CLOCK_DN'],
         meshDefs: [
             { geo: 'cylinder', args: [0.8, 0.8, 0.2, 16], pos: [0, 0.5, 0], scale: [1, 1, 1], rot: [Math.PI / 2, 0, 0] }
         ]
@@ -73,7 +73,7 @@ var REGION_DEFS = [
         name: 'Subesophageal Zone',
         description: 'Feeding and grooming command center — taste processing, motor commands',
         type: 'central',
-        neurons: ['SEZ_FEED', 'SEZ_GROOM', 'SEZ_WATER', 'GUS_GRN_SWEET', 'GUS_GRN_BITTER', 'GUS_GRN_WATER'],
+        neurons: ['SEZ_FEED', 'SEZ_GROOM', 'SEZ_WATER', 'GUS_GRN_SWEET', 'GUS_GRN_BITTER', 'GUS_GRN_WATER', 'GNG_DESC'],
         meshDefs: [
             { geo: 'sphere', args: [0.7, 12, 10], pos: [0, -1.0, 1.2], scale: [1.2, 0.7, 0.8] }
         ]
@@ -101,7 +101,7 @@ var REGION_DEFS = [
         name: 'Mechanosensory',
         description: 'Touch and proprioception — bristle, wind, and body position sensing',
         type: 'sensory',
-        neurons: ['MECH_BRISTLE', 'MECH_JO', 'MECH_CHORD', 'ANTENNAL_MECH'],
+        neurons: ['MECH_BRISTLE', 'MECH_JO', 'MECH_CHORD', 'ANTENNAL_MECH', 'NOCI'],
         meshDefs: [
             { geo: 'sphere', args: [0.35, 10, 8], pos: [0, 0.7, 1.8], scale: [1, 1, 1] }
         ]

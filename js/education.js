@@ -33,7 +33,7 @@
         {
             id: 'central-complex',
             name: 'Central Complex',
-            neurons: ['CX_EPG', 'CX_PFN', 'CX_FC', 'CX_HDELTA'],
+            neurons: ['CX_EPG', 'CX_PFN', 'CX_FC', 'CX_HDELTA', 'CLOCK_DN'],
             type: 'central',
             explanation: 'The central complex is the fly\'s navigation hub. It maintains an internal compass, tracks the fly\'s heading, and coordinates locomotion patterns.',
             analogy: 'Like a GPS and steering system combined \u2014 it knows which way the fly is pointing and plans where to go.',
@@ -53,7 +53,7 @@
         {
             id: 'sez',
             name: 'Subesophageal Zone',
-            neurons: ['SEZ_FEED', 'SEZ_GROOM', 'SEZ_WATER', 'GUS_GRN_SWEET', 'GUS_GRN_BITTER', 'GUS_GRN_WATER'],
+            neurons: ['SEZ_FEED', 'SEZ_GROOM', 'SEZ_WATER', 'GUS_GRN_SWEET', 'GUS_GRN_BITTER', 'GUS_GRN_WATER', 'GNG_DESC'],
             type: 'central',
             explanation: 'The subesophageal zone (SEZ) is the feeding and grooming command center. It processes taste information and sends motor commands to extend the proboscis or initiate grooming.',
             analogy: 'Like a cafeteria manager \u2014 it decides whether to eat based on what the taste buds report.',
@@ -84,7 +84,7 @@
         {
             id: 'mechanosensory',
             name: 'Mechanosensory',
-            neurons: ['MECH_BRISTLE', 'MECH_JO', 'MECH_CHORD', 'ANTENNAL_MECH'],
+            neurons: ['MECH_BRISTLE', 'MECH_JO', 'MECH_CHORD', 'ANTENNAL_MECH', 'NOCI'],
             type: 'sensory',
             explanation: 'Mechanosensory neurons detect touch, wind, gravity, and body position. Bristle neurons respond to physical contact, Johnston\'s organ senses wind and gravity via the antennae, and chordotonal organs track limb positions.',
             analogy: 'Like your sense of touch combined with your inner ear balance system.',
