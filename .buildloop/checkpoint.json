@@ -1,6 +1,0 @@
-{
-  "task_id": "D1.3",
-  "task_desc": "Fix bottom panel overflow clipping drive meters -- adding the Groom drive meter in T4.1 brought the total to 6 rows (State + 5 drives) in #drive-meters but the fixed 90px bottom panel height with 0.5rem padding leaves only ~74px of content space; 6 rows at ~14px each plus 5 gaps of 0.4rem (~6.4px) totals ~116px, causing vertical overflow that clips the bottom rows (Groom meter is likely invisible or partially cut off); fix by reducing row/gap sizing or switching to a compact 2-column layout, and if the panel height changes update the fly Y-position bottom bound (innerHeight - 90 in main.js:1244,1287) to match. Files: css/main.css, js/main.js.",
-  "completed_stage": "builder",
-  "timestamp": "2026-03-26T04:08:00.071859+00:00"
-}
