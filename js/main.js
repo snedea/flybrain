@@ -22,9 +22,8 @@ var speed = 0;
 var targetSpeed = 0;
 var speedChangeInterval = 0;
 var food = [];
-var frameCount = 0;
-var touchResetFrame = 0;
-var windResetFrame = 0;
+var touchResetTime = 0;
+var windResetTime = 0;
 var dragToolOrigin = null;
 var currentDtScale = 1;
 
@@ -272,7 +271,7 @@ function handleCanvasMousedown(event) {
 	} else if (activeTool === 'air') {
 		isDragging = true;
 		dragToolOrigin = 'air';
-		windResetFrame = 0;
+		windResetTime = 0;
 		dragStart.x = cx;
 		dragStart.y = cy;
 		BRAIN.stimulate.wind = true;
@@ -304,7 +303,7 @@ function handleCanvasMouseup(event) {
 				BRAIN.stimulate.windStrength = Math.min(1, dragDist / 150);
 			}
 			BRAIN.stimulate.wind = true;
-			windResetFrame = frameCount + 120;
+			windResetTime = Date.now() + 2000;
 		}
 		isDragging = false;
 		dragToolOrigin = null;
@@ -340,7 +339,7 @@ function applyTouchTool(cx, cy) {
 	BRAIN.stimulate.touch = true;
 	BRAIN.stimulate.touchLocation = location;
 
-	touchResetFrame = Math.max(touchResetFrame, frameCount + 120);
+	touchResetTime = Math.max(touchResetTime, Date.now() + 2000);
 }
 
 /**
@@ -439,6 +438,15 @@ function updateBehaviorState() {
 			behavior.cooldowns[behavior.current] = now + BEHAVIOR_COOLDOWN[behavior.current];
 		}
 		behavior.previous = behavior.current;
+		// Reset feeding timers when exiting feed state to prevent stale feedStart leak
+		if (behavior.current === 'feed') {
+			for (var fi = 0; fi < food.length; fi++) {
+				if (food[fi].feedStart !== 0) {
+					food[fi].feedStart = 0;
+					food[fi].radius = 10;
+				}
+			}
+		}
 		behavior.current = newState;
 		behavior.enterTime = now;
 
@@ -502,8 +510,7 @@ function computeMovementForBehavior() {
 				// Blend targetDir toward foodAngle
 				var angleDiffToFood = foodAngle - targetDir;
 				// Normalize to [-PI, PI]
-				while (angleDiffToFood > Math.PI) angleDiffToFood -= 2 * Math.PI;
-				while (angleDiffToFood < -Math.PI) angleDiffToFood += 2 * Math.PI;
+				angleDiffToFood = normalizeAngle(angleDiffToFood);
 				targetDir += angleDiffToFood * seekStrength;
 				// Ensure minimum speed when seeking food
 				if (targetSpeed < 0.3) targetSpeed = 0.3;
@@ -1311,8 +1318,7 @@ function update(dt) {
 		var awayStrength = Math.min(1, Math.sqrt(edgeBias * edgeBias + edgeBiasY * edgeBiasY));
 		var angleDiffEdge = awayAngle - targetDir;
 		// Normalize to [-PI, PI]
-		while (angleDiffEdge > Math.PI) angleDiffEdge -= 2 * Math.PI;
-		while (angleDiffEdge < -Math.PI) angleDiffEdge += 2 * Math.PI;
+		angleDiffEdge = normalizeAngle(angleDiffEdge);
 		targetDir += angleDiffEdge * awayStrength * 0.3 * dtScale;
 	}
 
@@ -1327,20 +1333,20 @@ function update(dt) {
 	if (fly.x < 0) {
 		fly.x = 0;
 		BRAIN.stimulate.touch = true;
-		touchResetFrame = Math.max(touchResetFrame, frameCount + 120);
+		touchResetTime = Math.max(touchResetTime, Date.now() + 2000);
 	} else if (fly.x > window.innerWidth) {
 		fly.x = window.innerWidth;
 		BRAIN.stimulate.touch = true;
-		touchResetFrame = Math.max(touchResetFrame, frameCount + 120);
+		touchResetTime = Math.max(touchResetTime, Date.now() + 2000);
 	}
 	if (fly.y < 44) {
 		fly.y = 44;
 		BRAIN.stimulate.touch = true;
-		touchResetFrame = Math.max(touchResetFrame, frameCount + 120);
+		touchResetTime = Math.max(touchResetTime, Date.now() + 2000);
 	} else if (fly.y > window.innerHeight - 90) {
 		fly.y = window.innerHeight - 90;
 		BRAIN.stimulate.touch = true;
-		touchResetFrame = Math.max(touchResetFrame, frameCount + 120);
+		touchResetTime = Math.max(touchResetTime, Date.now() + 2000);
 	}
 
 	// Food proximity
@@ -1382,21 +1388,20 @@ function update(dt) {
 		}
 	}
 
-	// Reset wall-touch stimulus after 120 frames (~2 seconds at 60fps)
-	if (touchResetFrame > 0 && frameCount >= touchResetFrame) {
+	// Reset touch stimulus after wall-clock expiry (2 seconds)
+	if (touchResetTime > 0 && Date.now() >= touchResetTime) {
 		BRAIN.stimulate.touch = false;
 		BRAIN.stimulate.touchLocation = null;
-		touchResetFrame = 0;
+		touchResetTime = 0;
 	}
 
-	// Reset wind stimulus after 120 frames (~2 seconds at 60fps)
-	if (windResetFrame > 0 && frameCount >= windResetFrame) {
+	// Reset wind stimulus after wall-clock expiry (2 seconds)
+	if (windResetTime > 0 && Date.now() >= windResetTime) {
 		BRAIN.stimulate.wind = false;
 		BRAIN.stimulate.windStrength = 0;
-		windResetFrame = 0;
+		windResetTime = 0;
 	}
 
-	frameCount++;
 	updateAnimForBehavior(dtScale);
 }
 

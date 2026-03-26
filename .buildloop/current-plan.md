@@ -1,153 +1,241 @@
-# Plan: D4.2
+# Plan: D5.1
 
 ## Dependencies
-- list: [] (no new dependencies)
+- list: [] (no new packages)
 - commands: [] (no install commands)
 
 ## File Operations (in execution order)
 
-### 1. MODIFY js/connectome.js
+### 1. MODIFY js/main.js
 - operation: MODIFY
-- reason: Wire MN_HEAD motor neuron into a new accumHead accumulator and into accumGroom; remove dead _isMoving/_isFeeding/_isGrooming flag assignments
+- reason: Replace frame-count-based stimulus expiry with Date.now() timestamps, fix feeding timer leak on behavior interruption, replace while-loop angle normalization with normalizeAngle() calls
 
-#### Change A: Add accumHead accumulator declaration
-- anchor: `BRAIN.accumStartle = 0;` (line 89)
-- action: Add `BRAIN.accumHead = 0;` on the line immediately after `BRAIN.accumStartle = 0;`
-- The resulting block should read:
-  ```
-  BRAIN.accumStartle = 0;
-  BRAIN.accumHead = 0;
-  ```
+There are 8 discrete changes to make in this file, listed in order from top-of-file to bottom-of-file. Apply them in this order.
 
-#### Change B: Reset accumHead in motorcontrol()
-- anchor: `BRAIN.accumStartle = 0;` inside the `BRAIN.motorcontrol = function ()` body (line 436)
-- action: Add `BRAIN.accumHead = 0;` on the line immediately after that `BRAIN.accumStartle = 0;`
-- The resulting block should read:
-  ```
-  BRAIN.accumGroom = 0;
-  BRAIN.accumStartle = 0;
-  BRAIN.accumHead = 0;
-  ```
+---
 
-#### Change C: Assign accumHead and add head into accumGroom
-- anchor: The two lines (470-471):
-  ```
-  	var head = readMotor('MN_HEAD');
-  	BRAIN.accumGroom = abdomen + Math.min(legL1, legR1);
-  ```
-- action: Replace those two lines with:
-  ```
-  	var head = readMotor('MN_HEAD');
-  	BRAIN.accumHead = head;
-  	BRAIN.accumGroom = abdomen + head + Math.min(legL1, legR1);
-  ```
-- Rationale: MN_HEAD receives signal from SEZ_GROOM (grooming head position, weight 4) and SEZ_FEED (head lowering toward food, weight 4). Adding head to accumGroom makes the groom accumulator more sensitive when head motor signal is active, giving these connectome pathways a behavioral effect. The separate accumHead preserves the raw signal for orientation biasing in main.js.
+#### Change 1: Rename module-scope variables from frame-based to time-based
 
-#### Change D: Floor accumHead at 0
-- anchor: `BRAIN.accumStartle = Math.max(0, BRAIN.accumStartle);` (line 485)
-- action: Add `BRAIN.accumHead = Math.max(0, BRAIN.accumHead);` on the line immediately after
-- The resulting block should read:
+- anchor: `var touchResetFrame = 0;`
+- Replace lines 26-27:
   ```
-  BRAIN.accumStartle = Math.max(0, BRAIN.accumStartle);
-  BRAIN.accumHead = Math.max(0, BRAIN.accumHead);
+  var touchResetFrame = 0;
+  var windResetFrame = 0;
   ```
+  with:
+  ```
+  var touchResetTime = 0;
+  var windResetTime = 0;
+  ```
+- `touchResetTime` and `windResetTime` will hold `Date.now() + 2000` timestamps (milliseconds since epoch) instead of frame counts. A value of 0 means "no pending reset."
 
-#### Change E: Remove dead _isMoving/_isFeeding/_isGrooming flag assignments
-- anchor: The block at lines 376-380:
-  ```
-  	// --- Update behavioral state flags for next tick ---
-  	BRAIN._isMoving = (Math.abs(BRAIN.accumWalkLeft) + Math.abs(BRAIN.accumWalkRight) > 5) ||
-  	                   (BRAIN.accumFlight > 5);
-  	BRAIN._isFeeding = BRAIN.accumFeed > 5;
-  	BRAIN._isGrooming = BRAIN.accumGroom > 5;
-  ```
-- action: Delete these 5 lines entirely (the comment line and the 4 assignment lines). The closing `};` of `BRAIN.update` that follows on line 381 remains.
-- Rationale: syncBrainFlags() in main.js:471-476 immediately overwrites these three flags after every BRAIN.update() call, making these assignments dead code. The flag declarations at lines 160-162 (`BRAIN._isMoving = false;` etc.) remain -- they are still needed as initial values and are read by BRAIN.updateDrives().
+---
 
-### 2. MODIFY js/main.js
-- operation: MODIFY
-- reason: Use accumHead to bias targetDir in walk/explore states; remove duplicate JSDoc blocks
+#### Change 2: Replace windResetFrame = 0 in handleCanvasMousedown (air drag start)
 
-#### Change A: Add head-turn orientation bias in computeMovementForBehavior()
-- anchor: The food-seeking block closing brace and the `} else if (state === 'phototaxis')` line. Specifically, the two lines:
+- anchor: `windResetFrame = 0;` (inside the `activeTool === 'air'` block at line 275)
+- Replace:
   ```
+  windResetFrame = 0;
+  ```
+  with:
+  ```
+  windResetTime = 0;
+  ```
+- This clears any pending wind reset when a new air drag begins, same semantics as before.
+
+---
+
+#### Change 3: Replace windResetFrame in handleCanvasMouseup (air drag end)
+
+- anchor: `windResetFrame = frameCount + 120;` (line 307)
+- Replace:
+  ```
+  windResetFrame = frameCount + 120;
+  ```
+  with:
+  ```
+  windResetTime = Date.now() + 2000;
+  ```
+- Sets wind stimulus to expire 2000ms from now (wall-clock time), replacing the 120-frame countdown.
+
+---
+
+#### Change 4: Replace touchResetFrame in applyTouchTool
+
+- anchor: `touchResetFrame = Math.max(touchResetFrame, frameCount + 120);` (line 343)
+- Replace:
+  ```
+  touchResetFrame = Math.max(touchResetFrame, frameCount + 120);
+  ```
+  with:
+  ```
+  touchResetTime = Math.max(touchResetTime, Date.now() + 2000);
+  ```
+- Same semantics: extends the touch reset deadline if a new touch happens before the old one expires. Uses wall-clock time instead of frame count.
+
+---
+
+#### Change 5: Replace while-loop angle normalization for food-seeking (angleDiffToFood)
+
+- anchor (the two while lines at 505-506):
+  ```
+  			while (angleDiffToFood > Math.PI) angleDiffToFood -= 2 * Math.PI;
+  			while (angleDiffToFood < -Math.PI) angleDiffToFood += 2 * Math.PI;
+  ```
+- Replace with:
+  ```
+  			angleDiffToFood = normalizeAngle(angleDiffToFood);
+  ```
+- Uses the existing normalizeAngle() helper at line 32-37 which is O(1) and safe against NaN (returns NaN without looping).
+
+---
+
+#### Change 6: Add feedStart reset on behavior exit from 'feed' in updateBehaviorState()
+
+- anchor: `if (newState !== behavior.current) {` (line 436, inside updateBehaviorState)
+- Insert the feedStart reset block immediately after the line `behavior.previous = behavior.current;` (line 441) and before the line `behavior.current = newState;` (line 442).
+- The exact old_string to match:
+  ```
+  		behavior.previous = behavior.current;
+  		behavior.current = newState;
+  ```
+- Replace with:
+  ```
+  		behavior.previous = behavior.current;
+  		// Reset feeding timers when exiting feed state to prevent stale feedStart leak
+  		if (behavior.current === 'feed') {
+  			for (var fi = 0; fi < food.length; fi++) {
+  				if (food[fi].feedStart !== 0) {
+  					food[fi].feedStart = 0;
+  					food[fi].radius = 10;
+  				}
+  			}
   		}
-  	} else if (state === 'phototaxis') {
+  		behavior.current = newState;
   ```
-  where the first `}` closes the `if (nf)` block and the second `}` closes the `if (BRAIN.stimulate.foodNearby ...)` block, located around line 512-513.
-- action: Insert a head-turn bias block BETWEEN the closing of the foodNearby block and the `} else if (state === 'phototaxis')` line. The new code goes right after the `}` that closes the foodNearby check (but before the `} else if (state === 'phototaxis')`):
-  ```
-  		// Head-turn bias from MN_HEAD (CX_FC orientation signal)
-  		if (BRAIN.accumHead > 3) {
-  			var headBias = (BRAIN.accumHead / 40) * 0.15;
-  			var headSign = (BRAIN.accumWalkLeft - BRAIN.accumWalkRight > 0) ? 1 : -1;
-  			targetDir += headBias * headSign;
-  		}
-  ```
-- Exact result: The walk/explore block should end with:
-  ```
-  		}
-  		// Head-turn bias from MN_HEAD (CX_FC orientation signal)
-  		if (BRAIN.accumHead > 3) {
-  			var headBias = (BRAIN.accumHead / 40) * 0.15;
-  			var headSign = (BRAIN.accumWalkLeft - BRAIN.accumWalkRight > 0) ? 1 : -1;
-  			targetDir += headBias * headSign;
-  		}
-  	} else if (state === 'phototaxis') {
-  ```
-- Logic explanation:
-  1. Only apply when accumHead exceeds a minimum threshold of 3 (avoids noise from tonic activity)
-  2. Scale the head signal: divide by 40 to normalize (MN_HEAD typically ranges 0-40 from its 4 sources at weights 3-4), then multiply by 0.15 radians max (~8.6 degrees) to keep the bias subtle
-  3. Direction of the head turn follows the walk asymmetry: if left walk accumulator > right, the fly is turning left, so head bias reinforces that direction (sign = +1); otherwise sign = -1
-  4. This captures the CX_FC "head turns" signal giving it a modest effect on targetDir without overriding the primary walk-based steering
+- Logic: When transitioning OUT of 'feed' state to any other state, iterate all food items and reset feedStart to 0 and radius to 10. This prevents stale feedStart timestamps from persisting through groom or other stationary states, which would cause instant food consumption when re-entering feed.
+- The variable name `fi` is used (not `i`) to avoid any potential scope confusion, since this function does not use `i` elsewhere.
 
-#### Change B: Remove duplicate JSDoc for drawProboscis
-- anchor: The four lines (around 1089-1092):
-  ```
-  /**
-   * Draws the proboscis (retractable feeding tube).
-   * Hidden by default; call this when feeding behavior is active.
-   */
-  ```
-  These are the FIRST (stale) JSDoc block, immediately before the SECOND (real) JSDoc block that starts with `/** * Draws the proboscis (retractable feeding tube).` and contains `@param {number} extend`.
-- action: Delete exactly these 4 lines:
-  ```
-  /**
-   * Draws the proboscis (retractable feeding tube).
-   * Hidden by default; call this when feeding behavior is active.
-   */
-  ```
-  The remaining (real) JSDoc block that follows (with the @param tag) is kept.
+---
 
-#### Change C: Remove duplicate JSDoc for drawLegs
-- anchor: The four lines (around 1115-1118):
+#### Change 7: Replace while-loop angle normalization for edge avoidance (angleDiffEdge)
+
+- anchor (the two while lines at 1314-1315):
   ```
-  /**
-   * Draws all 6 legs with walking or idle animation.
-   * Tripod gait: Group A (front-left, mid-right, rear-left) vs Group B.
-   */
+  		while (angleDiffEdge > Math.PI) angleDiffEdge -= 2 * Math.PI;
+  		while (angleDiffEdge < -Math.PI) angleDiffEdge += 2 * Math.PI;
   ```
-  These are the FIRST (stale) JSDoc block, immediately before the SECOND (real) JSDoc block that starts with `/** * Draws all 6 legs with behavior-specific animation.`.
-- action: Delete exactly these 4 lines:
+- Replace with:
   ```
-  /**
-   * Draws all 6 legs with walking or idle animation.
-   * Tripod gait: Group A (front-left, mid-right, rear-left) vs Group B.
-   */
+  		angleDiffEdge = normalizeAngle(angleDiffEdge);
   ```
-  The remaining (real) JSDoc block that follows (describing behavior-specific animation) is kept.
+- Same rationale as Change 5: O(1), NaN-safe.
+
+---
+
+#### Change 8: Replace all 4 touchResetFrame assignments in wall-collision block AND replace both reset checks at end of update(), AND remove frameCount increment
+
+- anchor: The wall-collision block starts at line 1327. There are 4 sites that set `touchResetFrame`:
+
+**8a.** Replace the 4 wall-collision touchResetFrame assignments (lines 1330, 1334, 1339, 1343):
+
+Each of the 4 instances of:
+```
+		touchResetFrame = Math.max(touchResetFrame, frameCount + 120);
+```
+must be replaced with:
+```
+		touchResetTime = Math.max(touchResetTime, Date.now() + 2000);
+```
+
+There are exactly 4 occurrences in the wall-collision block (left wall, right wall, top wall, bottom wall). Use `replace_all` or replace each individually.
+
+**8b.** Replace the touch reset check (lines 1386-1389):
+
+Old:
+```
+	// Reset wall-touch stimulus after 120 frames (~2 seconds at 60fps)
+	if (touchResetFrame > 0 && frameCount >= touchResetFrame) {
+		BRAIN.stimulate.touch = false;
+		BRAIN.stimulate.touchLocation = null;
+		touchResetFrame = 0;
+	}
+```
+
+New:
+```
+	// Reset touch stimulus after wall-clock expiry (2 seconds)
+	if (touchResetTime > 0 && Date.now() >= touchResetTime) {
+		BRAIN.stimulate.touch = false;
+		BRAIN.stimulate.touchLocation = null;
+		touchResetTime = 0;
+	}
+```
+
+**8c.** Replace the wind reset check (lines 1393-1396):
+
+Old:
+```
+	// Reset wind stimulus after 120 frames (~2 seconds at 60fps)
+	if (windResetFrame > 0 && frameCount >= windResetFrame) {
+		BRAIN.stimulate.wind = false;
+		BRAIN.stimulate.windStrength = 0;
+		windResetFrame = 0;
+	}
+```
+
+New:
+```
+	// Reset wind stimulus after wall-clock expiry (2 seconds)
+	if (windResetTime > 0 && Date.now() >= windResetTime) {
+		BRAIN.stimulate.wind = false;
+		BRAIN.stimulate.windStrength = 0;
+		windResetTime = 0;
+	}
+```
+
+**8d.** Remove or keep the `frameCount++` line at line 1399:
+
+The `frameCount` variable is no longer used by any timer. Search the file for other usages of `frameCount` before removing. If `frameCount` is not referenced anywhere else in the file (after all the changes above), remove both the declaration at line 25 (`var frameCount = 0;`) and the increment at line 1399 (`frameCount++;`). If it IS referenced elsewhere, keep both and leave a comment noting it is no longer used for stimulus timers.
+
+**Builder instruction for 8d:** Run a mental grep for `frameCount` across the entire file after making changes 1-8c. The only references should be the declaration (line 25) and the increment (line 1399). If that is the case, remove both. If there are other references, keep both.
+
+---
+
+## Summary of all changes
+
+| # | Location | What | Why |
+|---|----------|------|-----|
+| 1 | Line 26-27 | Rename `touchResetFrame`/`windResetFrame` to `touchResetTime`/`windResetTime` | Variable names reflect new semantics |
+| 2 | Line 275 | `windResetFrame = 0` -> `windResetTime = 0` | Track by timestamp |
+| 3 | Line 307 | `windResetFrame = frameCount + 120` -> `windResetTime = Date.now() + 2000` | Wall-clock expiry |
+| 4 | Line 343 | `touchResetFrame = Math.max(...)` -> `touchResetTime = Math.max(...)` | Wall-clock expiry |
+| 5 | Lines 505-506 | While loops -> `normalizeAngle()` | O(1), NaN-safe |
+| 6 | Lines 441-442 (updateBehaviorState) | Insert feedStart reset on exit from 'feed' | Fix stale timer leak |
+| 7 | Lines 1314-1315 | While loops -> `normalizeAngle()` | O(1), NaN-safe |
+| 8a | Lines 1330,1334,1339,1343 | 4x `touchResetFrame = Math.max(...)` -> `touchResetTime = Math.max(...)` | Wall-clock expiry |
+| 8b | Lines 1386-1389 | Touch reset check: frameCount -> Date.now() | Wall-clock expiry |
+| 8c | Lines 1393-1396 | Wind reset check: frameCount -> Date.now() | Wall-clock expiry |
+| 8d | Lines 25, 1399 | Remove `frameCount` if unused | Dead code cleanup |
 
 ## Verification
-- build: No build step (vanilla JS, no bundler). Open `index.html` in a browser.
-- lint: `grep -n 'var head' js/connectome.js` should show exactly one line (the readMotor line). `grep -n 'accumHead' js/connectome.js` should show 5 lines (declaration, reset, assignment, floor, no stale leftover). `grep -n '_isMoving.*accumWalkLeft\|_isFeeding.*accumFeed\|_isGrooming.*accumGroom' js/connectome.js` should return zero matches (dead assignments removed).
-- test: No existing test suite.
-- smoke: Open index.html in browser. Verify: (1) fly still walks, grooms, feeds, startles normally (no regressions from accumGroom formula change), (2) check browser console for zero JS errors, (3) during grooming the fly should trigger groom state slightly more readily due to head contribution to accumGroom, (4) during walking the fly's direction changes should be slightly more pronounced when CX_FC is active (subtle, hard to verify visually but confirms accumHead wiring works).
+- build: Open `index.html` in a browser (no build step -- vanilla JS)
+- lint: `grep -n 'touchResetFrame\|windResetFrame' js/main.js` -- expect zero matches (all renamed)
+- lint: `grep -n 'frameCount' js/main.js` -- expect zero matches if removed, or exactly 2 (declaration + increment) if kept
+- lint: `grep -n 'while (angleDiff' js/main.js` -- expect zero matches (all replaced with normalizeAngle)
+- test: No automated tests exist
+- smoke:
+  1. Load the page in browser. Click touch tool, click on fly. Verify fly reacts (groom/startle). Wait 2 seconds. Verify touch stimulus clears (touch row in drive panel should decay).
+  2. Click air tool, drag on canvas, release. Verify wind stimulus clears after ~2 seconds.
+  3. Place food near fly. Wait for fly to enter feed state and begin eating. While feeding, if fly transitions to groom (or another state), note whether food radius resets to full. When fly re-enters feed, verify feeding starts fresh (not instant consumption).
+  4. Open DevTools console. Type `normalizeAngle(NaN)` -- should return `NaN`, not hang.
 
 ## Constraints
-- Do NOT modify js/constants.js -- the weights table is correct; only the wiring in connectome.js was missing
-- Do NOT modify index.html or css/main.css -- no UI changes in this task
-- Do NOT add new dependencies or external files
-- Do NOT change the BRAIN._isMoving / _isFeeding / _isGrooming declarations at connectome.js:160-162 -- only remove the dead reassignments at the end of BRAIN.update()
-- Do NOT modify the readMotor helper function or the motor neuron drain behavior
-- Do NOT modify SPEC.md, CLAUDE.md, or TASKS.md
-- Keep the head-turn bias conservative (max ~0.15 radians) to avoid destabilizing existing walk/explore behavior
+- Do NOT modify any file other than `js/main.js`
+- Do NOT modify SPEC.md, CLAUDE.md, TASKS.md, or any .buildloop/ files other than current-plan.md
+- Do NOT add new dependencies or files
+- Do NOT change the 500ms brain tick interval or the `updateBrain` function
+- Do NOT change the 2000ms stimulus duration -- keep the same behavioral timing, just switch from frame-based to wall-clock-based measurement
+- Do NOT touch any animation interpolation code (dtScale, Math.pow, etc.) -- those are separate from this fix
+- The `normalizeAngle()` helper at lines 32-37 must NOT be modified -- it is correct as-is

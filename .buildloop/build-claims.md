@@ -1,32 +1,34 @@
-# Build Claims -- D4.2
+# Build Claims -- D5.1
 
 ## Files Changed
-- [MODIFY] js/connectome.js -- Wired MN_HEAD into new accumHead accumulator and into accumGroom formula; removed dead _isMoving/_isFeeding/_isGrooming flag assignments from BRAIN.update()
-- [MODIFY] js/main.js -- Added head-turn orientation bias in walk/explore states using accumHead; removed duplicate JSDoc blocks for drawProboscis and drawLegs
+- [MODIFY] js/main.js -- Replace frame-count-based stimulus timers with Date.now() timestamps, fix feeding timer leak on behavior exit, replace while-loop angle normalization with normalizeAngle() calls, remove dead frameCount variable
 
 ## Verification Results
-- Build: PASS (vanilla JS, no build step)
-- Tests: SKIPPED (no test suite)
-- Lint: PASS (grep verification of all changes below)
+- Build: PASS (vanilla JS, no build step -- file parses without syntax errors based on structural review)
+- Tests: SKIPPED (no automated tests exist)
+- Lint: PASS (`grep -n 'touchResetFrame\|windResetFrame' js/main.js` -- zero matches)
+- Lint: PASS (`grep -n 'frameCount' js/main.js` -- zero matches)
+- Lint: PASS (`grep -n 'while (angleDiff' js/main.js` -- zero matches)
 
 ## Claims
-- [ ] BRAIN.accumHead is declared and initialized to 0 at connectome.js:90 (alongside other accumulators)
-- [ ] BRAIN.accumHead is reset to 0 at start of motorcontrol() at connectome.js:433
-- [ ] BRAIN.accumHead is assigned from readMotor('MN_HEAD') at connectome.js:468, so MN_HEAD signal is no longer silently discarded
-- [ ] BRAIN.accumHead is floored at 0 via Math.max at connectome.js:484
-- [ ] accumGroom formula at connectome.js:469 now includes head: `abdomen + head + Math.min(legL1, legR1)` (was `abdomen + Math.min(legL1, legR1)`)
-- [ ] Dead flag assignments (_isMoving, _isFeeding, _isGrooming) removed from end of BRAIN.update() (were at old lines 376-380); the function now ends with `BRAIN.runconnectome();` followed by closing `};`
-- [ ] Flag declarations at connectome.js:160-162 are preserved (BRAIN._isMoving = false, etc.)
-- [ ] syncBrainFlags() in main.js:471-477 remains the authoritative source for these flags (unchanged)
-- [ ] Head-turn bias block added in computeMovementForBehavior() at main.js:514-518, inside the walk/explore branch, after food-seeking and before phototaxis
-- [ ] Head-turn bias threshold is 3 (accumHead > 3), max bias is 0.15 radians (~8.6 degrees), direction follows walk asymmetry sign
-- [ ] Duplicate JSDoc for drawProboscis removed -- only the version with @param {number} extend remains at main.js:1093-1096
-- [ ] Duplicate JSDoc for drawLegs removed -- only the "behavior-specific animation" version remains at main.js:1115-1121
-- [ ] No changes to js/constants.js, index.html, css/main.css, SPEC.md, CLAUDE.md, or TASKS.md
-- [ ] readMotor() helper function and motor neuron drain behavior unchanged
+- [ ] Claim 1: `touchResetFrame` and `windResetFrame` variables (line 25-26) renamed to `touchResetTime` and `windResetTime`; `frameCount` variable declaration removed entirely
+- [ ] Claim 2: `windResetTime = 0` clears pending wind reset when air drag begins (handleCanvasMousedown, ~line 274)
+- [ ] Claim 3: `windResetTime = Date.now() + 2000` sets wall-clock expiry on air drag end (handleCanvasMouseup, ~line 306)
+- [ ] Claim 4: `touchResetTime = Math.max(touchResetTime, Date.now() + 2000)` in applyTouchTool (~line 342) replaces frame-based touch expiry
+- [ ] Claim 5: Food-seeking angleDiffToFood normalization (previously two while loops at ~line 513) replaced with single `angleDiffToFood = normalizeAngle(angleDiffToFood)` call
+- [ ] Claim 6: In updateBehaviorState(), when transitioning OUT of 'feed' state, all food items have feedStart reset to 0 and radius reset to 10 (inserted between behavior.previous assignment and behavior.current assignment, ~lines 441-449)
+- [ ] Claim 7: Edge avoidance angleDiffEdge normalization (previously two while loops at ~line 1312) replaced with single `angleDiffEdge = normalizeAngle(angleDiffEdge)` call
+- [ ] Claim 8a: All 4 wall-collision touchResetFrame assignments (~lines 1329, 1333, 1338, 1342) replaced with `touchResetTime = Math.max(touchResetTime, Date.now() + 2000)`
+- [ ] Claim 8b: Touch reset check (~line 1391-1396) uses `touchResetTime > 0 && Date.now() >= touchResetTime` instead of frameCount comparison
+- [ ] Claim 8c: Wind reset check (~line 1398-1403) uses `windResetTime > 0 && Date.now() >= windResetTime` instead of frameCount comparison
+- [ ] Claim 8d: `frameCount` variable declaration and `frameCount++` increment both removed -- no references to frameCount remain in the file
+- [ ] Claim 9: Zero occurrences of `touchResetFrame`, `windResetFrame`, `frameCount`, or `while (angleDiff` remain in js/main.js
+- [ ] Claim 10: The normalizeAngle() helper function (lines 31-36) was NOT modified
+- [ ] Claim 11: Stimulus duration remains 2000ms (same behavioral timing, wall-clock instead of frame-count)
+- [ ] Claim 12: No files other than js/main.js were modified
 
 ## Gaps and Assumptions
-- The plan stated `grep -n 'accumHead' js/connectome.js` should show 5 lines, but only 4 distinct occurrences exist (declaration, reset, assignment, floor). This appears to be a plan counting error, not a missing implementation step.
-- Head-turn bias direction uses walk asymmetry (accumWalkLeft - accumWalkRight) as a proxy for turn direction. If both are equal, headSign defaults to -1. This is a heuristic, not a direct CX_FC direction signal.
-- The head contribution to accumGroom changes the groom detection sensitivity -- groom state may trigger slightly more readily when MN_HEAD has signal. This is intentional per the plan but could subtly change grooming frequency.
-- No automated tests exist; verification is visual (browser smoke test).
+- No automated tests exist; all verification is structural (grep-based) not behavioral
+- The feedStart reset in updateBehaviorState uses `food[fi].radius = 10` assuming 10 is the initial/full radius -- this matches the food creation at line 268 (`radius: 10`) and the out-of-range reset at line 1386 (`food[i].radius = 10`)
+- Smoke testing (browser interaction) was not performed -- claims about runtime behavior (stimulus clearing after 2s, feeding timer leak fix) are based on code review
+- The `normalizeAngle()` helper handles values up to 2*PI away from [-PI,PI] via if-statements (not modular for arbitrary multiples) but this is sufficient for angle differences which are always within one revolution
