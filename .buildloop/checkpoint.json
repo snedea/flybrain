@@ -1,6 +1,0 @@
-{
-  "task_id": "T4.2",
-  "task_desc": "Add missing UI controls, touch-specific grooming, and mobile support -- (1) add the help button (?) from the spec UI layout that shows a small overlay/tooltip explaining each interaction tool and how to use it, (2) add a connectome panel toggle button that hides/shows the connectome node visualization in the bottom-left panel, (3) implement touch-location-specific grooming animation: when touchLocation is 'head', front legs should rub the head area; when 'abdomen', abdomen curls with rear leg movements; when 'thorax', full bilateral front-leg grooming; when 'leg', targeted single-leg cleaning motion, (4) add touch event handlers (touchstart, touchmove, touchend) on the canvas mirroring the existing mouse handlers so the simulation works on mobile/tablet, (5) add edge avoidance: when the fly is within ~50px of screen edges, bias targetDir away from the edge so it turns naturally instead of hard-stopping at the boundary and triggering touch neurons. Files: js/main.js, css/main.css, index.html.",
-  "completed_stage": "builder",
-  "timestamp": "2026-03-26T03:53:55.053844+00:00"
-}
