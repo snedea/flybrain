@@ -244,6 +244,21 @@ if (brain3dBtn) {
     });
 }
 
+// --- Learn / Education panel toggle ---
+var learnBtn = document.getElementById('learnBtn');
+if (learnBtn) {
+    learnBtn.addEventListener('click', function () {
+        if (typeof EducationPanel !== 'undefined') {
+            EducationPanel.toggle();
+            if (EducationPanel.active) {
+                learnBtn.classList.add('active');
+            } else {
+                learnBtn.classList.remove('active');
+            }
+        }
+    });
+}
+
 // --- Help overlay toggle ---
 var helpOverlay = document.getElementById('helpOverlay');
 var helpBtn = document.getElementById('helpBtn');
@@ -265,6 +280,18 @@ document.addEventListener('click', function (e) {
 		e.target !== helpBtn) {
 		helpOverlay.style.display = 'none';
 	}
+});
+
+// Close education panel when clicking outside of it
+document.addEventListener('click', function (e) {
+    if (typeof EducationPanel !== 'undefined' && EducationPanel.active) {
+        var panel = document.getElementById('education-panel');
+        var learnBtnEl = document.getElementById('learnBtn');
+        if (panel && !panel.contains(e.target) && e.target !== learnBtnEl) {
+            EducationPanel.hide();
+            if (learnBtnEl) learnBtnEl.classList.remove('active');
+        }
+    }
 });
 
 // --- Connectome panel toggle ---

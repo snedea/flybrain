@@ -15,6 +15,7 @@
             <button class="tool-btn" data-tool="light" id="lightBtn">Light: Bright</button>
             <button class="tool-btn" data-tool="temp" id="tempBtn">Temp: Neutral</button>
             <button class="tool-btn" id="brain3dBtn" aria-pressed="false">Brain 3D</button>
+            <button class="tool-btn" id="learnBtn">Learn</button>
             <button class="tool-btn" id="helpBtn">?</button>
         </div>
         <div class="toolbar-right">
@@ -38,6 +39,13 @@
         <div class="help-item"><strong>Temp</strong> -- Cycles through Neutral, Warm, and Cool. Warm makes the fly more active and avoidant. Cool makes it exploratory.</div>
     </div>
     <canvas id='canvas'></canvas>
+    <div id="education-panel" class="education-panel" style="display:none;">
+        <div class="education-panel-header">
+            <span class="education-panel-title">Brain Guide</span>
+            <button class="education-close-btn" id="education-close-btn">&times;</button>
+        </div>
+        <div class="education-content" id="education-content"></div>
+    </div>
     <div id="brain3d-overlay" style="display:none;"></div>
     <div id="brain3d-tooltip" style="display:none;"></div>
     <div id="bottom-panel">
@@ -88,6 +96,7 @@
     <script type="text/javascript" src="./js/connectome.js"></script>
     <script type="text/javascript" src="./js/fly-logic.js"></script>
     <script type="text/javascript" src="./js/brain3d.js"></script>
+    <script type="text/javascript" src="./js/education.js"></script>
     <script type="text/javascript" src="./js/main.js"></script>
 </body>
 

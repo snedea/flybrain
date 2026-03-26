@@ -1,504 +1,560 @@
-# Plan: T6.1
+# Plan: T6.2
 
 ## Dependencies
-- list: [Three.js r158 via CDN (no npm install)]
-- commands: [none — CDN scripts added directly to index.html]
+- list: [] (no new dependencies — vanilla JS, no build step)
+- commands: [] (nothing to install)
 
 ## File Operations (in execution order)
 
-### 1. MODIFY index.html
-- operation: MODIFY
-- reason: Add Three.js CDN scripts, brain3d.js script tag, Brain 3D toggle button, overlay container div, and tooltip div
-
-#### Change 1: Add Three.js CDN and OrbitControls scripts before existing scripts
-- anchor: `<script type="text/javascript" src="./js/constants.js"></script>`
-- Insert BEFORE that anchor line, these two script tags:
-```html
-<script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/controls/OrbitControls.js"></script>
-```
-
-#### Change 2: Add brain3d.js script tag after fly-logic.js but before main.js
-- anchor: `<script type="text/javascript" src="./js/fly-logic.js"></script>`
-- Insert AFTER that anchor line:
-```html
-<script type="text/javascript" src="./js/brain3d.js"></script>
-```
-- Final script load order must be: three.min.js → OrbitControls.js → constants.js → connectome.js → fly-logic.js → brain3d.js → main.js
-
-#### Change 3: Add "Brain 3D" toggle button to toolbar-left
-- anchor: `<button class="tool-btn" id="helpBtn">?</button>`
-- Insert BEFORE that anchor line:
-```html
-<button class="tool-btn" id="brain3dBtn" aria-pressed="false">Brain 3D</button>
-```
-
-#### Change 4: Add brain3d overlay container and tooltip div after the canvas element
-- anchor: `<canvas id='canvas'></canvas>`
-- Insert AFTER that anchor line:
-```html
-<div id="brain3d-overlay" style="display:none;"></div>
-<div id="brain3d-tooltip" style="display:none;"></div>
-```
-
-### 2. CREATE js/brain3d.js
+### 1. CREATE js/education.js
 - operation: CREATE
-- reason: New file containing the entire Brain3D module — Three.js scene setup, brain region meshes, raycasting, update loop, tooltip
+- reason: New module containing all educational guide panel logic, content data, SVG signal flow diagram, and Brain3D region highlight integration
 
-#### Module Structure
-The file is a single IIFE that exposes `window.Brain3D` as an object with the following properties and methods:
+#### Imports / Dependencies
+- No import statements (vanilla JS IIFE pattern, same as brain3d.js)
+- Reads from: `window.Brain3D` (for region highlighting), `BRAIN.postSynaptic` (for neuron lists), `neuronDescriptions` (global from main.js)
 
-```javascript
-window.Brain3D = {
-    active: false,
-    _initialized: false,
-    _scene: null,
-    _camera: null,
-    _renderer: null,
-    _controls: null,
-    _regions: [],       // array of region objects
-    _allMeshes: [],     // flat array of all THREE.Mesh for raycasting
-    _raycaster: null,
-    _mouse: null,
-    _container: null,
-    _tooltipEl: null,
-    _animFrameId: null,
-    init: function() { ... },
-    show: function() { ... },
-    hide: function() { ... },
-    toggle: function() { ... },
-    update: function() { ... },
-    _onMouseMove: function(event) { ... },
-    _onResize: function() { ... },
-    _buildRegions: function() { ... },
-    _createRegionMeshes: function(regionDef) { ... },
-    _renderLoop: function() { ... }
-};
+#### Data Structures
+
+Define `EDUCATION_REGIONS` array (the educational content for each brain region). Each entry is an object:
+```js
+{
+    id: 'optic-lobes',           // CSS-safe slug used for section IDs
+    name: 'Optic Lobes',         // display name, must match Brain3D REGION_DEFS[i].name exactly
+    neurons: ['VIS_R1R6', 'VIS_R7R8', 'VIS_ME', 'VIS_LO', 'VIS_LC', 'VIS_LPTC'],
+    type: 'sensory',
+    explanation: '...',          // plain-language what-it-does (2-3 sentences)
+    analogy: '...',              // real-world analogy string
+    interaction: '...',          // which user action activates it
+    populationEstimate: '...'    // string like "~60,000 neurons in the real fly"
+}
 ```
 
-#### Constants (top of IIFE, before Brain3D object)
+Full entries (builder must use these exact values):
 
-```javascript
-var REGION_COLORS = {
-    sensory: 0x3b82f6,
-    central: 0x8b5cf6,
-    drives:  0xf59e0b,
-    motor:   0xef4444
-};
+1. `id: 'optic-lobes'`, `name: 'Optic Lobes'`, `neurons: ['VIS_R1R6','VIS_R7R8','VIS_ME','VIS_LO','VIS_LC','VIS_LPTC']`, `type: 'sensory'`
+   - `explanation: "The optic lobes are the fly's visual processing centers, one on each side of the brain. They detect motion, color, edges, and looming objects. Almost half the fly's brain is devoted to vision."
+   - `analogy: "Like your visual cortex — but optimized for detecting fast motion and avoiding swatters."
+   - `interaction: "Change the Light setting from Bright to Dim or Dark and watch the optic lobes respond."
+   - `populationEstimate: "~60,000 neurons in the real fly"
 
-var ACTIVATION_DIVISOR = 80;  // raw postSynaptic values divided by this, clamped to [0,1]
-var BASE_OPACITY = 0.3;
-var MAX_OPACITY = 0.8;
-var BASE_EMISSIVE_INTENSITY = 0.0;
-var MAX_EMISSIVE_INTENSITY = 1.0;
-```
+2. `id: 'antennal-lobes'`, `name: 'Antennal Lobes'`, `neurons: ['OLF_ORN_FOOD','OLF_ORN_DANGER','OLF_LN','OLF_PN']`, `type: 'sensory'`
+   - `explanation: "The antennal lobes process smells detected by the antennae. Different odors activate different glomeruli (clusters), letting the fly distinguish food from danger."
+   - `analogy: "Like your olfactory bulb — the first stop for smell information before it reaches higher brain areas."
+   - `interaction: "Place food on the canvas and watch olfactory neurons fire as the fly detects it."
+   - `populationEstimate: "~2,600 neurons across ~50 glomeruli"
 
-#### Region Definitions (array, defined inside IIFE)
+3. `id: 'mushroom-bodies'`, `name: 'Mushroom Bodies'`, `neurons: ['MB_KC','MB_APL','MB_MBON_APP','MB_MBON_AV','MB_DAN_REW','MB_DAN_PUN']`, `type: 'central'`
+   - `explanation: "The mushroom bodies are the fly's learning and memory center. They associate smells with rewards or punishments, allowing the fly to learn which odors mean food and which mean danger."
+   - `analogy: "Like the fly's hippocampus — they form and recall memories about smells."
+   - `interaction: "Feed the fly repeatedly and watch the reward dopamine neurons (DAN) activate alongside the Kenyon cells."
+   - `populationEstimate: "~2,000 Kenyon cells + ~400 output/dopamine neurons"
 
-Each region definition is an object with: `name`, `description`, `type`, `neurons`, `meshDefs` (array of mesh definition objects).
+4. `id: 'central-complex'`, `name: 'Central Complex'`, `neurons: ['CX_EPG','CX_PFN','CX_FC','CX_HDELTA']`, `type: 'central'`
+   - `explanation: "The central complex is the fly's navigation hub. It maintains an internal compass, tracks the fly's heading, and coordinates locomotion patterns."
+   - `analogy: "Like a GPS and steering system combined — it knows which way the fly is pointing and plans where to go."
+   - `interaction: "Watch the compass neurons (EPG) as the fly walks and changes direction."
+   - `populationEstimate: "~3,000 neurons in the real fly"
 
-The complete region definitions array (REGION_DEFS):
+5. `id: 'lateral-horn'`, `name: 'Lateral Horn'`, `neurons: ['LH_APP','LH_AV']`, `type: 'central'`
+   - `explanation: "The lateral horn handles innate (unlearned) responses to odors. Unlike the mushroom bodies which learn, the lateral horn triggers hardwired approach or avoidance behaviors."
+   - `analogy: "Like an instinctive reflex — you pull your hand from a hot stove before you think about it."
+   - `interaction: "Place food near the fly and watch LH_APP (approach) activate. The lateral horn responds even without prior learning."
+   - `populationEstimate: "~1,400 neurons"
 
-```javascript
-var REGION_DEFS = [
-    {
-        name: 'Optic Lobes',
-        description: 'Visual processing — motion detection, color, pattern recognition, and optic flow',
-        type: 'sensory',
-        neurons: ['VIS_R1R6', 'VIS_R7R8', 'VIS_ME', 'VIS_LO', 'VIS_LC', 'VIS_LPTC'],
-        meshDefs: [
-            { geo: 'sphere', args: [1.4, 16, 12], pos: [-3.2, 0.2, -0.3], scale: [1, 0.75, 1.1] },
-            { geo: 'sphere', args: [1.4, 16, 12], pos: [3.2, 0.2, -0.3], scale: [1, 0.75, 1.1] }
-        ]
-    },
-    {
-        name: 'Antennal Lobes',
-        description: 'Olfactory processing — food and danger odor detection',
-        type: 'sensory',
-        neurons: ['OLF_ORN_FOOD', 'OLF_ORN_DANGER', 'OLF_LN', 'OLF_PN'],
-        meshDefs: [
-            { geo: 'sphere', args: [0.45, 12, 10], pos: [-0.7, -0.6, 2.2], scale: [1, 1, 1] },
-            { geo: 'sphere', args: [0.45, 12, 10], pos: [0.7, -0.6, 2.2], scale: [1, 1, 1] }
-        ]
-    },
-    {
-        name: 'Mushroom Bodies',
-        description: 'Learning and memory — associative odor memories, reward and punishment',
-        type: 'central',
-        neurons: ['MB_KC', 'MB_APL', 'MB_MBON_APP', 'MB_MBON_AV', 'MB_DAN_REW', 'MB_DAN_PUN'],
-        meshDefs: [
-            { geo: 'sphere', args: [0.6, 12, 10], pos: [-1.3, 1.0, -0.3], scale: [1, 1, 1] },
-            { geo: 'sphere', args: [0.6, 12, 10], pos: [1.3, 1.0, -0.3], scale: [1, 1, 1] },
-            { geo: 'torus', args: [0.4, 0.12, 8, 16], pos: [-0.6, 0.2, 1.0], scale: [1, 1, 1], rot: [Math.PI / 2, 0, 0] },
-            { geo: 'torus', args: [0.4, 0.12, 8, 16], pos: [0.6, 0.2, 1.0], scale: [1, 1, 1], rot: [Math.PI / 2, 0, 0] }
-        ]
-    },
-    {
-        name: 'Central Complex',
-        description: 'Navigation — heading direction, path integration, locomotion coordination',
-        type: 'central',
-        neurons: ['CX_EPG', 'CX_PFN', 'CX_FC', 'CX_HDELTA'],
-        meshDefs: [
-            { geo: 'cylinder', args: [0.8, 0.8, 0.2, 16], pos: [0, 0.5, 0], scale: [1, 1, 1], rot: [Math.PI / 2, 0, 0] }
-        ]
-    },
-    {
-        name: 'Lateral Horn',
-        description: 'Innate odor responses — hardwired approach and avoidance behaviors',
-        type: 'central',
-        neurons: ['LH_APP', 'LH_AV'],
-        meshDefs: [
-            { geo: 'sphere', args: [0.45, 12, 10], pos: [-1.8, 0.5, 0.3], scale: [1, 1, 1] },
-            { geo: 'sphere', args: [0.45, 12, 10], pos: [1.8, 0.5, 0.3], scale: [1, 1, 1] }
-        ]
-    },
-    {
-        name: 'Subesophageal Zone',
-        description: 'Feeding and grooming command center — taste processing, motor commands',
-        type: 'central',
-        neurons: ['SEZ_FEED', 'SEZ_GROOM', 'SEZ_WATER', 'GUS_GRN_SWEET', 'GUS_GRN_BITTER', 'GUS_GRN_WATER'],
-        meshDefs: [
-            { geo: 'sphere', args: [0.7, 12, 10], pos: [0, -1.0, 1.2], scale: [1.2, 0.7, 0.8] }
-        ]
-    },
-    {
-        name: 'VNC / Motor',
-        description: 'Motor output — locomotion, flight, and body movement commands',
-        type: 'motor',
-        neurons: ['DN_WALK', 'DN_FLIGHT', 'DN_TURN', 'DN_BACKUP', 'DN_STARTLE', 'VNC_CPG'],
-        collectMNPrefix: true,
-        meshDefs: [
-            { geo: 'cylinder', args: [0.35, 0.25, 2.5, 12], pos: [0, -1.5, -1.8], scale: [1, 1, 1], rot: [0.3, 0, 0] }
-        ]
-    },
-    {
-        name: 'Thermosensory',
-        description: 'Temperature sensing — warm and cool detection',
-        type: 'sensory',
-        neurons: ['THERMO_WARM', 'THERMO_COOL'],
-        meshDefs: [
-            { geo: 'sphere', args: [0.3, 10, 8], pos: [0, 0.0, 2.8], scale: [1, 1, 1] }
-        ]
-    },
-    {
-        name: 'Mechanosensory',
-        description: 'Touch and proprioception — bristle, wind, and body position sensing',
-        type: 'sensory',
-        neurons: ['MECH_BRISTLE', 'MECH_JO', 'MECH_CHORD', 'ANTENNAL_MECH'],
-        meshDefs: [
-            { geo: 'sphere', args: [0.35, 10, 8], pos: [0, 0.7, 1.8], scale: [1, 1, 1] }
-        ]
-    },
-    {
-        name: 'Drives',
-        description: 'Internal motivational states — hunger, fear, fatigue, curiosity, grooming urge',
-        type: 'drives',
-        neurons: ['DRIVE_HUNGER', 'DRIVE_FEAR', 'DRIVE_FATIGUE', 'DRIVE_CURIOSITY', 'DRIVE_GROOM'],
-        meshDefs: [
-            { geo: 'sphere', args: [0.5, 12, 10], pos: [0, 0.3, -0.3], scale: [1, 1, 1] }
-        ]
-    }
-];
-```
+6. `id: 'sez'`, `name: 'Subesophageal Zone'`, `neurons: ['SEZ_FEED','SEZ_GROOM','SEZ_WATER','GUS_GRN_SWEET','GUS_GRN_BITTER','GUS_GRN_WATER']`, `type: 'central'`
+   - `explanation: "The subesophageal zone (SEZ) is the feeding and grooming command center. It processes taste information and sends motor commands to extend the proboscis or initiate grooming."
+   - `analogy: "Like a cafeteria manager — it decides whether to eat based on what the taste buds report."
+   - `interaction: "Feed the fly and watch the SEZ light up. Touch the fly to trigger grooming commands."
+   - `populationEstimate: "~7,000 neurons"
+
+7. `id: 'vnc-motor'`, `name: 'VNC / Motor'`, `neurons: ['DN_WALK','DN_FLIGHT','DN_TURN','DN_BACKUP','DN_STARTLE','VNC_CPG']`, `type: 'motor'`, `collectMNPrefix: true`
+   - `explanation: "The ventral nerve cord (VNC) is the fly's spinal cord equivalent. It contains motor neurons that control the legs, wings, proboscis, and abdomen, plus central pattern generators that coordinate rhythmic movements like walking."
+   - `analogy: "Like your spinal cord — it relays commands from the brain to the muscles and coordinates repetitive movements like walking."
+   - `interaction: "Watch the motor neurons activate during any behavior — walking lights up leg motors, flight lights up wing motors."
+   - `populationEstimate: "~15,000 neurons including motor neurons and interneurons"
+
+8. `id: 'thermosensory'`, `name: 'Thermosensory'`, `neurons: ['THERMO_WARM','THERMO_COOL']`, `type: 'sensory'`
+   - `explanation: "Thermosensory neurons detect temperature changes. Warm and cool sensors report to the brain so the fly can seek comfortable temperatures."
+   - `analogy: "Like the temperature sensors in your skin — they tell the brain whether it is too hot or too cold."
+   - `interaction: "Change the Temp setting to Warm or Cool and watch the corresponding thermosensory neurons activate."
+   - `populationEstimate: "~60 neurons"
+
+9. `id: 'mechanosensory'`, `name: 'Mechanosensory'`, `neurons: ['MECH_BRISTLE','MECH_JO','MECH_CHORD','ANTENNAL_MECH']`, `type: 'sensory'`
+   - `explanation: "Mechanosensory neurons detect touch, wind, gravity, and body position. Bristle neurons respond to physical contact, Johnston's organ senses wind and gravity via the antennae, and chordotonal organs track limb positions."
+   - `analogy: "Like your sense of touch combined with your inner ear balance system."
+   - `interaction: "Touch the fly to activate bristle neurons. Blow air to activate Johnston's organ."
+   - `populationEstimate: "~2,500 neurons"
+
+10. `id: 'drives'`, `name: 'Drives'`, `neurons: ['DRIVE_HUNGER','DRIVE_FEAR','DRIVE_FATIGUE','DRIVE_CURIOSITY','DRIVE_GROOM']`, `type: 'drives'`
+    - `explanation: "Drive neurons represent internal motivational states. They fluctuate over time and bias the fly's behavior — a hungry fly seeks food, a frightened fly flees, a tired fly rests."
+    - `analogy: "Like your own feelings of hunger, anxiety, or tiredness — invisible internal states that shape what you do next."
+    - `interaction: "Watch the drive meters in the bottom panel. Hunger increases over time; fear spikes when you touch or blow air at the fly."
+    - `populationEstimate: "Distributed — modeled as 5 functional groups"
 
 #### Functions
 
-##### signature: `Brain3D.init()`
-- purpose: Initialize the Three.js scene, camera, renderer, controls, lighting, brain region meshes, and raycaster. Called once from main.js after BRAIN.setup().
-- logic:
-  1. If `Brain3D._initialized` is true, return immediately (prevent double init).
-  2. Set `Brain3D._container` to `document.getElementById('brain3d-overlay')`.
-  3. Set `Brain3D._tooltipEl` to `document.getElementById('brain3d-tooltip')`.
-  4. Wrap steps 4-14 in a try/catch. On catch, log error to console and set `Brain3D._initialized = false`, then return.
-  5. Create `Brain3D._scene = new THREE.Scene()`. Set `Brain3D._scene.background = new THREE.Color(0x0a0a1a)`.
-  6. Compute `width = Brain3D._container.clientWidth || window.innerWidth` and `height = Brain3D._container.clientHeight || (window.innerHeight - 44 - 90)`.
-  7. Create `Brain3D._camera = new THREE.PerspectiveCamera(55, width / height, 0.1, 100)`. Set `Brain3D._camera.position.set(0, 6, 10)`.
-  8. Create `Brain3D._renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false })`. Call `Brain3D._renderer.setSize(width, height)`. Call `Brain3D._renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))`. Append `Brain3D._renderer.domElement` to `Brain3D._container`.
-  9. Create `Brain3D._controls = new THREE.OrbitControls(Brain3D._camera, Brain3D._renderer.domElement)`. Set `Brain3D._controls.enableDamping = true`, `Brain3D._controls.dampingFactor = 0.08`, `Brain3D._controls.target.set(0, 0, 0)`. Call `Brain3D._controls.update()`.
-  10. Add lighting: `Brain3D._scene.add(new THREE.AmbientLight(0x404060, 0.6))`. Create `var pointLight1 = new THREE.PointLight(0xffffff, 0.8, 50)`, set `pointLight1.position.set(5, 8, 5)`, add to scene. Create `var pointLight2 = new THREE.PointLight(0x8888ff, 0.4, 50)`, set `pointLight2.position.set(-5, -3, -5)`, add to scene.
-  11. Call `Brain3D._buildRegions()`.
-  12. Create `Brain3D._raycaster = new THREE.Raycaster()`. Create `Brain3D._mouse = new THREE.Vector2()`.
-  13. Bind event listeners: `Brain3D._renderer.domElement.addEventListener('mousemove', Brain3D._onMouseMove)`. `window.addEventListener('resize', Brain3D._onResize)`.
-  14. Set `Brain3D._initialized = true`.
-- calls: `Brain3D._buildRegions()`
-- returns: void
-- error handling: try/catch around WebGLRenderer creation logs error to console.warn('Brain3D: WebGL not available') and returns early
+- signature: `EducationPanel.init()` (no parameters, returns undefined)
+  - purpose: Cache DOM references and attach event listeners
+  - logic:
+    1. Store reference to `document.getElementById('education-panel')` in `EducationPanel._panel`
+    2. Store reference to `document.getElementById('education-close-btn')` in `closeBtn`
+    3. Add click listener on `closeBtn` that calls `EducationPanel.hide()`
+    4. Store reference to `document.getElementById('education-content')` in `EducationPanel._content`
+    5. Call `EducationPanel._buildContent()` to populate the panel HTML
+    6. Set `EducationPanel._initialized = true`
+  - calls: `EducationPanel._buildContent()`
+  - returns: undefined
+  - error handling: none needed (DOM elements guaranteed by index.html)
 
-##### signature: `Brain3D._buildRegions()`
-- purpose: Create Three.js meshes for all brain regions from REGION_DEFS, add them to the scene, and populate `Brain3D._regions` and `Brain3D._allMeshes` arrays.
-- logic:
-  1. Set `Brain3D._regions = []` and `Brain3D._allMeshes = []`.
-  2. Iterate over each `regionDef` in `REGION_DEFS`:
-     a. Copy the `neurons` array: `var neuronList = regionDef.neurons.slice()`.
-     b. If `regionDef.collectMNPrefix === true`, iterate all keys of `BRAIN.postSynaptic`. For each key that starts with `'MN_'` and is NOT already in `neuronList`, push it to `neuronList`.
-     c. Resolve color: `var colorHex = REGION_COLORS[regionDef.type]`.
-     d. Create a `region` object: `{ name: regionDef.name, description: regionDef.description, type: regionDef.type, neurons: neuronList, meshes: [], activation: 0 }`.
-     e. Iterate over each `meshDef` in `regionDef.meshDefs`:
-        - Create geometry based on `meshDef.geo`:
-          - If `'sphere'`: `new THREE.SphereGeometry(meshDef.args[0], meshDef.args[1], meshDef.args[2])`
-          - If `'torus'`: `new THREE.TorusGeometry(meshDef.args[0], meshDef.args[1], meshDef.args[2], meshDef.args[3])`
-          - If `'cylinder'`: `new THREE.CylinderGeometry(meshDef.args[0], meshDef.args[1], meshDef.args[2], meshDef.args[3])`
-        - Create material: `new THREE.MeshStandardMaterial({ color: colorHex, emissive: colorHex, emissiveIntensity: 0, transparent: true, opacity: 0.3, depthWrite: false, roughness: 0.6, metalness: 0.1 })`
-        - Create mesh: `var mesh = new THREE.Mesh(geometry, material)`.
-        - Set `mesh.position.set(meshDef.pos[0], meshDef.pos[1], meshDef.pos[2])`.
-        - Set `mesh.scale.set(meshDef.scale[0], meshDef.scale[1], meshDef.scale[2])`.
-        - If `meshDef.rot` exists, set `mesh.rotation.set(meshDef.rot[0], meshDef.rot[1], meshDef.rot[2])`.
-        - Set `mesh.userData.region = region` (back-reference for raycasting).
-        - Set `mesh.renderOrder = 1` (transparent objects render after opaque).
-        - Add mesh to scene: `Brain3D._scene.add(mesh)`.
-        - Push mesh to `region.meshes`.
-        - Push mesh to `Brain3D._allMeshes`.
-     f. Push `region` to `Brain3D._regions`.
-  3. Add a faint wireframe "outline" mesh for spatial reference (optional but good visual context):
-     - Create `new THREE.SphereGeometry(4.5, 16, 12)` with `new THREE.MeshBasicMaterial({ color: 0x223355, wireframe: true, transparent: true, opacity: 0.06 })`.
-     - Set `position.set(0, 0, 0)` and `scale.set(1, 0.6, 0.9)`.
-     - Add to scene.
-- calls: THREE.SphereGeometry, THREE.TorusGeometry, THREE.CylinderGeometry, THREE.MeshStandardMaterial, THREE.Mesh
-- returns: void
-- error handling: none
+- signature: `EducationPanel._buildContent()` (no parameters, returns undefined)
+  - purpose: Generate the full HTML content of the education panel and insert it into `EducationPanel._content`
+  - logic:
+    1. Initialize empty string `html`
+    2. Append Introduction section:
+       - `<div class="edu-section">`
+       - `<h2 class="edu-section-title">What is this?</h2>`
+       - `<p class="edu-text">` containing: "This is a simplified functional model of the Drosophila melanogaster (fruit fly) brain. The real fly brain contains approximately 130,000 neurons forming around 50 million synaptic connections. Our model compresses this into ~70 functional neuron groups — clusters of neurons that work together for a specific purpose."
+       - Another `<p class="edu-text">` containing: "A connectome is a complete map of neural connections in a brain. The fly connectome was fully mapped by the FlyWire consortium in 2024, making Drosophila only the second organism (after C. elegans) with a complete wiring diagram."
+       - Close `</div>`
+    3. Append region sections: loop through `EDUCATION_REGIONS` array, for each entry:
+       - `<div class="edu-section">`
+       - `<h2 class="edu-section-title">` containing a clickable region name: `<span class="edu-region-link" data-region="REGION_NAME">REGION_NAME</span>` where REGION_NAME is the entry's `name` field. After the name, append a type badge: `<span class="edu-type-badge edu-type-TYPE">TYPE</span>` where TYPE is the entry's `type` field
+       - `<p class="edu-text">` with the `explanation` value
+       - `<p class="edu-analogy"><strong>Analogy:</strong> ` with the `analogy` value
+       - `<p class="edu-interaction"><strong>Try it:</strong> ` with the `interaction` value
+       - `<div class="edu-neuron-list"><strong>Neuron groups in our model:</strong>` then loop through the entry's `neurons` array. For each neuron, output `<span class="edu-neuron-tag">NEURON_NAME</span>`. If the entry has `collectMNPrefix: true`, additionally iterate `Object.keys(BRAIN.postSynaptic)` and for each key starting with `'MN_'` that is not already in the neurons array, append it as a tag.
+       - `<div class="edu-population">` with the `populationEstimate` value
+       - Close `</div>`
+    4. Append Signal Flow section:
+       - `<div class="edu-section">`
+       - `<h2 class="edu-section-title">Signal Flow</h2>`
+       - `<p class="edu-text">` containing: "Information flows through the fly brain in a consistent pattern: sensory neurons detect the environment, central processing regions interpret and decide, and motor neurons execute the chosen behavior. Internal drives (hunger, fear, fatigue) bias the central processing, shifting which actions win."
+       - Inline SVG diagram (see SVG specification below)
+       - Close `</div>`
+    5. Append "What's Missing" section:
+       - `<div class="edu-section">`
+       - `<h2 class="edu-section-title">What's Missing</h2>`
+       - `<p class="edu-text">` containing: "Our 70-group model is a dramatic simplification. Here's what we leave out:"
+       - `<ul class="edu-list">` with these exact `<li>` items:
+         - "Individual neuron dynamics — each of our groups represents hundreds or thousands of real neurons that fire independently"
+         - "Synaptic plasticity — real synapses strengthen and weaken with use; our connection weights are fixed"
+         - "Neuromodulator diffusion — chemicals like dopamine and serotonin diffuse broadly in the real brain, not just through direct connections"
+         - "Electrical synapses (gap junctions) — our model only represents chemical synapses"
+         - "Approximate connection weights — our weights are educated estimates, not exact counts from the connectome"
+       - Close `</ul></div>`
+    6. Append "Learn More" section:
+       - `<div class="edu-section">`
+       - `<h2 class="edu-section-title">Learn More</h2>`
+       - `<ul class="edu-links">` with these exact `<li><a>` items (each link has `target="_blank"` and `rel="noopener noreferrer"`):
+         - text: "FlyWire Codex — Browse the complete fly connectome", href: "https://codex.flywire.ai"
+         - text: "Dorkenwald et al. 2024 — The paper describing the full connectome mapping", href: "https://doi.org/10.1038/s41586-024-07558-y"
+         - text: "Virtual Fly Brain — 3D atlas and neuron database", href: "https://www.virtualflybrain.org"
+         - text: "worm-sim — The C. elegans project that inspired FlyBrain", href: "https://github.com/heyseth/worm-sim"
+       - Close `</ul></div>`
+    7. Set `EducationPanel._content.innerHTML = html`
+    8. Attach click listeners to all `.edu-region-link` elements inside `EducationPanel._content`: use `EducationPanel._content.addEventListener('click', function(e) {...})` (single delegated listener). In the handler:
+       - Check if `e.target.classList.contains('edu-region-link')` or `e.target.closest('.edu-region-link')` — get the element
+       - Read `data-region` attribute from the element
+       - Call `EducationPanel.highlightRegion(regionName)` with the value
+  - calls: `EducationPanel.highlightRegion()` (via event delegation)
+  - returns: undefined
+  - error handling: none
 
-##### signature: `Brain3D.show()`
-- purpose: Show the 3D overlay panel and start the internal render loop.
-- logic:
-  1. If `!Brain3D._initialized`, call `Brain3D.init()`. If still `!Brain3D._initialized` after init, return (WebGL failed).
-  2. Set `Brain3D._container.style.display = 'block'`.
-  3. Set `Brain3D.active = true`.
-  4. Call `Brain3D._onResize()` to size the renderer to the current container dimensions.
-  5. Call `Brain3D._renderLoop()` to start the internal animation frame loop.
-- calls: `Brain3D.init()`, `Brain3D._onResize()`, `Brain3D._renderLoop()`
-- returns: void
-- error handling: none
+- Signal Flow SVG specification (inline in the HTML string built by `_buildContent`):
+  - Container: `<svg class="edu-signal-flow" viewBox="0 0 600 200" xmlns="http://www.w3.org/2000/svg">`
+  - Three rounded rectangles, left to right:
+    - x=20 y=60 width=140 height=80 rx=8: fill `#3b82f6` (sensory blue) at 20% opacity, stroke `#3b82f6`, text "Sensory Input" centered in white at font-size 14
+    - x=230 y=40 width=140 height=120 rx=8: fill `#8b5cf6` (central purple) at 20% opacity, stroke `#8b5cf6`, text "Central Processing" centered in white at font-size 14
+    - x=440 y=60 width=140 height=80 rx=8: fill `#ef4444` (motor red) at 20% opacity, stroke `#ef4444`, text "Motor Output" centered in white at font-size 14
+  - Arrows (lines with arrowhead markers):
+    - Line from x=160 y=100 to x=230 y=100 (sensory to central), stroke `#8892a4`, stroke-width 2, marker-end arrow
+    - Line from x=370 y=100 to x=440 y=100 (central to motor), stroke `#8892a4`, stroke-width 2, marker-end arrow
+  - Drives box below central:
+    - x=250 y=175 width=100 height=25 rx=4: fill `#f59e0b` at 20% opacity, stroke `#f59e0b`, text "Drives" centered in white at font-size 12
+    - Dashed line from x=300 y=175 to x=300 y=160 (drives up to central), stroke `#f59e0b`, stroke-dasharray 4,3, marker-end arrow
+  - Arrow marker definition in `<defs>`: `<marker id="edu-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8892a4"/></marker>`
+  - Additional arrow marker for drives: `<marker id="edu-arrow-drives" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#f59e0b"/></marker>`
+  - Small labels below each box:
+    - Below sensory: text at x=90 y=155, font-size 10, fill `#8892a4`: "Eyes, antennae, bristles"
+    - Below central: text at x=300 y=25, font-size 10, fill `#8892a4`: "Mushroom bodies, central complex"
+    - Below motor: text at x=510 y=155, font-size 10, fill `#8892a4`: "Legs, wings, proboscis"
 
-##### signature: `Brain3D.hide()`
-- purpose: Hide the 3D overlay panel and stop the internal render loop.
-- logic:
-  1. Set `Brain3D._container.style.display = 'none'`.
-  2. Set `Brain3D.active = false`.
-  3. Set `Brain3D._tooltipEl.style.display = 'none'`.
-  4. If `Brain3D._animFrameId !== null`, call `cancelAnimationFrame(Brain3D._animFrameId)` and set `Brain3D._animFrameId = null`.
-- returns: void
+- signature: `EducationPanel.highlightRegion(regionName)` (regionName: string, returns undefined)
+  - purpose: Temporarily boost the emissive glow of the named region in the 3D brain view
+  - logic:
+    1. Check `if (typeof Brain3D === 'undefined' || !Brain3D._initialized || !Brain3D._regions)` — if true, return immediately (3D view not available)
+    2. If `Brain3D.active === false`, do nothing (don't force-open the 3D panel, just skip)
+    3. Loop through `Brain3D._regions` array. Find the region where `region.name === regionName`
+    4. If not found, return
+    5. For each mesh in `region.meshes`:
+       - Store original emissiveIntensity: `var originalIntensity = mesh.material.emissiveIntensity`
+       - Store original opacity: `var originalOpacity = mesh.material.opacity`
+       - Set `mesh.material.emissiveIntensity = 1.5` (boosted)
+       - Set `mesh.material.opacity = 0.9` (boosted)
+    6. Set a `setTimeout` for 1200ms that restores each mesh:
+       - `mesh.material.emissiveIntensity = originalIntensity`
+       - `mesh.material.opacity = originalOpacity`
+       (Capture the meshes array and original values in the closure)
+  - calls: none
+  - returns: undefined
+  - error handling: guard against missing Brain3D
 
-##### signature: `Brain3D.toggle()`
-- purpose: Toggle visibility of the 3D overlay panel.
-- logic:
-  1. If `Brain3D.active`, call `Brain3D.hide()`. Else call `Brain3D.show()`.
-- returns: void
+- signature: `EducationPanel.show()` (no parameters, returns undefined)
+  - purpose: Show the education panel
+  - logic:
+    1. If `!EducationPanel._initialized`, call `EducationPanel.init()`
+    2. Set `EducationPanel._panel.style.display = 'block'`
+    3. Set `EducationPanel.active = true`
+  - calls: `EducationPanel.init()` (conditionally)
+  - returns: undefined
+  - error handling: none
 
-##### signature: `Brain3D._renderLoop()`
-- purpose: Internal requestAnimationFrame loop that renders the Three.js scene when the overlay is active.
-- logic:
-  1. If `!Brain3D.active`, return (stop loop).
-  2. Set `Brain3D._animFrameId = requestAnimationFrame(Brain3D._renderLoop)`.
-  3. Call `Brain3D._controls.update()` (for damping).
-  4. Call `Brain3D._renderer.render(Brain3D._scene, Brain3D._camera)`.
-- returns: void
+- signature: `EducationPanel.hide()` (no parameters, returns undefined)
+  - purpose: Hide the education panel
+  - logic:
+    1. Set `EducationPanel._panel.style.display = 'none'`
+    2. Set `EducationPanel.active = false`
+  - calls: none
+  - returns: undefined
+  - error handling: none
 
-##### signature: `Brain3D.update()`
-- purpose: Read live connectome activation levels from BRAIN.postSynaptic and update each region mesh's emissive intensity and opacity. Called from main.js loop() each frame.
-- logic:
-  1. If `!Brain3D.active || !Brain3D._initialized`, return immediately.
-  2. Iterate over each `region` in `Brain3D._regions`:
-     a. Compute average activation: `var sum = 0; var count = 0;`. Iterate over each `neuronName` in `region.neurons`. If `BRAIN.postSynaptic[neuronName]` exists, add `BRAIN.postSynaptic[neuronName][BRAIN.thisState]` to `sum` and increment `count`. If `count > 0`, set `var avg = sum / count`, else `var avg = 0`.
-     b. Normalize: `var normalized = Math.min(1, Math.max(0, avg / ACTIVATION_DIVISOR))`. Store `region.activation = normalized`.
-     c. Compute opacity: `var opacity = BASE_OPACITY + normalized * (MAX_OPACITY - BASE_OPACITY)` (range 0.3-0.8).
-     d. Compute emissive intensity: `var emissiveIntensity = BASE_EMISSIVE_INTENSITY + normalized * (MAX_EMISSIVE_INTENSITY - BASE_EMISSIVE_INTENSITY)` (range 0.0-1.0).
-     e. Iterate over each `mesh` in `region.meshes`. Set `mesh.material.opacity = opacity`. Set `mesh.material.emissiveIntensity = emissiveIntensity`.
-- calls: reads `BRAIN.postSynaptic[name][BRAIN.thisState]`
-- returns: void
+- signature: `EducationPanel.toggle()` (no parameters, returns undefined)
+  - purpose: Toggle the education panel visibility
+  - logic:
+    1. If `EducationPanel.active` is true, call `EducationPanel.hide()`, else call `EducationPanel.show()`
+  - calls: `EducationPanel.show()` or `EducationPanel.hide()`
+  - returns: undefined
+  - error handling: none
 
-##### signature: `Brain3D._onMouseMove(event)`
-- purpose: Handle mouse movement over the Three.js canvas for raycasting hover detection and tooltip display.
-- logic:
-  1. Get renderer DOM element bounds: `var rect = Brain3D._renderer.domElement.getBoundingClientRect()`.
-  2. Compute normalized device coordinates: `Brain3D._mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1`. `Brain3D._mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1`.
-  3. Set raycaster from camera: `Brain3D._raycaster.setFromCamera(Brain3D._mouse, Brain3D._camera)`.
-  4. Intersect: `var intersects = Brain3D._raycaster.intersectObjects(Brain3D._allMeshes)`.
-  5. If `intersects.length > 0`:
-     a. Get `var region = intersects[0].object.userData.region`.
-     b. Build tooltip HTML string:
-        - Start with `'<div class="b3d-tip-name">' + region.name + '</div>'`.
-        - Add `'<div class="b3d-tip-desc">' + region.description + '</div>'`.
-        - Add `'<div class="b3d-tip-type">' + region.type.charAt(0).toUpperCase() + region.type.slice(1) + '</div>'`.
-        - Add `'<div class="b3d-tip-neurons">'`.
-        - Iterate over each `neuronName` in `region.neurons`:
-          - Read raw value: `var raw = BRAIN.postSynaptic[neuronName] ? BRAIN.postSynaptic[neuronName][BRAIN.thisState] : 0`.
-          - Read description: look up the neuron name in the `neuronDescriptions` variable from main.js. Access it as `(typeof neuronDescriptions !== 'undefined' && neuronDescriptions[neuronName]) ? neuronDescriptions[neuronName] : neuronName`.
-          - Compute percentage: `var pct = Math.min(100, Math.max(0, Math.round(raw / ACTIVATION_DIVISOR * 100)))`.
-          - Append: `'<div class="b3d-tip-neuron"><span class="b3d-tip-neuron-name">' + desc + '</span><span class="b3d-tip-neuron-val">' + pct + '%</span></div>'`.
-        - Close: `'</div>'`.
-     c. Set `Brain3D._tooltipEl.innerHTML = html`.
-     d. Position tooltip: `Brain3D._tooltipEl.style.left = (event.clientX + 12) + 'px'`. `Brain3D._tooltipEl.style.top = (event.clientY + 12) + 'px'`.
-     e. Clamp tooltip to stay on screen: if `event.clientX + 12 + 260 > window.innerWidth`, set `left = (event.clientX - 270) + 'px'`. If `event.clientY + 12 + Brain3D._tooltipEl.offsetHeight > window.innerHeight - 90`, set `top = (event.clientY - Brain3D._tooltipEl.offsetHeight - 12) + 'px'`.
-     f. Set `Brain3D._tooltipEl.style.display = 'block'`.
-  6. Else (no intersection): set `Brain3D._tooltipEl.style.display = 'none'`.
-- returns: void
+Module structure: Wrap everything in an IIFE `(function() { ... })();`. At the top of the IIFE, define `EDUCATION_REGIONS` array. Then define `window.EducationPanel = { active: false, _initialized: false, _panel: null, _content: null, init: ..., _buildContent: ..., highlightRegion: ..., show: ..., hide: ..., toggle: ... }`. Export via `window.EducationPanel`.
 
-##### signature: `Brain3D._onResize()`
-- purpose: Update camera aspect ratio and renderer size when the window or container resizes.
-- logic:
-  1. If `!Brain3D._renderer`, return.
-  2. Compute `var width = Brain3D._container.clientWidth || window.innerWidth`. `var height = Brain3D._container.clientHeight || (window.innerHeight - 44 - 90)`.
-  3. Set `Brain3D._camera.aspect = width / height`. Call `Brain3D._camera.updateProjectionMatrix()`.
-  4. Call `Brain3D._renderer.setSize(width, height)`.
-- returns: void
+### 2. MODIFY index.html
+- operation: MODIFY
+- reason: Add "Learn" toolbar button, education panel HTML container, and education.js script tag
 
-#### Wiring / Integration
-- `window.Brain3D` is the global entry point. Main.js calls `Brain3D.init()` after `BRAIN.setup()` and calls `Brain3D.update()` from the main loop. The button handler calls `Brain3D.toggle()`.
+#### Change 1: Add "Learn" button to toolbar
+- anchor: `<button class="tool-btn" id="helpBtn">?</button>`
+- Insert BEFORE that line (on a new line before it, inside `.toolbar-left`):
+  ```html
+  <button class="tool-btn" id="learnBtn">Learn</button>
+  ```
+
+#### Change 2: Add education panel HTML
+- anchor: `<div id="brain3d-overlay" style="display:none;"></div>`
+- Insert BEFORE that line:
+  ```html
+  <div id="education-panel" class="education-panel" style="display:none;">
+      <div class="education-panel-header">
+          <span class="education-panel-title">Brain Guide</span>
+          <button class="education-close-btn" id="education-close-btn">&times;</button>
+      </div>
+      <div class="education-content" id="education-content"></div>
+  </div>
+  ```
+
+#### Change 3: Add education.js script tag
+- anchor: `<script type="text/javascript" src="./js/brain3d.js"></script>`
+- Insert AFTER that line:
+  ```html
+  <script type="text/javascript" src="./js/education.js"></script>
+  ```
 
 ### 3. MODIFY js/main.js
 - operation: MODIFY
-- reason: (A) Call Brain3D.init() after BRAIN.setup(), (B) Add Brain 3D button click handler, (C) Call Brain3D.update() in the main loop
+- reason: Add Learn button click handler and close-on-outside-click behavior
 
-#### Change A: Initialize Brain3D after BRAIN.setup() and neuronColorMap build
-- anchor: `BRAIN.randExcite();`
-- Insert BEFORE that anchor line (after the neuronColorMap loop that ends at approximately line 180):
-```javascript
-// Initialize Brain3D module (deferred — actual Three.js setup happens on first toggle)
-if (typeof Brain3D !== 'undefined') {
-    Brain3D.init();
-}
-```
+#### Change 1: Add Learn button toggle handler
+- anchor: `// --- Help overlay toggle ---` (line 247)
+- Insert BEFORE that line (on new lines):
+  ```js
+  // --- Learn / Education panel toggle ---
+  var learnBtn = document.getElementById('learnBtn');
+  if (learnBtn) {
+      learnBtn.addEventListener('click', function () {
+          if (typeof EducationPanel !== 'undefined') {
+              EducationPanel.toggle();
+              if (EducationPanel.active) {
+                  learnBtn.classList.add('active');
+              } else {
+                  learnBtn.classList.remove('active');
+              }
+          }
+      });
+  }
+  ```
 
-#### Change B: Add Brain 3D toggle button handler
-- anchor: `// --- Help overlay toggle ---`
-- Insert BEFORE that anchor line:
-```javascript
-// --- Brain 3D toggle ---
-var brain3dBtn = document.getElementById('brain3dBtn');
-if (brain3dBtn) {
-    brain3dBtn.addEventListener('click', function () {
-        if (typeof Brain3D !== 'undefined') {
-            Brain3D.toggle();
-            var isActive = Brain3D.active;
-            brain3dBtn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-            if (isActive) {
-                brain3dBtn.classList.add('active');
-            } else {
-                brain3dBtn.classList.remove('active');
-            }
-        }
-    });
-}
-```
-
-#### Change C: Call Brain3D.update() in the main loop
-- anchor: `update(dt);` (inside the `loop` function at approximately line 1644)
-- Insert AFTER that line (before `draw();`):
-```javascript
-    if (typeof Brain3D !== 'undefined' && Brain3D.active) { Brain3D.update(); }
-```
+#### Change 2: Add education panel to the outside-click close handler
+- anchor: `if (helpOverlay.style.display !== 'none' &&` (line 263, inside the document click handler)
+- The existing document click handler at line 262 closes the help overlay when clicking outside. After that handler's closing `}` and `});` on line 268, add on a new line:
+  ```js
+  // Close education panel when clicking outside of it
+  document.addEventListener('click', function (e) {
+      if (typeof EducationPanel !== 'undefined' && EducationPanel.active) {
+          var panel = document.getElementById('education-panel');
+          var learnBtnEl = document.getElementById('learnBtn');
+          if (panel && !panel.contains(e.target) && e.target !== learnBtnEl) {
+              EducationPanel.hide();
+              if (learnBtnEl) learnBtnEl.classList.remove('active');
+          }
+      }
+  });
+  ```
 
 ### 4. MODIFY css/main.css
 - operation: MODIFY
-- reason: Add styles for the brain3d overlay panel, tooltip, and tooltip inner elements
+- reason: Add styles for the education panel (slide-out sidebar), its content sections, neuron tags, signal flow SVG, and region link highlights
 
-#### Change: Add brain3d styles at the end of the file
-- anchor: `#nodeHolder.hidden {` (last rule block in the file)
-- Insert AFTER that entire rule block (after the closing `}`):
+#### Change 1: Append education panel styles
+- anchor: `.b3d-tip-neuron-val {` (this is near the end of the file, line 438)
+- After the closing `}` of that rule block (line 444, the last line of CSS), append the following CSS:
 
 ```css
-/* --- Brain 3D Overlay --- */
-#brain3d-overlay {
+
+/* --- Education Panel (slide-out sidebar) --- */
+.education-panel {
     position: fixed;
     top: 44px;
-    left: 0;
     right: 0;
     bottom: 90px;
-    z-index: 15;
-    background: #0a0a1a;
-}
-
-#brain3d-overlay canvas {
-    display: block;
-    width: 100% !important;
-    height: 100% !important;
-}
-
-/* --- Brain 3D Tooltip --- */
-#brain3d-tooltip {
-    position: fixed;
-    z-index: 45;
+    width: 380px;
+    max-width: 90vw;
     background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 0.5rem 0.75rem;
+    border-left: 1px solid var(--border);
+    z-index: 25;
     font-family: system-ui, -apple-system, sans-serif;
-    pointer-events: none;
-    max-width: 260px;
+    display: flex;
+    flex-direction: column;
     box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    overflow: hidden;
 }
 
-.b3d-tip-name {
-    color: var(--text);
-    font-size: 0.8rem;
-    font-weight: 600;
-    margin-bottom: 0.15rem;
-}
-
-.b3d-tip-desc {
-    color: var(--text-muted);
-    font-size: 0.7rem;
-    margin-bottom: 0.25rem;
-    line-height: 1.3;
-}
-
-.b3d-tip-type {
-    color: var(--accent);
-    font-size: 0.65rem;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    font-weight: 500;
-    margin-bottom: 0.35rem;
-}
-
-.b3d-tip-neurons {
-    border-top: 1px solid var(--border);
-    padding-top: 0.3rem;
-    max-height: 180px;
-    overflow-y: auto;
-}
-
-.b3d-tip-neuron {
+.education-panel-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.education-panel-title {
+    color: var(--text);
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.education-close-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 0 0.25rem;
+    line-height: 1;
+}
+
+.education-close-btn:hover {
+    color: var(--text);
+}
+
+.education-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem;
+}
+
+.edu-section {
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.edu-section:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+
+.edu-section-title {
+    color: var(--text);
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem 0;
+    display: flex;
+    align-items: center;
     gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.edu-text {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    line-height: 1.5;
+    margin: 0 0 0.5rem 0;
+}
+
+.edu-analogy {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    line-height: 1.5;
+    margin: 0 0 0.5rem 0;
+    font-style: italic;
+}
+
+.edu-analogy strong {
+    font-style: normal;
+    color: var(--text);
+}
+
+.edu-interaction {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    line-height: 1.5;
+    margin: 0 0 0.5rem 0;
+}
+
+.edu-interaction strong {
+    color: var(--accent);
+}
+
+.edu-region-link {
+    cursor: pointer;
+    color: var(--text);
+    transition: color 0.2s ease;
+}
+
+.edu-region-link:hover {
+    color: var(--accent);
+}
+
+.edu-type-badge {
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 500;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+}
+
+.edu-type-sensory {
+    color: var(--neuron-sensory);
+    background: rgba(59, 130, 246, 0.15);
+}
+
+.edu-type-central {
+    color: var(--neuron-central);
+    background: rgba(139, 92, 246, 0.15);
+}
+
+.edu-type-drives {
+    color: var(--neuron-drives);
+    background: rgba(245, 158, 11, 0.15);
+}
+
+.edu-type-motor {
+    color: var(--neuron-motor);
+    background: rgba(239, 68, 68, 0.15);
+}
+
+.edu-neuron-list {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin: 0.5rem 0;
+    line-height: 1.6;
+}
+
+.edu-neuron-list strong {
+    color: var(--text);
+    display: block;
+    margin-bottom: 0.25rem;
+    font-size: 0.75rem;
+}
+
+.edu-neuron-tag {
+    display: inline-block;
+    background: var(--surface-hover);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.1rem 0.35rem;
     font-size: 0.65rem;
     color: var(--text-muted);
-    padding: 0.1rem 0;
+    margin: 0.1rem;
+    font-family: monospace;
 }
 
-.b3d-tip-neuron-name {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+.edu-population {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    font-style: italic;
+    margin-top: 0.25rem;
 }
 
-.b3d-tip-neuron-val {
-    flex-shrink: 0;
-    color: var(--text);
-    font-weight: 500;
-    min-width: 32px;
-    text-align: right;
+.edu-signal-flow {
+    width: 100%;
+    height: auto;
+    margin: 0.5rem 0;
+}
+
+.edu-list {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    line-height: 1.5;
+    margin: 0.5rem 0;
+    padding-left: 1.25rem;
+}
+
+.edu-list li {
+    margin-bottom: 0.4rem;
+}
+
+.edu-links {
+    list-style: none;
+    padding: 0;
+    margin: 0.5rem 0;
+}
+
+.edu-links li {
+    margin-bottom: 0.5rem;
+}
+
+.edu-links a {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 0.8rem;
+    transition: color 0.2s ease;
+}
+
+.edu-links a:hover {
+    color: var(--accent-hover);
 }
 ```
 
 ## Verification
-- build: no build step — open index.html in a browser directly (or via local file server)
-- lint: no linter configured in project
-- test: no existing test runner for this project
-- smoke: Open the application in a browser. Click the "Brain 3D" button in the toolbar. Verify: (1) a dark overlay appears between the toolbar and bottom panel showing a 3D brain model with colored translucent regions, (2) the regions glow and become more opaque as the fly's connectome is active, (3) you can orbit/rotate the brain with mouse drag, zoom with scroll wheel, (4) hovering over a brain region shows a tooltip with region name, description, type, and neuron activation percentages, (5) clicking "Brain 3D" again hides the overlay, (6) the simulation continues running underneath while the overlay is open, (7) the button shows active state (orange border/text) when the panel is visible.
+- build: no build step (vanilla JS, open index.html in browser)
+- lint: no linter configured
+- test: no existing tests for UI components
+- smoke: Open `index.html` in a browser. Verify:
+  1. A "Learn" button appears in the toolbar between "Brain 3D" and "?"
+  2. Clicking "Learn" opens a right-side panel with title "Brain Guide"
+  3. The panel contains sections: "What is this?", each of the 10 brain regions, "Signal Flow" (with SVG diagram), "What's Missing", and "Learn More"
+  4. Each region section shows the region name, type badge, explanation, analogy, interaction hint, neuron tags, and population estimate
+  5. Clicking a region name in the panel while Brain 3D is active causes the corresponding 3D region to briefly glow brighter for ~1.2 seconds
+  6. Clicking outside the panel closes it
+  7. The close (x) button closes the panel
+  8. The "Learn" toolbar button gets the active class when panel is open and loses it when closed
+  9. Links in "Learn More" open in new tabs
+  10. The panel scrolls if content overflows
 
 ## Constraints
-- Do NOT install any npm packages or use any build step
-- Do NOT modify js/connectome.js, js/constants.js, or js/fly-logic.js
-- Do NOT create a second requestAnimationFrame loop in main.js — the Brain3D module manages its own internal render loop via `_renderLoop()`
-- Do NOT add `type="module"` to any script tag — the project uses global script loading
-- Three.js CDN version MUST be exactly 0.158.0 for both three.min.js and OrbitControls.js — mismatched versions cause runtime errors
-- OrbitControls CDN path MUST be `examples/js/controls/OrbitControls.js` (NOT `examples/jsm/` which is the ES module version)
-- All brain region materials MUST set `depthWrite: false` to prevent z-fighting between transparent meshes
-- All CSS values MUST use the existing CSS custom properties from `:root` (var(--surface), var(--border), var(--text), var(--text-muted), var(--accent), var(--radius)) — no hardcoded hex values except for the scene background (0x0a0a1a) and region colors that match the existing regionColors in main.js
-- The Brain 3D button must NOT have a `data-tool` attribute — it is a toggle button (like the help button), not a canvas click tool
-- The `Brain3D.update()` call in main.js loop MUST be guarded with `typeof Brain3D !== 'undefined' && Brain3D.active` to handle cases where brain3d.js fails to load
-- The `neuronDescriptions` object from main.js is accessed by brain3d.js as a global variable — since brain3d.js loads before main.js, use `typeof neuronDescriptions !== 'undefined'` guard when reading it in the tooltip
+- Do NOT modify SPEC.md, TASKS.md, CLAUDE.md, or any files in .buildloop/ (other than current-plan.md)
+- Do NOT add any npm packages, build steps, or external dependencies
+- Do NOT modify js/brain3d.js — the education panel reads from Brain3D's existing public API (`Brain3D._regions`, `Brain3D._initialized`, `Brain3D.active`) but does not alter brain3d.js code
+- Do NOT modify js/connectome.js or js/fly-logic.js or js/constants.js
+- All colors must use CSS custom properties from :root (--bg, --surface, --border, --text, --text-muted, --accent, --neuron-sensory, --neuron-central, --neuron-drives, --neuron-motor). No hardcoded hex values in CSS except for the SVG inline diagram which uses the same palette values
+- No gradients, glassmorphism, glows, or neon effects
+- Only allowed shadow: `0 1px 3px rgba(0,0,0,0.3)`
+- Only allowed transition: `property 0.2s ease`
+- The education.js script tag must appear AFTER brain3d.js and BEFORE main.js in index.html
+- The "Learn" button must be a `<button class="tool-btn" id="learnBtn">Learn</button>` — it is NOT a data-tool button (it does not participate in the active-tool selection loop for Feed/Touch/Air)
+- The highlightRegion function must match region names exactly as they appear in Brain3D's REGION_DEFS (e.g., "Optic Lobes", "VNC / Motor")
+- For the VNC/Motor region neuron list, use the same `collectMNPrefix` pattern as brain3d.js: iterate `Object.keys(BRAIN.postSynaptic)` and include any key starting with `'MN_'`
