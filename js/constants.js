@@ -292,7 +292,7 @@ var weights = {
 
 	// Feeding command center
 	SEZ_FEED: {
-		MN_PROBOSCIS: 10,    // extend proboscis
+		MN_PROBOSCIS: 14,    // extend proboscis
 		MN_HEAD: 4,          // lower head toward food
 		DN_WALK: -6,         // suppress walking while feeding
 		DN_FLIGHT: -5,       // suppress flight while feeding
@@ -302,8 +302,8 @@ var weights = {
 
 	// Grooming command center
 	SEZ_GROOM: {
-		MN_LEG_L1: 7,        // front left leg (grooming effector)
-		MN_LEG_R1: 7,        // front right leg (grooming effector)
+		MN_LEG_L1: 10,       // front left leg (grooming effector)
+		MN_LEG_R1: 10,       // front right leg (grooming effector)
 		MN_ABDOMEN: 5,       // abdomen grooming
 		MN_HEAD: 4,          // head positioning for grooming
 		DN_WALK: -5,          // suppress walking while grooming
@@ -472,7 +472,7 @@ var weights = {
 
 	// Grooming urge
 	DRIVE_GROOM: {
-		SEZ_GROOM: 6,         // grooming drive triggers grooming command
+		SEZ_GROOM: 8,         // grooming drive triggers grooming command
 		DN_WALK: -3,           // grooming suppresses walking
 		DN_FLIGHT: -2,         // grooming suppresses flight
 	},

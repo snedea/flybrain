@@ -24,6 +24,53 @@ var speedChangeInterval = 0;
 var food = [];
 var frameCount = 0;
 
+// ============================================================
+// BEHAVIOR STATE MACHINE
+// ============================================================
+
+// Minimum time (ms) the fly must stay in a state before transitioning out
+var BEHAVIOR_MIN_DURATION = {
+	idle: 0,
+	walk: 500,
+	explore: 1000,
+	phototaxis: 1000,
+	rest: 3000,
+	groom: 2000,
+	feed: 2000,
+	fly: 1500,
+	startle: 800,
+};
+
+// Cooldown (ms) after exiting a state before it can be re-entered
+var BEHAVIOR_COOLDOWN = {
+	startle: 2000,
+	fly: 1000,
+	groom: 3000,
+	feed: 1000,
+};
+
+// Accumulator thresholds for entering each state
+var BEHAVIOR_THRESHOLDS = {
+	startle: 30,
+	fly: 15,
+	feed: 8,
+	groom: 8,
+	walk: 5,
+	restFatigue: 0.7,
+	exploreCuriosity: 0.4,
+	phototaxisLight: 0.5,
+};
+
+// The behavior state object
+var behavior = {
+	current: 'idle',
+	previous: 'idle',
+	enterTime: Date.now(),
+	cooldowns: {},
+	startlePhase: 'none',
+	startleFreezeEnd: 0,
+};
+
 // --- Tool state ---
 var activeTool = 'feed';
 var isDragging = false;
@@ -98,13 +145,9 @@ function updateBrain() {
 		psBox.style.backgroundColor = neuronColorMap[postSynaptic] || '#55FF55';
 		psBox.style.opacity = Math.min(1, neuron / 50);
 	}
-	var scalingFactor = 20;
-	var newDir = (BRAIN.accumleft - BRAIN.accumright) / scalingFactor;
-	targetDir = facingDir + newDir * Math.PI;
-	targetSpeed =
-		(Math.abs(BRAIN.accumleft) + Math.abs(BRAIN.accumright)) /
-		(scalingFactor * 5);
-	speedChangeInterval = (targetSpeed - speed) / (scalingFactor * 1.5);
+	// Evaluate behavioral state and compute movement
+	updateBehaviorState();
+	computeMovementForBehavior();
 
 	// Update drive meter bars
 	var driveHungerEl = document.getElementById('driveHunger');
@@ -115,6 +158,10 @@ function updateBrain() {
 	if (driveFearEl) driveFearEl.style.width = (BRAIN.drives.fear * 100) + '%';
 	if (driveFatigueEl) driveFatigueEl.style.width = (BRAIN.drives.fatigue * 100) + '%';
 	if (driveCuriosityEl) driveCuriosityEl.style.width = (BRAIN.drives.curiosity * 100) + '%';
+
+	// Update behavior state label
+	var behaviorStateEl = document.getElementById('behaviorState');
+	if (behaviorStateEl) behaviorStateEl.textContent = behavior.current;
 }
 
 BRAIN.randExcite();
@@ -208,6 +255,226 @@ function applyTouchTool(cx, cy) {
 	}, 2000);
 }
 
+/**
+ * Returns true if any food item is within 50px of the fly.
+ */
+function hasNearbyFood() {
+	for (var i = 0; i < food.length; i++) {
+		if (Math.hypot(fly.x - food[i].x, fly.y - food[i].y) <= 50) return true;
+	}
+	return false;
+}
+
+/**
+ * Returns true if the given state is in its cooldown period.
+ */
+function isCoolingDown(state, now) {
+	return behavior.cooldowns[state] !== undefined && now < behavior.cooldowns[state];
+}
+
+/**
+ * Evaluates accumulator outputs and drives to determine which behavior
+ * state should be active. Returns the state name string.
+ * Priority order (highest first): startle, fly, feed, groom, rest, phototaxis, explore, walk, idle.
+ */
+function evaluateBehaviorEntry() {
+	var now = Date.now();
+	var totalWalk = BRAIN.accumWalkLeft + BRAIN.accumWalkRight;
+
+	if (BRAIN.accumStartle > BEHAVIOR_THRESHOLDS.startle && !isCoolingDown('startle', now)) {
+		return 'startle';
+	}
+	if (BRAIN.accumFlight > BEHAVIOR_THRESHOLDS.fly && !isCoolingDown('fly', now)) {
+		return 'fly';
+	}
+	if (BRAIN.accumFeed > BEHAVIOR_THRESHOLDS.feed && hasNearbyFood() && !isCoolingDown('feed', now)) {
+		return 'feed';
+	}
+	if (BRAIN.accumGroom > BEHAVIOR_THRESHOLDS.groom && !isCoolingDown('groom', now)) {
+		return 'groom';
+	}
+	if (BRAIN.drives.fatigue > BEHAVIOR_THRESHOLDS.restFatigue) {
+		return 'rest';
+	}
+	if (BRAIN.stimulate.lightLevel > BEHAVIOR_THRESHOLDS.phototaxisLight &&
+		BRAIN.drives.curiosity > 0.2 && totalWalk > 3) {
+		return 'phototaxis';
+	}
+	if (totalWalk > BEHAVIOR_THRESHOLDS.walk &&
+		BRAIN.drives.curiosity > BEHAVIOR_THRESHOLDS.exploreCuriosity) {
+		return 'explore';
+	}
+	if (totalWalk > BEHAVIOR_THRESHOLDS.walk) {
+		return 'walk';
+	}
+	return 'idle';
+}
+
+/**
+ * Called on the 500ms brain tick. Evaluates state transitions and
+ * updates BRAIN behavior flags for the next tick's drive computation.
+ */
+function updateBehaviorState() {
+	var now = Date.now();
+	var elapsed = now - behavior.enterTime;
+	var minDur = BEHAVIOR_MIN_DURATION[behavior.current] || 0;
+
+	// Do not transition if minimum duration has not elapsed
+	if (elapsed < minDur) {
+		// Update BRAIN flags based on current state (for drive computation)
+		syncBrainFlags();
+		return;
+	}
+
+	var newState = evaluateBehaviorEntry();
+
+	if (newState !== behavior.current) {
+		// Set cooldown for the state being exited
+		if (BEHAVIOR_COOLDOWN[behavior.current]) {
+			behavior.cooldowns[behavior.current] = now + BEHAVIOR_COOLDOWN[behavior.current];
+		}
+		behavior.previous = behavior.current;
+		behavior.current = newState;
+		behavior.enterTime = now;
+
+		// Startle: initialize freeze phase and drain DN_STARTLE
+		if (newState === 'startle') {
+			behavior.startlePhase = 'freeze';
+			behavior.startleFreezeEnd = now + 200;
+			if (BRAIN.postSynaptic['DN_STARTLE']) {
+				BRAIN.postSynaptic['DN_STARTLE'][BRAIN.thisState] = 0;
+				BRAIN.postSynaptic['DN_STARTLE'][BRAIN.nextState] = 0;
+			}
+		} else {
+			behavior.startlePhase = 'none';
+		}
+	}
+
+	syncBrainFlags();
+}
+
+/**
+ * Syncs BRAIN._isMoving/_isFeeding/_isGrooming flags with the
+ * behavioral state machine so that drive updates in the next
+ * brain tick reflect actual behavior, not just accumulator values.
+ */
+function syncBrainFlags() {
+	var s = behavior.current;
+	BRAIN._isMoving = (s === 'walk' || s === 'explore' || s === 'phototaxis' ||
+		s === 'fly' || (s === 'startle' && behavior.startlePhase === 'burst'));
+	BRAIN._isFeeding = (s === 'feed');
+	BRAIN._isGrooming = (s === 'groom');
+}
+
+/**
+ * Computes targetDir, targetSpeed, speedChangeInterval based on the
+ * current behavioral state. Called on the 500ms brain tick.
+ * Replaces the old hardcoded accumleft/right -> speed/dir computation.
+ */
+function computeMovementForBehavior() {
+	var scalingFactor = 20;
+	var state = behavior.current;
+
+	if (state === 'walk' || state === 'explore') {
+		var newDir = (BRAIN.accumleft - BRAIN.accumright) / scalingFactor;
+		targetDir = facingDir + newDir * Math.PI;
+		targetSpeed = (Math.abs(BRAIN.accumleft) + Math.abs(BRAIN.accumright)) / (scalingFactor * 5);
+		speedChangeInterval = (targetSpeed - speed) / (scalingFactor * 1.5);
+		if (state === 'explore') {
+			targetDir += (Math.random() - 0.5) * 0.3;
+		}
+	} else if (state === 'phototaxis') {
+		// Steer toward canvas center (light source placeholder)
+		var dx = window.innerWidth / 2 - fly.x;
+		var dy = -(window.innerHeight / 2 - fly.y);
+		targetDir = Math.atan2(dy, dx);
+		targetSpeed = (Math.abs(BRAIN.accumleft) + Math.abs(BRAIN.accumright)) / (scalingFactor * 5);
+		if (targetSpeed < 0.3) targetSpeed = 0.3;
+		speedChangeInterval = (targetSpeed - speed) / (scalingFactor * 1.5);
+	} else if (state === 'fly') {
+		var newDir = (BRAIN.accumleft - BRAIN.accumright) / scalingFactor;
+		targetDir = facingDir + newDir * Math.PI + (Math.random() - 0.5) * 0.2;
+		targetSpeed = ((Math.abs(BRAIN.accumleft) + Math.abs(BRAIN.accumright)) / (scalingFactor * 5)) * 2.5;
+		if (targetSpeed < 1.5) targetSpeed = 1.5;
+		speedChangeInterval = (targetSpeed - speed) / (scalingFactor * 0.5);
+	} else if (state === 'startle') {
+		if (behavior.startlePhase === 'freeze') {
+			targetSpeed = 0;
+			speedChangeInterval = -speed * 0.5;
+		} else {
+			// burst direction: reverse facing + jitter
+			targetDir = facingDir + Math.PI + (Math.random() - 0.5) * 0.5;
+			targetSpeed = 0.5;
+			speedChangeInterval = (targetSpeed - speed) / 30;
+		}
+	} else if (state === 'feed' || state === 'groom' || state === 'rest') {
+		targetSpeed = 0;
+		speedChangeInterval = -speed * 0.1;
+	} else {
+		// idle
+		targetSpeed = 0;
+		speedChangeInterval = -speed * 0.05;
+	}
+}
+
+/**
+ * Called every frame (60fps) BEFORE speed interpolation.
+ * Handles frame-rate-dependent overrides: startle freeze/burst transitions,
+ * and speed clamping for stationary behaviors.
+ */
+function applyBehaviorMovement() {
+	if (behavior.current === 'startle') {
+		var now = Date.now();
+		if (behavior.startlePhase === 'freeze') {
+			speed = 0;
+			speedChangeInterval = 0;
+			if (now >= behavior.startleFreezeEnd) {
+				behavior.startlePhase = 'burst';
+				speed = 3.0;
+				targetDir = facingDir + Math.PI + (Math.random() - 0.5) * 0.5;
+				targetSpeed = 0.5;
+				speedChangeInterval = (targetSpeed - speed) / 30;
+			}
+		}
+	}
+
+	if (behavior.current === 'feed' || behavior.current === 'groom' ||
+		behavior.current === 'rest' || behavior.current === 'idle') {
+		if (speed > 0.05) {
+			speed *= 0.92;
+		} else {
+			speed = 0;
+		}
+	}
+}
+
+/**
+ * Called every frame (60fps). Smoothly interpolates animation parameters
+ * toward their targets based on the current behavior state.
+ */
+function updateAnimForBehavior() {
+	var state = behavior.current;
+
+	// Wing spread target
+	var targetWingSpread = 0;
+	if (state === 'fly' || (state === 'startle' && behavior.startlePhase === 'burst')) {
+		targetWingSpread = 1;
+	}
+	anim.wingSpread += (targetWingSpread - anim.wingSpread) * 0.15;
+
+	// Proboscis extension target
+	var targetProboscis = 0;
+	if (state === 'feed') {
+		targetProboscis = 1;
+	}
+	anim.proboscisExtend += (targetProboscis - anim.proboscisExtend) * 0.1;
+
+	// Groom phase advances when grooming
+	if (state === 'groom') {
+		anim.groomPhase += 0.12;
+	}
+}
+
 function cycleLightLevel() {
 	lightStateIndex = (lightStateIndex + 1) % lightStates.length;
 	BRAIN.stimulate.lightLevel = lightStates[lightStateIndex];
@@ -253,6 +520,10 @@ var anim = {
 	wingMicro: 0,
 	wingMicroTarget: 0,
 	wingMicroTimer: 0,
+	// Behavior animation state (T2.1)
+	groomPhase: 0,
+	proboscisExtend: 0,
+	wingSpread: 0,
 };
 
 // Body dimensions (fly ~70px long)
@@ -334,11 +605,12 @@ var COLORS = {
  */
 function drawFlyBody() {
 	var t = Date.now() / 1000;
-	var spd = Math.abs(speed);
-	var isMoving = spd > 0.15;
+	var state = behavior.current;
+	var isWalking = (state === 'walk' || state === 'explore' || state === 'phototaxis');
 
-	// Update walk animation
-	if (isMoving) {
+	// Update walk animation phase only when walking
+	if (isWalking) {
+		var spd = Math.abs(speed);
 		anim.walkPhase += spd * 0.5;
 	}
 
@@ -347,7 +619,7 @@ function drawFlyBody() {
 	drawWing(1);  // right
 
 	// --- Legs (behind body) ---
-	drawLegs(isMoving);
+	drawLegs(state);
 
 	// --- Abdomen ---
 	drawAbdomen();
@@ -364,9 +636,10 @@ function drawFlyBody() {
 	// --- Antennae ---
 	drawAntennae(t);
 
-	// --- Proboscis (hidden by default) ---
-	// Uncomment if feeding behavior is active:
-	// drawProboscis();
+	// --- Proboscis (shown when extending) ---
+	if (anim.proboscisExtend > 0.01) {
+		drawProboscis(anim.proboscisExtend);
+	}
 }
 
 /**
@@ -378,12 +651,24 @@ function drawWing(side) {
 	var wl = BODY.wingLength;
 	var ww = BODY.wingWidth * side;
 
-	// Wing micro-movement
+	// Wing micro-movement (idle flutter)
 	var microOffset = anim.wingMicro * 0.5 * side;
+
+	// Wing spread for flight/startle
+	var spreadAngle = anim.wingSpread * 0.85;
+
+	// Flight buzz: rapid oscillation when wings are spread
+	var buzzOffset = 0;
+	if (anim.wingSpread > 0.5) {
+		buzzOffset = Math.sin(Date.now() / 30) * 0.15 * anim.wingSpread;
+	}
 
 	ctx.save();
 	ctx.translate(wx + microOffset, wy);
-	ctx.rotate(side * 0.15 + microOffset * 0.02); // slight fold angle
+	ctx.rotate(side * (0.15 + spreadAngle) + microOffset * 0.02 + buzzOffset);
+
+	// Dynamic wing opacity (more visible when spread)
+	var wingAlpha = 0.3 + anim.wingSpread * 0.35;
 
 	// Teardrop wing shape
 	ctx.beginPath();
@@ -398,9 +683,9 @@ function drawWing(side) {
 		-ww * 0.1, -wl * 0.3,
 		0, 0
 	);
-	ctx.fillStyle = COLORS.wing;
+	ctx.fillStyle = 'rgba(200, 210, 230, ' + wingAlpha.toFixed(2) + ')';
 	ctx.fill();
-	ctx.strokeStyle = COLORS.wingStroke;
+	ctx.strokeStyle = 'rgba(180, 190, 210, ' + Math.min(1, wingAlpha + 0.2).toFixed(2) + ')';
 	ctx.lineWidth = 0.5;
 	ctx.stroke();
 
@@ -412,7 +697,7 @@ function drawWing(side) {
 	ctx.lineTo(ww * 1.0, -wl * 0.5);
 	ctx.moveTo(0, -1);
 	ctx.lineTo(ww * 0.8, -wl * 0.3);
-	ctx.strokeStyle = COLORS.wingVein;
+	ctx.strokeStyle = 'rgba(160, 170, 190, ' + Math.min(1, wingAlpha + 0.1).toFixed(2) + ')';
 	ctx.lineWidth = 0.3;
 	ctx.stroke();
 
@@ -566,10 +851,16 @@ function drawAntennae(t) {
  * Draws the proboscis (retractable feeding tube).
  * Hidden by default; call this when feeding behavior is active.
  */
-function drawProboscis() {
+/**
+ * Draws the proboscis (retractable feeding tube).
+ * @param {number} extend - Extension amount from 0 (retracted) to 1 (fully extended).
+ */
+function drawProboscis(extend) {
+	var len = BODY.proboscisLength * extend;
+
 	ctx.beginPath();
 	ctx.moveTo(0, BODY.proboscisBaseY);
-	ctx.lineTo(0, BODY.proboscisBaseY - BODY.proboscisLength);
+	ctx.lineTo(0, BODY.proboscisBaseY - len);
 	ctx.strokeStyle = COLORS.proboscis;
 	ctx.lineWidth = 1.2;
 	ctx.lineCap = 'round';
@@ -577,7 +868,7 @@ function drawProboscis() {
 
 	// Tiny tip
 	ctx.beginPath();
-	ctx.arc(0, BODY.proboscisBaseY - BODY.proboscisLength, 1, 0, Math.PI * 2);
+	ctx.arc(0, BODY.proboscisBaseY - len, 1, 0, Math.PI * 2);
 	ctx.fillStyle = COLORS.proboscis;
 	ctx.fill();
 }
@@ -586,10 +877,22 @@ function drawProboscis() {
  * Draws all 6 legs with walking or idle animation.
  * Tripod gait: Group A (front-left, mid-right, rear-left) vs Group B.
  */
-function drawLegs(isMoving) {
+/**
+ * Draws all 6 legs with behavior-specific animation.
+ * State-dependent modes: tripod gait (walk/explore/phototaxis),
+ * grooming rub (groom), tucked (fly/rest), jump pose (startle burst),
+ * idle jitter (idle/feed).
+ */
+function drawLegs(state) {
 	var t = Date.now() / 1000;
+	var isWalking = (state === 'walk' || state === 'explore' || state === 'phototaxis');
+	var isGrooming = (state === 'groom');
+	var isFlying = (state === 'fly');
+	var isStartleBurst = (state === 'startle' && behavior.startlePhase === 'burst');
+	var isStartleFreeze = (state === 'startle' && behavior.startlePhase === 'freeze');
+	var isResting = (state === 'rest');
 
-	// Update idle jitter targets
+	// Update idle jitter targets periodically
 	if (t - anim.legJitterTimer > 1.5 + Math.random() * 2.0) {
 		anim.legJitterTimer = t;
 		for (var j = 0; j < 6; j++) {
@@ -607,10 +910,7 @@ function drawLegs(isMoving) {
 	}
 	anim.wingMicro += (anim.wingMicroTarget - anim.wingMicro) * 0.03;
 
-	// Leg indices: 0=front-left, 1=front-right, 2=mid-left, 3=mid-right, 4=rear-left, 5=rear-right
-	// Tripod groups:
-	//   A: front-left(0), mid-right(3), rear-left(4)
-	//   B: front-right(1), mid-left(2), rear-right(5)
+	// Tripod groups
 	var groupA = [0, 3, 4];
 	var groupB = [1, 2, 5];
 
@@ -620,31 +920,50 @@ function drawLegs(isMoving) {
 		var attach = BODY.legAttach[pairIdx];
 		var restAngles = BODY.legRestAngles[pairIdx];
 
-		// Walk animation: determine phase offset for this leg
+		var hipMod = restAngles.hip;
+		var kneeMod = restAngles.knee;
 		var walkOffset = 0;
-		if (isMoving) {
+		var jitter = 0;
+
+		if (isWalking) {
+			// Tripod gait animation
 			var inGroupA = groupA.indexOf(legIdx) !== -1;
-			// Group A and B alternate: A at phase 0, B at phase PI
 			var legPhase = anim.walkPhase + (inGroupA ? 0 : Math.PI);
 			walkOffset = Math.sin(legPhase) * 0.35;
+		} else if (isGrooming && pairIdx === 0) {
+			// Front legs: grooming rub -- swing inward and oscillate
+			hipMod = -0.2 + Math.sin(anim.groomPhase) * 0.5;
+			kneeMod = -0.6 + Math.sin(anim.groomPhase * 1.3) * 0.2;
+		} else if (isFlying) {
+			// Tucked legs during flight
+			hipMod *= 0.4;
+			kneeMod *= 0.3;
+		} else if (isStartleBurst && pairIdx >= 1) {
+			// Middle and rear legs extend for jump
+			hipMod *= 1.5;
+			kneeMod *= 0.5;
+		} else if (isStartleFreeze) {
+			// Legs frozen in current position -- no jitter, no walk
+			// Use rest angles as-is (no modification)
+		} else if (isResting) {
+			// Slightly tucked with slow jitter
+			hipMod *= 0.7;
+			jitter = anim.legJitter[legIdx] * 0.3;
+		} else {
+			// idle / feed / default: normal idle jitter
+			jitter = anim.legJitter[legIdx];
 		}
 
-		// Idle jitter
-		var jitter = isMoving ? 0 : anim.legJitter[legIdx];
-
 		// Compute hip and knee angles
-		var hipAngle = (restAngles.hip + walkOffset + jitter) * side;
-		var kneeAngle = restAngles.knee * side;
+		var hipAngle = (hipMod + walkOffset + jitter) * side;
+		var kneeAngle = kneeMod * side;
 
 		// Attachment point on body
 		var ax = attach.x * side;
 		var ay = attach.y;
 
-		// Hip angle: relative to horizontal axis
-		// For left legs (side=-1), angles go left; for right (side=1), angles go right
-		var baseAngle = Math.PI / 2 * side + hipAngle;
-
 		// First segment (coxa/femur)
+		var baseAngle = Math.PI / 2 * side + hipAngle;
 		var seg1EndX = ax + Math.cos(baseAngle) * BODY.legSeg1;
 		var seg1EndY = ay + Math.sin(baseAngle) * BODY.legSeg1;
 
@@ -685,6 +1004,8 @@ function drawLegs(isMoving) {
 
 // --- Movement update (same interface as worm-sim) ---
 function update() {
+	applyBehaviorMovement();
+
 	speed += speedChangeInterval;
 
 	var facingMinusTarget = facingDir - targetDir;
@@ -724,18 +1045,24 @@ function update() {
 	}
 
 	// Food proximity
+	BRAIN.stimulate.foodContact = false;
+	BRAIN.stimulate.foodNearby = false;
 	for (var i = 0; i < food.length; i++) {
 		var dist = Math.hypot(fly.x - food[i].x, fly.y - food[i].y);
 		if (dist <= 50) {
 			BRAIN.stimulateFoodSenseNeurons = true;
+			BRAIN.stimulate.foodNearby = true;
 			if (dist <= 20) {
-				food.splice(i, 1);
-				i--;
+				BRAIN.stimulate.foodContact = true;
+				if (behavior.current === 'feed') {
+					food.splice(i, 1);
+					i--;
+				}
 			}
 		}
 	}
 
-	// Reset neuron stimulation after 2 seconds
+	// Reset legacy neuron stimulation flags after 2 seconds
 	setTimeout(function () {
 		BRAIN.stimulateHungerNeurons = true;
 		BRAIN.stimulateNoseTouchNeurons = false;
@@ -743,6 +1070,7 @@ function update() {
 	}, 2000);
 
 	frameCount++;
+	updateAnimForBehavior();
 }
 
 // --- Draw ---

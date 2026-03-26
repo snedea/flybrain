@@ -221,3 +221,11 @@ canvas {
 #driveCuriosity {
     background: var(--success);
 }
+
+.behavior-state {
+    font-size: 0.7rem;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+}

@@ -1,75 +1,100 @@
-# Scout Report: T1.3
+# Scout Report: T2.1
 
 ## Key Facts (read this first)
 
-- **Stack**: Vanilla JS, HTML5 Canvas, no build step, no dependencies. Files: `index.html`, `css/main.css`, `js/constants.js`, `js/connectome.js`, `js/main.js`.
-- **BRAIN.stimulate API is fully wired** in `connectome.js:133-144` -- all sensory inputs exist (`touch`, `touchLocation`, `foodNearby`, `foodContact`, `wind`, `windStrength`, `lightLevel`, `lightDirection`). T1.3 only needs to set these fields from UI events.
-- **BRAIN.drives exists** at `connectome.js:155-161` with `hunger`, `fear`, `fatigue`, `curiosity`, `groom` as floats 0-1. Drive meters read these directly.
-- **BRAIN.neuronRegions** at `connectome.js:99-127` classifies all neurons into `sensory`, `central`, `drives`, `motor` arrays -- ready for color-coded connectome panel.
-- **Hard constraint**: Canvas is full-window (`canvas.width = window.innerWidth`, `canvas.height = window.innerHeight` at `main.js:641-644`). Current UI is all absolutely positioned overlays. New toolbar and bottom panel must follow this pattern, OR canvas resize must account for panel heights.
+- **Stack**: Vanilla JS, no build step. Three JS files loaded in order: `constants.js` -> `connectome.js` -> `main.js`. HTML5 Canvas. No npm, no bundler.
+- **Accumulators exist, state machine does not.** `connectome.js` already computes `BRAIN.accumWalkLeft/Right`, `accumFlight`, `accumFeed`, `accumGroom`, `accumStartle` each brain tick (500ms). `main.js` ignores all but `accumleft`/`accumright` for direction/speed -- the rest are dead outputs.
+- **Animations are partial.** Tripod gait `drawLegs(isMoving)` exists and works. Wing spread, proboscis extension, grooming arm movements, and startle freeze-burst do NOT exist. `drawProboscis()` is a full function but never called (commented out in `drawFlyBody`).
+- **All work is in `main.js`.** The state machine, per-state animation dispatch, and movement overrides all go here. `connectome.js` / `constants.js` only need weight tuning.
+- **Brain tick = 500ms, render tick = 60fps.** State machine reads accumulator snapshots on the 500ms cadence, animations interpolate smoothly on 60fps.
 
 ## Relevant Files
 
-| File | Role for T1.3 |
-|------|---------------|
-| `index.html` | Add `#toolbar` div (top), restructure `#nodeHolder` into `#bottom-panel`. Remove legacy `#buttons` (center/clear) or relocate. |
-| `css/main.css` | Add toolbar, bottom panel, tool button, active-tool, drive-meter styles. Remove/update legacy absolute positioning that will conflict. |
-| `js/main.js` | Replace `addFood` canvas mousedown with tool-aware handler. Add tool state variable. Add connectome panel draw loop. Add light toggle logic. |
-| `js/connectome.js` | Read-only for T1.3. Provides `BRAIN.stimulate`, `BRAIN.drives`, `BRAIN.neuronRegions`. |
-| `js/constants.js` | Read-only. |
+| File | Role for T2.1 |
+|------|--------------|
+| `js/main.js` | PRIMARY target -- add state machine, per-state animation, movement overrides |
+| `js/connectome.js` | Read: accumulator definitions, `motorcontrol()`, drive flags; minor: may add `accumExplore` accumulator |
+| `js/constants.js` | Weight tuning to make behaviors emerge naturally (DN_WALK, DN_FLIGHT, SEZ_GROOM, DN_STARTLE thresholds) |
+| `css/main.css` | No changes expected unless a state indicator label is added to the UI |
+| `index.html` | No changes expected |
 
 ## Architecture Notes
 
-**Current UI layout** (all absolutely positioned over full-screen canvas):
-- `#nodeHolder`: all ~70 neuron spans rendered as green `brainNode` dots at `top:0` -- worm-sim legacy
-- `#toggleConnectome`: slider at `bottom:10, left:10`
-- `#githubButton`: at `bottom:10, right:10`
-- `#buttons`: center + clear SVG buttons at bottom center
+### Current signal flow (T1.x result)
+```
+BRAIN.update() @ 500ms
+  -> updateDrives()
+  -> stimulate sensory neurons
+  -> runconnectome()
+  -> motorcontrol() -> accumWalkLeft/Right/Flight/Feed/Groom/Startle
+  -> accumleft = accumWalkLeft, accumright = accumWalkRight
 
-**Canvas event handling**: Single `canvas.addEventListener('mousedown', addFood)` at `main.js:75`. This must be replaced by a dispatcher that checks `activeTool` and routes to the correct sensory stimulation.
+update() @ 60fps
+  -> speed += speedChangeInterval  (from targetSpeed computed in updateBrain)
+  -> facingDir tracks targetDir
+  -> fly.x/y += cos/sin * speed
 
-**Brain update loop**: `setInterval(updateBrain, 500)` at `main.js:69`. Inside `updateBrain`, node spans are updated by ID lookup (`document.getElementById(postSynaptic)`). This loop is also where the connectome panel should be refreshed (or a separate interval can be used).
+draw() @ 60fps
+  -> drawFlyBody()
+    -> drawWing(side)       // always folded
+    -> drawLegs(isMoving)   // tripod gait if speed > 0.15
+    -> drawAbdomen/Thorax/Head/Eyes/Antennae
+    -> drawProboscis()      // COMMENTED OUT
+```
 
-**Fly position for hit-testing**: `fly.x`, `fly.y` (global), `facingDir` (global radians). Body parts have offsets defined in `BODY` object (`main.js:124-173`). To detect touch location, transform click coordinates into fly-local space (rotate by `-(-facingDir + PI/2)` = `facingDir - PI/2`) and compare against BODY offsets.
+### Key anim object (lives on `anim` in main.js:239)
+- `walkPhase`: phase counter for tripod gait, advanced by `spd * 0.5` each draw call
+- `antennaTwitchL/R`, `antennaTimer`: antenna idle twitch state
+- `legJitter[]`, `legJitterTimer`: idle leg micro-movement
+- `wingMicro`, `wingMicroTimer`: subtle wing idle flutter
+- T2.1 needs to ADD to `anim`: `groomPhase`, `proboscisExtend` (0-1), `wingSpread` (0-1), `startleFreeze`, `behaviorBlend` timer
 
-**Sensory neuron mappings** (what each tool sets):
-- **Feed** (click near/on fly): `BRAIN.stimulate.foodNearby = true` if within ~50px; `BRAIN.stimulate.foodContact = true` if within ~20px. Also places visible food dot.
-- **Touch** (click on fly body): `BRAIN.stimulate.touch = true`; `BRAIN.stimulate.touchLocation` = `'head'|'thorax'|'abdomen'|'leg'` based on local-space click position vs BODY offsets.
-- **Air** (click/drag near fly): `BRAIN.stimulate.wind = true`; `BRAIN.stimulate.windStrength` proportional to drag distance or inverse proximity; set after mouse-up.
-- **Light** (toolbar toggle, no canvas click): cycle `BRAIN.stimulate.lightLevel` through `1.0 -> 0.5 -> 0.0 -> 1.0`. Button label reflects current state.
+### Leg drawing architecture (main.js:589)
+- `drawLegs(isMoving)` takes a bool -- needs to become `drawLegs(behaviorState)` or take extra anim params
+- Tripod groups A=[0,3,4], B=[1,2,5]. `walkOffset = sin(phase) * 0.35` per-leg
+- For grooming: front legs (0,1 = L1/R1) need to swing inward and cross-rub. Current code will fight this if `isMoving` is still wired to speed
+- For startle: a jump impulse should override the speed interpolation system temporarily
 
-**Connectome panel visualization**: The existing `#nodeHolder` with `brainNode` spans works but is unstyled by region. Options:
-1. Keep spans, color them by region using `BRAIN.neuronRegions` lookup on init, update opacity by activation.
-2. Draw a small canvas inside a `#connectome-panel` div.
+### Wing drawing architecture (main.js:375)
+- `drawWing(side)` has hardcoded `ctx.rotate(side * 0.15 + microOffset * 0.02)` -- always folded
+- Flight spread needs to rotate wings outward by ~0.8-1.2 radians from body axis
+- Wing spread should animate via `anim.wingSpread` (0=folded, 1=fully spread)
 
-Option 1 is simpler (no new canvas, reuses existing DOM + `updateBrain` loop). Just move `#nodeHolder` into the bottom panel div and add region-based `background-color` on setup.
+### Phototaxis gap
+- `BRAIN.stimulate.lightDirection` exists in connectome.js but the light tool only cycles intensity level, never sets a direction
+- For phototaxis, either: (a) set a fixed direction (e.g., toward canvas edge or a static 0-radian angle), or (b) steer toward brightest area based on light level cycling. Simplest: when phototaxis active, steer toward a target point (screen center or a random bright-zone point).
 
-**Drive meters**: Plain HTML `<div>` progress bars. Update width% from `BRAIN.drives` each brain tick (inside `updateBrain` or a separate `requestAnimationFrame`).
+### accumStartle source
+- `accumStartle` reads `DN_STARTLE` neuron's `thisState` -- NOT a motor neuron, so it's NOT drained each tick like the others. This means it accumulates between ticks. The state machine should use a threshold (e.g., > 30) to detect startle rather than treating it like a continuous accumulator.
 
 ## Suggested Approach
 
-1. **index.html**: Add `<div id="toolbar">` before `<canvas>`. Inside toolbar: 4 tool buttons (Feed, Touch, Air, Light) + title. Move `#nodeHolder` inside a new `<div id="bottom-panel">`. Add `<div id="drive-meters">` alongside it. Keep or remove legacy buttons (clear/center are still useful -- relocate to toolbar or remove).
+1. **Add `fly.behaviorState` and `fly.behaviorTimer`** to the fly object (or a separate `STATE` object). States: `'idle'`, `'walk'`, `'explore'`, `'groom'`, `'feed'`, `'startle'`, `'fly'`, `'rest'`, `'phototaxis'`.
 
-2. **css/main.css**: Make `body` a flex column: `toolbar (fixed height) | canvas (flex-grow) | bottom-panel (fixed height)`. OR keep canvas full-window and absolutely position toolbar at top + bottom-panel at bottom with semi-transparent background. The latter is simpler and requires no canvas resize change. Set canvas top offset with CSS if using flex.
+2. **Add `updateBehaviorState()`** called inside `updateBrain()` (i.e., on the 500ms tick). Reads accumulators and drives to transition states. Priority order (high to low): `startle > fly > feed > groom > rest > phototaxis > explore > walk > idle`.
 
-3. **js/main.js**:
-   - Add `var activeTool = 'feed';` global.
-   - Wire tool button clicks to set `activeTool` + update active class.
-   - Replace `canvas.addEventListener('mousedown', addFood)` with `handleCanvasMousedown(event)` dispatcher. Add `mousemove` and `mouseup` for Air drag support.
-   - Add `function applyTool(x, y)` that reads `activeTool` and stimulates the right neurons.
-   - Add touch location detection function using fly-local coordinate transform.
-   - Add Light toggle (toolbar button only, no canvas interaction).
-   - In `updateBrain()`: color-code neurons by region on first call (one-time setup), update drive meter bar widths.
+3. **Wire movement to behavioral state** inside `update()`:
+   - `walk/explore/phototaxis`: current accumleft/right -> speed/dir (existing)
+   - `feed`: speed = 0 (or near 0)
+   - `groom`: speed = 0
+   - `startle`: freeze 200ms then burst (impulse to targetSpeed)
+   - `fly`: higher max speed, erratic direction changes
+   - `rest`: speed rapidly decays to 0
 
-4. **Coloring neuronRegions**: On startup (or inside `BRAIN.setup`), iterate `BRAIN.neuronRegions` and set `backgroundColor` on each span. Colors: sensory=`#3399ff`, central=`#9933ff`, drives=`#ff9900`, motor=`#ff3333`.
+4. **Extend `drawFlyBody()`** to dispatch per-state drawing:
+   - Pass `fly.behaviorState` into draw helpers
+   - `drawLegs(behaviorState)`: tripod for walk/explore, grooming rubbing for groom, jump extension for startle, tucked for fly
+   - `drawWing(side, wingSpread)`: add spread parameter; animate spread for fly/startle
+   - Call `drawProboscis()` with `anim.proboscisExtend` when in feed state
 
-## Risks and Constraints (read this last)
+5. **Tuning in `constants.js`**: The main gap is that `accumFeed` and `accumGroom` may never reach actionable thresholds because their pathway (SEZ_FEED -> MN_PROBOSCIS, SEZ_GROOM -> MN_LEG_L1) competes heavily with walking suppression. Consider raising `SEZ_FEED` weight to `MN_PROBOSCIS` to 14, and `SEZ_GROOM` to `MN_LEG_L1`/`MN_LEG_R1` to 10. Check `DRIVE_GROOM` -> `SEZ_GROOM` = 6 is sufficient.
 
-- **Canvas resize conflict**: If using flex layout (toolbar + canvas + panel), `window.innerWidth/Height` for canvas sizing will be wrong -- must subtract toolbar and panel heights. Safest: keep canvas `position:absolute; top:toolbarH; bottom:panelH; left:0; right:0` and set `canvas.width/height` from `canvas.offsetWidth/offsetHeight` in resize. Alternatively, overlay approach avoids this entirely.
-- **Legacy `#buttons` (center/clear)**: Currently at `bottom:0` center -- conflicts with new bottom panel. Must relocate or remove. The clear button now needs tool-context (it only makes sense with Feed tool active, but can remain as a global reset).
-- **`#toggleConnectome` overlap**: Currently at `bottom:10, left:10` -- will overlap the new bottom panel. Relocate to toolbar or remove (replaced by the panel itself).
-- **Stimulus reset timing**: `BRAIN.stimulate.touch`, `.wind`, `.foodNearby` are set to `true` and then reset in a `setTimeout(..., 2000)` at `main.js:604-608`. This works for momentary events but Air drag needs to hold `wind=true` while dragging and reset on mouseup.
-- **Touch location hit-test**: Requires coordinate rotation by `(facingDir - PI/2)` to go from canvas space to fly-local space. The BODY offsets use `headOffsetY: -24`, `thoraxOffsetY: -10`, `abdomenOffsetY: 12` -- use these to classify click position. Simple bounding box checks are sufficient.
-- **Light tool UX**: SPEC says "toggle light level (bright/dim/dark)" -- this is a 3-state cycle on the toolbar button, not a canvas click. The button should show current state. `BRAIN.stimulate.lightLevel` is already read by connectome on every tick, so just keeping it set is sufficient.
-- **`#nodeHolder` DOM ID collision**: `updateBrain` uses `document.getElementById(postSynaptic)` to find spans by neuron name. If `#nodeHolder` is moved inside bottom-panel, these lookups still work because IDs are document-wide. No code change needed for the lookup itself.
-- **Existing `BRAIN.stimulateHungerNeurons/NoseTouchNeurons/FoodSenseNeurons`** flags at `connectome.js:147-149` are backward-compat shims still used in `main.js:604-608`. The new tool system should set `BRAIN.stimulate.*` directly and leave these shims alone (they map into `BRAIN.stimulate` at the top of `BRAIN.update`).
+## Risks and Constraints
+
+- **Grooming leg animation requires a new anim mode** that overrides the tripod gait. The front legs need to cross in front of the head (swing to center, rub). This requires passing extra state into `drawLegs` and branching on behavior -- not just an `isMoving` bool.
+- **Startle impulse vs. smooth interpolation**: the current `speedChangeInterval` system is designed for smooth ramp-up. A startle jump needs to bypass this with a direct `speed = N` assignment followed by a timer to resume normal interpolation.
+- **State machine priority collisions**: when fear > 0.7 AND hunger > 0.7, startle and feed both want to fire. Priority order must be explicitly coded; accumulator thresholds must be tuned so only one "wins" clearly.
+- **`accumStartle` is NOT drained** between ticks (unlike motor neurons). After a startle event, `DN_STARTLE` will hold a high value for multiple ticks. The state machine must enforce a minimum time-in-state (e.g., 1s cooldown after startle) to prevent re-triggering.
+- **Phototaxis needs a direction target** -- the current light tool provides no spatial direction. Either fix the tool to set `lightDirection` or implement phototaxis as "walk toward screen center when light is bright" as a placeholder.
+- **`drawFlyBody` currently reads `speed` directly** for `isMoving`. After the state machine, the source of truth for animation should be `fly.behaviorState`, not `speed`. Refactor `isMoving` usage inside `drawFlyBody` after state machine is in place.
+- **All code stays in 3 files** -- no new files. The state machine should be added as a new section in `main.js`, analogous to how `connectome.js` sections are labeled.

@@ -1,6 +1,6 @@
 {
-  "task_id": "T1.3",
-  "task_desc": "Build interaction toolbar and wire user inputs to sensory neurons -- add top toolbar with tool buttons (Feed, Touch, Air, Light). Implement tool selection + canvas click/drag handlers. Map each interaction to the appropriate sensory neuron group stimulation. Add bottom panel with connectome visualization (colored by region: sensory=blue, central=purple, motor=red) and drive meters (hunger, fear, fatigue bars). Update index.html and main.css.",
+  "task_id": "T2.1",
+  "task_desc": "Implement full behavioral state machine with animations -- create behavior states (walk, groom, feed, startle, fly, rest, explore, phototaxis) with entry/exit conditions driven by motor neuron accumulator outputs. Animate each behavior: tripod gait walking, grooming leg movements, proboscis extension for feeding, wing spread for flight, freeze-then-flee for startle. Add transitions between behaviors with appropriate blending. Tune connectome weights so behaviors emerge naturally from the neural simulation rather than being hardcoded.",
   "completed_stage": "builder",
-  "timestamp": "2026-03-26T03:12:04.846912+00:00"
+  "timestamp": "2026-03-26T03:30:07.338106+00:00"
 }

@@ -10,4 +10,4 @@
 
 ## Phase 2: Behavioral Polish
 
-- [ ] T2.1: Implement full behavioral state machine with animations -- create behavior states (walk, groom, feed, startle, fly, rest, explore, phototaxis) with entry/exit conditions driven by motor neuron accumulator outputs. Animate each behavior: tripod gait walking, grooming leg movements, proboscis extension for feeding, wing spread for flight, freeze-then-flee for startle. Add transitions between behaviors with appropriate blending. Tune connectome weights so behaviors emerge naturally from the neural simulation rather than being hardcoded.
+- [x] T2.1: Implement full behavioral state machine with animations -- create behavior states (walk, groom, feed, startle, fly, rest, explore, phototaxis) with entry/exit conditions driven by motor neuron accumulator outputs. Animate each behavior: tripod gait walking, grooming leg movements, proboscis extension for feeding, wing spread for flight, freeze-then-flee for startle. Add transitions between behaviors with appropriate blending. Tune connectome weights so behaviors emerge naturally from the neural simulation rather than being hardcoded. [SPI-]
