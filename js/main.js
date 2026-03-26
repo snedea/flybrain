@@ -25,6 +25,11 @@ var food = [];
 var frameCount = 0;
 var wallTouchResetFrame = 0;
 
+// Visual feedback effects
+var ripples = [];
+var windArrowEnd = null;
+var currentMousePos = { x: 0, y: 0 };
+
 // ============================================================
 // BEHAVIOR STATE MACHINE
 // ============================================================
@@ -155,10 +160,12 @@ function updateBrain() {
 	var driveFearEl = document.getElementById('driveFear');
 	var driveFatigueEl = document.getElementById('driveFatigue');
 	var driveCuriosityEl = document.getElementById('driveCuriosity');
+	var driveGroomEl = document.getElementById('driveGroom');
 	if (driveHungerEl) driveHungerEl.style.width = (BRAIN.drives.hunger * 100) + '%';
 	if (driveFearEl) driveFearEl.style.width = (BRAIN.drives.fear * 100) + '%';
 	if (driveFatigueEl) driveFatigueEl.style.width = (BRAIN.drives.fatigue * 100) + '%';
 	if (driveCuriosityEl) driveCuriosityEl.style.width = (BRAIN.drives.curiosity * 100) + '%';
+	if (driveGroomEl) driveGroomEl.style.width = (BRAIN.drives.groom * 100) + '%';
 
 	// Update behavior state label
 	var behaviorStateEl = document.getElementById('behaviorState');
@@ -181,9 +188,10 @@ function handleCanvasMousedown(event) {
 	var cy = event.clientY;
 
 	if (activeTool === 'feed') {
-		food.push({ x: cx, y: cy });
+		food.push({ x: cx, y: cy, radius: 10, feedStart: 0, feedDuration: 0 });
 	} else if (activeTool === 'touch') {
 		applyTouchTool(cx, cy);
+		ripples.push({ x: cx, y: cy, startTime: Date.now() });
 	} else if (activeTool === 'air') {
 		isDragging = true;
 		dragStart.x = cx;
@@ -194,11 +202,14 @@ function handleCanvasMousedown(event) {
 }
 
 function handleCanvasMousemove(event) {
+	currentMousePos.x = event.clientX;
+	currentMousePos.y = event.clientY;
 	if (!isDragging || activeTool !== 'air') return;
 	var dx = event.clientX - dragStart.x;
 	var dy = event.clientY - dragStart.y;
 	var dragDist = Math.sqrt(dx * dx + dy * dy);
 	BRAIN.stimulate.windStrength = Math.min(1, dragDist / 150);
+	windArrowEnd = { x: event.clientX, y: event.clientY };
 }
 
 function handleCanvasMouseup(event) {
@@ -215,6 +226,7 @@ function handleCanvasMouseup(event) {
 		}
 		BRAIN.stimulate.wind = true;
 		isDragging = false;
+		windArrowEnd = null;
 		setTimeout(function () {
 			BRAIN.stimulate.wind = false;
 			BRAIN.stimulate.windStrength = 0;
@@ -264,6 +276,23 @@ function hasNearbyFood() {
 		if (Math.hypot(fly.x - food[i].x, fly.y - food[i].y) <= 50) return true;
 	}
 	return false;
+}
+
+/**
+ * Returns the nearest food item and its distance, or null if no food exists.
+ */
+function nearestFood() {
+	var best = null;
+	var bestDist = Infinity;
+	for (var i = 0; i < food.length; i++) {
+		var d = Math.hypot(fly.x - food[i].x, fly.y - food[i].y);
+		if (d < bestDist) {
+			bestDist = d;
+			best = food[i];
+		}
+	}
+	if (!best) return null;
+	return { item: best, dist: bestDist };
 }
 
 /**
@@ -384,6 +413,23 @@ function computeMovementForBehavior() {
 		if (state === 'explore') {
 			targetDir += (Math.random() - 0.5) * 0.3;
 		}
+		// Food-seeking: bias targetDir toward nearest food when hungry and food detected
+		if (BRAIN.stimulate.foodNearby && BRAIN.drives.hunger > 0.3) {
+			var nf = nearestFood();
+			if (nf) {
+				var foodAngle = Math.atan2(-(nf.item.y - fly.y), nf.item.x - fly.x);
+				var seekStrength = Math.min(1, BRAIN.drives.hunger) * 0.6;
+				// Blend targetDir toward foodAngle
+				var angleDiffToFood = foodAngle - targetDir;
+				// Normalize to [-PI, PI]
+				while (angleDiffToFood > Math.PI) angleDiffToFood -= 2 * Math.PI;
+				while (angleDiffToFood < -Math.PI) angleDiffToFood += 2 * Math.PI;
+				targetDir += angleDiffToFood * seekStrength;
+				// Ensure minimum speed when seeking food
+				if (targetSpeed < 0.3) targetSpeed = 0.3;
+				speedChangeInterval = (targetSpeed - speed) / (scalingFactor * 1.5);
+			}
+		}
 	} else if (state === 'phototaxis') {
 		// Steer toward canvas center (light source placeholder)
 		var dx = window.innerWidth / 2 - fly.x;
@@ -484,12 +530,90 @@ function cycleLightLevel() {
 }
 
 function drawFood() {
+	var t = Date.now();
 	for (var i = 0; i < food.length; i++) {
+		var f = food[i];
+		var distToFly = Math.hypot(fly.x - f.x, fly.y - f.y);
+
+		// Approach glow: subtle pulsing glow when fly is within 50px
+		if (distToFly <= 50) {
+			var pulse = 0.3 + Math.sin(t / 200) * 0.15;
+			ctx.beginPath();
+			ctx.arc(f.x, f.y, f.radius + 6, 0, Math.PI * 2);
+			ctx.fillStyle = 'rgba(251, 192, 45, ' + pulse.toFixed(2) + ')';
+			ctx.fill();
+		}
+
+		// Food circle (uses dynamic radius for gradual feeding shrink)
 		ctx.beginPath();
-		ctx.arc(food[i].x, food[i].y, 10, 0, Math.PI * 2);
+		ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2);
 		ctx.fillStyle = 'rgb(251,192,45)';
 		ctx.fill();
 	}
+}
+
+/**
+ * Draws expanding ripple effects at touch-tool click points.
+ * Ripples expand from 0 to 30px radius over 500ms, fading out.
+ */
+function drawRipples() {
+	var now = Date.now();
+	for (var i = ripples.length - 1; i >= 0; i--) {
+		var r = ripples[i];
+		var elapsed = now - r.startTime;
+		if (elapsed > 500) {
+			ripples.splice(i, 1);
+			continue;
+		}
+		var progress = elapsed / 500;
+		var radius = progress * 30;
+		var alpha = 1 - progress;
+		ctx.beginPath();
+		ctx.arc(r.x, r.y, radius, 0, Math.PI * 2);
+		ctx.strokeStyle = 'rgba(227, 115, 75, ' + alpha.toFixed(2) + ')';
+		ctx.lineWidth = 2 * (1 - progress);
+		ctx.stroke();
+	}
+}
+
+/**
+ * Draws a wind direction arrow when the air tool is being dragged.
+ * Arrow points from dragStart to current mouse position.
+ */
+function drawWindArrow() {
+	if (!isDragging || activeTool !== 'air' || !windArrowEnd) return;
+	var dx = windArrowEnd.x - dragStart.x;
+	var dy = windArrowEnd.y - dragStart.y;
+	var dist = Math.sqrt(dx * dx + dy * dy);
+	if (dist < 5) return;
+
+	var alpha = Math.min(0.7, dist / 150);
+
+	// Shaft
+	ctx.beginPath();
+	ctx.moveTo(dragStart.x, dragStart.y);
+	ctx.lineTo(windArrowEnd.x, windArrowEnd.y);
+	ctx.strokeStyle = 'rgba(200, 210, 230, ' + alpha.toFixed(2) + ')';
+	ctx.lineWidth = 2;
+	ctx.stroke();
+
+	// Arrowhead
+	var angle = Math.atan2(dy, dx);
+	var headLen = 10;
+	ctx.beginPath();
+	ctx.moveTo(windArrowEnd.x, windArrowEnd.y);
+	ctx.lineTo(
+		windArrowEnd.x - Math.cos(angle - 0.4) * headLen,
+		windArrowEnd.y - Math.sin(angle - 0.4) * headLen
+	);
+	ctx.moveTo(windArrowEnd.x, windArrowEnd.y);
+	ctx.lineTo(
+		windArrowEnd.x - Math.cos(angle + 0.4) * headLen,
+		windArrowEnd.y - Math.sin(angle + 0.4) * headLen
+	);
+	ctx.strokeStyle = 'rgba(200, 210, 230, ' + alpha.toFixed(2) + ')';
+	ctx.lineWidth = 2;
+	ctx.stroke();
 }
 
 // --- Fly body ---
@@ -1060,9 +1184,31 @@ function update(dt) {
 			if (dist <= 20) {
 				BRAIN.stimulate.foodContact = true;
 				if (behavior.current === 'feed') {
-					food.splice(i, 1);
-					i--;
+					// Gradual feeding: start timer on first contact, shrink food, remove when done
+					if (food[i].feedStart === 0) {
+						food[i].feedStart = Date.now();
+						food[i].feedDuration = 2000 + Math.random() * 3000;
+					}
+					var elapsed = Date.now() - food[i].feedStart;
+					var progress = Math.min(1, elapsed / food[i].feedDuration);
+					food[i].radius = 10 * (1 - progress * 0.9);
+					if (progress >= 1) {
+						food.splice(i, 1);
+						i--;
+					}
 				}
+			} else {
+				// Not in contact range: reset feeding progress if fly walked away
+				if (food[i].feedStart !== 0) {
+					food[i].feedStart = 0;
+					food[i].radius = 10;
+				}
+			}
+		} else {
+			// Out of range: reset feeding progress
+			if (food[i].feedStart !== 0) {
+				food[i].feedStart = 0;
+				food[i].radius = 10;
 			}
 		}
 	}
@@ -1091,6 +1237,8 @@ function draw() {
 
 	ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
 	drawFood();
+	drawRipples();
+	drawWindArrow();
 
 	// Draw fly at its position, rotated to face movement direction
 	ctx.save();

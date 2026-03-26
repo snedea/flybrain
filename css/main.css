@@ -222,6 +222,10 @@ canvas {
     background: var(--success);
 }
 
+#driveGroom {
+    background: var(--accent);
+}
+
 .behavior-state {
     font-size: 0.7rem;
     color: var(--accent);
