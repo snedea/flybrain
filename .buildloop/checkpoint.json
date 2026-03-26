@@ -1,0 +1,6 @@
+{
+  "task_id": "D18.1",
+  "task_desc": "Fix education panel highlightRegion being invisible because Brain3D.update() overwrites mesh material values every frame -- The highlightRegion() function at education.js:248-278 saves current mesh opacity/emissiveIntensity, boosts them to 1.5/0.9, and uses setTimeout to restore after 1200ms. But Brain3D.update() at brain3d.js:303-328 is called every animation frame from main.js:1769, and it recalculates and overwrites opacity and emissiveIntensity for every region mesh based on activation data. The highlight is visible for at most one frame (~16ms) before update() stomps on it, making the feature completely non-functional. The setTimeout restore at 1200ms also writes back stale values captured before the highlight, causing a brief flicker to outdated opacity/emissive levels. Fix: add a per-region _highlightUntil timestamp or boolean flag checked by Brain3D.update() so it skips recalculating material values for a region that is currently highlighted; highlightRegion() sets the flag with a 1200ms expiry, and update() respects it by leaving that region's meshes untouched until the flag expires. Files: js/brain3d.js, js/education.js.",
+  "completed_stage": "builder",
+  "timestamp": "2026-03-26T21:07:40.487053+00:00"
+}

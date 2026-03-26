@@ -1,25 +1,23 @@
-# Build Claims -- D17.2
+# Build Claims -- D18.1
 
 ## Files Changed
-- MODIFY js/main.js -- Removed eager Brain3D.init() call at page load (lines 425-428 deleted); initialization is now fully lazy via show()
-- MODIFY js/brain3d.js -- (a) Removed window resize listener from init(), (b) show() now sets container display:block before init() for correct dimensions and adds resize listener, (c) hide() removes resize listener as first action
+- MODIFY js/brain3d.js -- Added `_highlightUntil` timestamp property to region objects, added highlight-skip logic in `update()`, added public `highlightRegion()` method
+- MODIFY js/education.js -- Replaced broken `highlightRegion` implementation with delegation to `Brain3D.highlightRegion()`
 
 ## Verification Results
-- Build: SKIPPED (vanilla JS, no build step)
+- Build: SKIPPED (vanilla JS, no bundler)
 - Tests: SKIPPED (no existing tests)
 - Lint: SKIPPED (no linter configured)
 
 ## Claims
-- [ ] Claim 1: js/main.js no longer contains any call to Brain3D.init() — the 4-line block (comment + if/typeof guard + init call) has been completely removed
-- [ ] Claim 2: brain3d.js init() function no longer registers a window resize listener — line `window.addEventListener('resize', Brain3D._onResize)` has been removed from init()
-- [ ] Claim 3: brain3d.js show() sets `Brain3D._container = document.getElementById('brain3d-overlay')` and `display:block` BEFORE calling init() on first use, ensuring clientWidth/clientHeight return real dimensions during WebGL setup
-- [ ] Claim 4: brain3d.js show() calls `window.addEventListener('resize', Brain3D._onResize)` after init/display, pairing with removeEventListener in hide()
-- [ ] Claim 5: brain3d.js hide() calls `window.removeEventListener('resize', Brain3D._onResize)` as its first line, stopping resize processing while overlay is hidden
-- [ ] Claim 6: Brain3D._onResize is used as a direct function reference (not wrapped in anonymous function) so addEventListener/removeEventListener correctly pair
-- [ ] Claim 7: No other functions were modified — _onResize, _renderLoop, update, _onMouseMove, _buildRegions, toggle all remain unchanged
-- [ ] Claim 8: No new files, dependencies, or script tags were added
+- [ ] Claim 1: Each region object created in `_buildRegions()` now has a `_highlightUntil: 0` property (brain3d.js line 208)
+- [ ] Claim 2: `Brain3D.update()` checks `region._highlightUntil` after computing `region.activation` but before writing material values; if `Date.now() < region._highlightUntil`, it `continue`s to skip material overwrites for that region (brain3d.js lines 322-327)
+- [ ] Claim 3: When `_highlightUntil` has expired, `update()` resets it to 0 and falls through to normal material calculation in the same frame (brain3d.js line 326)
+- [ ] Claim 4: `Brain3D.highlightRegion(regionName)` is a new public method that finds the region by name, sets `_highlightUntil = Date.now() + 1200`, and applies highlight material values (emissiveIntensity: 1.5, opacity: 0.9) to all meshes (brain3d.js lines 339-355)
+- [ ] Claim 5: `EducationPanel.highlightRegion()` now delegates entirely to `Brain3D.highlightRegion()`, removing the broken setTimeout restore logic and stale-value capture (education.js lines 248-252)
+- [ ] Claim 6: No files other than js/brain3d.js and js/education.js were modified
+- [ ] Claim 7: The highlight duration remains 1200ms and highlight material values remain emissiveIntensity: 1.5 and opacity: 0.9
 
 ## Gaps and Assumptions
-- Smoke testing (browser-based verification) cannot be performed in this CLI environment; all 6 smoke test scenarios from the plan require manual browser testing
-- The `show()` path for first-time init sets `_container` before `init()`, but `init()` line 137 re-assigns `_container` via getElementById — this is harmless (same element) as noted in the plan
-- Repeated show/hide cycles will repeatedly add/remove the resize listener; addEventListener with the same function reference is idempotent per the DOM spec, but removeEventListener in hide() ensures clean pairing
+- Smoke test (open browser, click region link in education panel, observe 1.2s glow) cannot be run in CLI — requires manual browser verification
+- Activation computation (`region.activation = normalized`) still runs during highlight so other consumers of that value are not affected

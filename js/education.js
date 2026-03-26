@@ -246,35 +246,9 @@
         },
 
         highlightRegion: function (regionName) {
-            if (typeof Brain3D === 'undefined' || !Brain3D._initialized || !Brain3D._regions) return;
-            if (Brain3D.active === false) return;
-
-            var foundRegion = null;
-            for (var i = 0; i < Brain3D._regions.length; i++) {
-                if (Brain3D._regions[i].name === regionName) {
-                    foundRegion = Brain3D._regions[i];
-                    break;
-                }
+            if (typeof Brain3D !== 'undefined' && Brain3D.highlightRegion) {
+                Brain3D.highlightRegion(regionName);
             }
-            if (!foundRegion) return;
-
-            var meshes = foundRegion.meshes;
-            var originals = [];
-            for (var j = 0; j < meshes.length; j++) {
-                originals.push({
-                    emissiveIntensity: meshes[j].material.emissiveIntensity,
-                    opacity: meshes[j].material.opacity
-                });
-                meshes[j].material.emissiveIntensity = 1.5;
-                meshes[j].material.opacity = 0.9;
-            }
-
-            setTimeout(function () {
-                for (var k = 0; k < meshes.length; k++) {
-                    meshes[k].material.emissiveIntensity = originals[k].emissiveIntensity;
-                    meshes[k].material.opacity = originals[k].opacity;
-                }
-            }, 1200);
         },
 
         show: function () {

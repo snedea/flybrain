@@ -204,7 +204,8 @@ window.Brain3D = {
                 type: regionDef.type,
                 neurons: neuronList,
                 meshes: [],
-                activation: 0
+                activation: 0,
+                _highlightUntil: 0
             };
 
             for (var m = 0; m < regionDef.meshDefs.length; m++) {
@@ -318,6 +319,13 @@ window.Brain3D = {
             var normalized = Math.min(1, Math.max(0, avg / ACTIVATION_DIVISOR));
             region.activation = normalized;
 
+            if (region._highlightUntil > 0) {
+                if (Date.now() < region._highlightUntil) {
+                    continue;
+                }
+                region._highlightUntil = 0;
+            }
+
             var opacity = BASE_OPACITY + normalized * (MAX_OPACITY - BASE_OPACITY);
             var emissiveIntensity = BASE_EMISSIVE_INTENSITY + normalized * (MAX_EMISSIVE_INTENSITY - BASE_EMISSIVE_INTENSITY);
 
@@ -325,6 +333,25 @@ window.Brain3D = {
                 region.meshes[j].material.opacity = opacity;
                 region.meshes[j].material.emissiveIntensity = emissiveIntensity;
             }
+        }
+    },
+
+    highlightRegion: function (regionName) {
+        if (!Brain3D.active || !Brain3D._initialized || !Brain3D._regions) return;
+
+        var foundRegion = null;
+        for (var i = 0; i < Brain3D._regions.length; i++) {
+            if (Brain3D._regions[i].name === regionName) {
+                foundRegion = Brain3D._regions[i];
+                break;
+            }
+        }
+        if (!foundRegion) return;
+
+        foundRegion._highlightUntil = Date.now() + 1200;
+        for (var j = 0; j < foundRegion.meshes.length; j++) {
+            foundRegion.meshes[j].material.emissiveIntensity = 1.5;
+            foundRegion.meshes[j].material.opacity = 0.9;
         }
     },
 
