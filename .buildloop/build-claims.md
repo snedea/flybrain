@@ -1,37 +1,42 @@
-# Build Claims -- D16.1
+# Build Claims -- T6.1
 
 ## Files Changed
-- [CREATE] js/fly-logic.js -- Shared pure functions (normalizeAngle, BEHAVIOR_THRESHOLDS, isCoolingDown, hasNearbyFood, evaluateBehaviorEntry) extracted from main.js for use by both main.js and tests.js
-- [CREATE] tests/run-node.js -- Node.js test runner entry point that loads scripts via vm.runInThisContext and calls runAllTests()
-- [MODIFY] js/connectome.js -- Fixed misleading windDirection comment at line 142: changed "direction wind is blowing FROM" to "wind travel direction (drag vector; 0=right, PI/2=up). Wind SOURCE = windDirection + PI."
-- [MODIFY] js/main.js -- Removed 5 functions/constants now in fly-logic.js: normalizeAngle, BEHAVIOR_THRESHOLDS, hasNearbyFood, isCoolingDown, evaluateBehaviorEntry
-- [MODIFY] index.html -- Added fly-logic.js script tag between connectome.js and main.js
-- [MODIFY] tests/run.html -- Added fly-logic.js script tag between connectome.js and tests.js
-- [MODIFY] tests/tests.js -- Removed copied function snapshots (Section 2), replaced with mutable test state vars; added 13 new tests for T5.1-T5.3; replaced runAllTests with Node/CLI-compatible version using globalThis fallback, console.log output, and process.exitCode=1 on failure
+- [CREATE] js/brain3d.js -- New Brain3D module: Three.js 3D brain visualization with 10 neuropil regions, raycasting tooltips, live connectome activation mapping
+- [MODIFY] index.html -- Added Three.js CDN scripts (r158), brain3d.js script tag, Brain 3D toggle button, overlay container div, tooltip div
+- [MODIFY] js/main.js -- Added Brain3D.init() call after BRAIN.setup(), Brain 3D button click handler, Brain3D.update() call in main loop
+- [MODIFY] css/main.css -- Added styles for brain3d overlay panel, tooltip, and tooltip inner elements (tip-name, tip-desc, tip-type, tip-neurons, tip-neuron)
 
 ## Verification Results
-- Build: PASS (no build step -- vanilla JS project)
-- Tests: PASS (`node tests/run-node.js` -- 45 passed / 0 failed / 45 total, exit code 0)
-- Lint: SKIPPED (no linter configured)
-- Failure detection: PASS (injected deliberate failure: output showed "FAIL test_deliberate_fail: intentional", exit code 1)
+- Build: PASS (no build step — CDN-only project)
+- Tests: SKIPPED (no test runner configured)
+- Lint: PASS (node --check js/brain3d.js && node --check js/main.js — both passed with no errors)
 
 ## Claims
-- [ ] Claim 1: js/fly-logic.js contains normalizeAngle, BEHAVIOR_THRESHOLDS, isCoolingDown, hasNearbyFood, and evaluateBehaviorEntry -- identical logic to what was previously in main.js and tests.js
-- [ ] Claim 2: main.js no longer defines normalizeAngle, BEHAVIOR_THRESHOLDS, hasNearbyFood, isCoolingDown, or evaluateBehaviorEntry -- these are now loaded from fly-logic.js via script tag in index.html
-- [ ] Claim 3: tests/tests.js no longer contains copied snapshots of those 5 functions/constants -- it relies on fly-logic.js loaded via script tag in run.html
-- [ ] Claim 4: index.html loads fly-logic.js between connectome.js and main.js
-- [ ] Claim 5: tests/run.html loads fly-logic.js between connectome.js and tests.js
-- [ ] Claim 6: runAllTests() uses globalThis/window/global fallback chain to discover test_ functions, works in both browser and Node.js
-- [ ] Claim 7: runAllTests() logs pass/fail/total counts and each failure message to console
-- [ ] Claim 8: runAllTests() sets process.exitCode = 1 when failures > 0 (guarded by typeof process check)
-- [ ] Claim 9: runAllTests() DOM output is guarded by typeof document check, preserving browser path
-- [ ] Claim 10: tests/run-node.js loads constants.js, connectome.js, fly-logic.js, tests.js via vm.runInThisContext and calls runAllTests()
-- [ ] Claim 11: 13 new test functions added covering: dark fatigue gain doubling (test_dark_fatigue_gain_doubled, test_bright_fatigue_gain_normal), dark curiosity range reduction (test_dark_curiosity_range_reduced, test_bright_curiosity_range_normal), tonic injection halving in dark (test_tonic_injection_halved_in_dark), temperature warm pathway (test_temperature_warm_activates_pathway), temperature cool pathway (test_temperature_cool_activates_pathway), neutral temperature no-fire (test_temperature_neutral_no_thermo), nociception auto-clear (test_nociception_auto_clears), nociception startle activation (test_nociception_activates_startle_pathway), brace blocked by strong wind (test_brace_blocked_by_strong_wind), brace blocked by no wind (test_brace_blocked_by_no_wind), brace blocked by high startle (test_brace_blocked_by_high_startle)
-- [ ] Claim 12: connectome.js windDirection comment fixed from "direction wind is blowing FROM" to "wind travel direction (drag vector)" with note that wind SOURCE = windDirection + PI
-- [ ] Claim 13: All 45 tests pass with exit code 0; injected failure produces exit code 1 with FAIL message in console output
+- [ ] Claim 1: index.html loads Three.js r0.158.0 via CDN (three.min.js and OrbitControls.js) before all project scripts
+- [ ] Claim 2: Script load order is: three.min.js → OrbitControls.js → constants.js → connectome.js → fly-logic.js → brain3d.js → main.js
+- [ ] Claim 3: A "Brain 3D" toggle button exists in toolbar-left (id="brain3dBtn", aria-pressed="false"), positioned before the help button, with NO data-tool attribute
+- [ ] Claim 4: div#brain3d-overlay and div#brain3d-tooltip exist in index.html after the canvas element, both initially display:none
+- [ ] Claim 5: js/brain3d.js is an IIFE that exposes window.Brain3D with methods: init, show, hide, toggle, update, _buildRegions, _renderLoop, _onMouseMove, _onResize
+- [ ] Claim 6: Brain3D.init() creates a Three.js scene with background 0x0a0a1a, PerspectiveCamera(55, ..., 0.1, 100) at position(0,6,10), WebGLRenderer with antialias, OrbitControls with damping, ambient light + 2 point lights
+- [ ] Claim 7: 10 brain regions are defined matching the plan: Optic Lobes, Antennal Lobes, Mushroom Bodies, Central Complex, Lateral Horn, Subesophageal Zone, VNC/Motor, Thermosensory, Mechanosensory, Drives
+- [ ] Claim 8: Region colors match: sensory=0x3b82f6 (blue), central=0x8b5cf6 (purple), drives=0xf59e0b (amber), motor=0xef4444 (red)
+- [ ] Claim 9: All meshes use MeshStandardMaterial with transparent:true, depthWrite:false, opacity:0.3 base, emissiveIntensity:0 base
+- [ ] Claim 10: VNC/Motor region dynamically collects all MN_* prefixed neurons from BRAIN.postSynaptic (collectMNPrefix flag)
+- [ ] Claim 11: Brain3D.update() reads BRAIN.postSynaptic[neuronName][BRAIN.thisState], averages per region, normalizes by ACTIVATION_DIVISOR=80, maps to opacity 0.3-0.8 and emissiveIntensity 0.0-1.0
+- [ ] Claim 12: Raycasting via _onMouseMove shows tooltip with region name, description, type, and per-neuron activation percentages using neuronDescriptions global (with typeof guard)
+- [ ] Claim 13: Tooltip clamping logic prevents overflow past right edge (260px threshold) and bottom edge (window.innerHeight - 90)
+- [ ] Claim 14: main.js calls Brain3D.init() after BRAIN.setup() with typeof guard
+- [ ] Claim 15: main.js calls Brain3D.update() in the main loop() function guarded by typeof Brain3D !== 'undefined' && Brain3D.active
+- [ ] Claim 16: Brain 3D button click handler toggles Brain3D.toggle(), updates aria-pressed, and toggles .active class on the button
+- [ ] Claim 17: Brain3D manages its own internal render loop via _renderLoop() using requestAnimationFrame — no second RAF loop added to main.js
+- [ ] Claim 18: CSS uses only existing CSS custom properties (--surface, --border, --text, --text-muted, --accent, --radius) except for scene background hex 0x0a0a1a and region color hex values
+- [ ] Claim 19: Overlay positioned fixed top:44px bottom:90px (between toolbar and bottom panel) at z-index:15; tooltip at z-index:45
+- [ ] Claim 20: A faint wireframe sphere outline (opacity 0.06) provides spatial reference in the 3D scene
+- [ ] Claim 21: Brain3D._onResize handles window resize, updating camera aspect ratio and renderer size
 
 ## Gaps and Assumptions
-- Browser path (tests/run.html rendering) not tested in this environment (no browser available); DOM output logic is unchanged except for typeof guard wrapping
-- nearestFood() remains in main.js as specified (not shared)
-- BEHAVIOR_MIN_DURATION and BEHAVIOR_COOLDOWN remain in main.js as specified (not shared)
-- The evaluateBehaviorEntry function in fly-logic.js includes the brace and dark rest threshold logic that was added in T5.1-T5.2, matching the current main.js implementation exactly
+- No automated tests exist for this feature; verification is manual browser-based smoke testing only
+- Three.js CDN scripts require internet access to load; no offline fallback provided
+- The neuronDescriptions global is defined in main.js which loads after brain3d.js, so the typeof guard in _onMouseMove is essential for avoiding runtime errors if tooltip is shown before main.js fully initializes (unlikely but handled)
+- Mesh positions are anatomically approximate using the plan's coordinate values; no real neuroanatomical data was used
+- The ACTIVATION_DIVISOR of 80 is a tuning constant — actual visual quality depends on the range of postSynaptic values at runtime

@@ -92,6 +92,69 @@ var regionColors = {
 	motor: '#ef4444',
 };
 
+// Human-readable neuron descriptions for tooltips
+var neuronDescriptions = {
+	VIS_R1R6: 'R1-R6 motion photoreceptors',
+	VIS_R7R8: 'R7/R8 color photoreceptors',
+	VIS_ME: 'Medulla (visual processing)',
+	VIS_LO: 'Lobula (pattern recognition)',
+	VIS_LC: 'Lobula columnar (looming detection)',
+	VIS_LPTC: 'Lobula plate tangential (optic flow)',
+	OLF_ORN_FOOD: 'Olfactory receptor (food odors)',
+	OLF_ORN_DANGER: 'Olfactory receptor (danger odors)',
+	OLF_LN: 'Olfactory local interneurons',
+	OLF_PN: 'Olfactory projection neurons',
+	GUS_GRN_SWEET: 'Sweet taste receptors',
+	GUS_GRN_BITTER: 'Bitter taste receptors',
+	GUS_GRN_WATER: 'Water taste receptors',
+	MECH_BRISTLE: 'Bristle neurons (touch)',
+	MECH_JO: "Johnston's organ (wind/gravity)",
+	MECH_CHORD: 'Chordotonal (proprioception)',
+	THERMO_WARM: 'Warm thermosensors',
+	THERMO_COOL: 'Cool thermosensors',
+	NOCI: 'Nociceptors (pain)',
+	MB_KC: 'Kenyon cells (odor memory)',
+	MB_APL: 'APL inhibitory neuron',
+	MB_MBON_APP: 'MB output (appetitive)',
+	MB_MBON_AV: 'MB output (aversive)',
+	MB_DAN_REW: 'Dopamine reward neurons',
+	MB_DAN_PUN: 'Dopamine punishment neurons',
+	LH_APP: 'Lateral horn (approach)',
+	LH_AV: 'Lateral horn (avoidance)',
+	CX_EPG: 'Compass neurons (heading)',
+	CX_PFN: 'Path integration neurons',
+	CX_FC: 'Fan-shaped body (locomotion)',
+	CX_HDELTA: 'Heading change neurons',
+	SEZ_FEED: 'Feeding command center',
+	SEZ_GROOM: 'Grooming command center',
+	SEZ_WATER: 'Water intake command',
+	ANTENNAL_MECH: 'Antennal mechanosensory',
+	GNG_DESC: 'Gnathal ganglia (arousal)',
+	DN_WALK: 'Walk command',
+	DN_FLIGHT: 'Flight command',
+	DN_TURN: 'Turn command',
+	DN_BACKUP: 'Backward walk command',
+	DN_STARTLE: 'Startle/escape command',
+	VNC_CPG: 'Central pattern generator (gait)',
+	CLOCK_DN: 'Circadian clock',
+	DRIVE_HUNGER: 'Hunger drive',
+	DRIVE_FEAR: 'Fear drive',
+	DRIVE_FATIGUE: 'Fatigue drive',
+	DRIVE_CURIOSITY: 'Curiosity drive',
+	DRIVE_GROOM: 'Grooming urge',
+	MN_LEG_L1: 'Motor: front left leg',
+	MN_LEG_R1: 'Motor: front right leg',
+	MN_LEG_L2: 'Motor: middle left leg',
+	MN_LEG_R2: 'Motor: middle right leg',
+	MN_LEG_L3: 'Motor: rear left leg',
+	MN_LEG_R3: 'Motor: rear right leg',
+	MN_WING_L: 'Motor: left wing',
+	MN_WING_R: 'Motor: right wing',
+	MN_PROBOSCIS: 'Motor: proboscis',
+	MN_HEAD: 'Motor: head',
+	MN_ABDOMEN: 'Motor: abdomen',
+};
+
 // --- Brain setup ---
 BRAIN.setup();
 
@@ -104,6 +167,7 @@ for (var ps in BRAIN.connectome) {
 	newBox.rows = 1;
 	newBox.id = ps;
 	newBox.className = 'brainNode';
+	newBox.setAttribute('data-neuron', ps);
 	document.getElementById('nodeHolder').appendChild(newBox);
 }
 
@@ -114,6 +178,30 @@ for (var region in BRAIN.neuronRegions) {
 		neuronColorMap[neurons[i]] = regionColors[region] || '#55FF55';
 	}
 }
+
+// --- Neuron tooltip on hover ---
+var neuronTooltip = document.getElementById('neuronTooltip');
+document.getElementById('nodeHolder').addEventListener('mouseover', function (e) {
+	var node = e.target.closest('.brainNode');
+	if (!node) return;
+	var id = node.getAttribute('data-neuron');
+	var desc = neuronDescriptions[id] || id;
+	neuronTooltip.textContent = desc;
+	neuronTooltip.style.display = 'block';
+});
+document.getElementById('nodeHolder').addEventListener('mousemove', function (e) {
+	if (neuronTooltip.style.display === 'block') {
+		neuronTooltip.style.left = (e.clientX + 10) + 'px';
+		neuronTooltip.style.bottom = (window.innerHeight - e.clientY + 10) + 'px';
+		neuronTooltip.style.top = 'auto';
+	}
+});
+document.getElementById('nodeHolder').addEventListener('mouseout', function (e) {
+	var node = e.target.closest('.brainNode');
+	if (node) {
+		neuronTooltip.style.display = 'none';
+	}
+});
 
 // --- Tool button handlers ---
 var toolButtons = document.querySelectorAll('.tool-btn[data-tool]');
@@ -137,6 +225,23 @@ for (var i = 0; i < toolButtons.length; i++) {
 			});
 		}
 	})(toolButtons[i]);
+}
+
+// --- Brain 3D toggle ---
+var brain3dBtn = document.getElementById('brain3dBtn');
+if (brain3dBtn) {
+    brain3dBtn.addEventListener('click', function () {
+        if (typeof Brain3D !== 'undefined') {
+            Brain3D.toggle();
+            var isActive = Brain3D.active;
+            brain3dBtn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+            if (isActive) {
+                brain3dBtn.classList.add('active');
+            } else {
+                brain3dBtn.classList.remove('active');
+            }
+        }
+    });
 }
 
 // --- Help overlay toggle ---
@@ -208,6 +313,11 @@ function updateBrain() {
 	// Update behavior state label
 	var behaviorStateEl = document.getElementById('behaviorState');
 	if (behaviorStateEl) behaviorStateEl.textContent = behavior.current;
+}
+
+// Initialize Brain3D module (deferred — actual Three.js setup happens on first toggle)
+if (typeof Brain3D !== 'undefined') {
+    Brain3D.init();
 }
 
 BRAIN.randExcite();
@@ -857,8 +967,8 @@ var BODY = {
 	// Wings (teardrop shapes, attached to thorax)
 	wingOffsetX: 7,
 	wingOffsetY: -8,
-	wingLength: 22,
-	wingWidth: 9,
+	wingLength: 42,
+	wingWidth: 16,
 	// Proboscis
 	proboscisLength: 8,
 	proboscisBaseY: -30,
@@ -910,15 +1020,15 @@ function drawFlyBody(dtScale) {
 	var t = Date.now() / 1000;
 	var state = behavior.current;
 
-	// --- Wings (drawn first, behind body) ---
-	drawWing(-1); // left
-	drawWing(1);  // right
-
 	// --- Legs (behind body) ---
 	drawLegs(state, dtScale);
 
 	// --- Abdomen ---
 	drawAbdomen();
+
+	// --- Wings (over abdomen, behind thorax) ---
+	drawWing(-1); // left
+	drawWing(1);  // right
 
 	// --- Thorax ---
 	drawThorax();
@@ -961,22 +1071,26 @@ function drawWing(side) {
 
 	ctx.save();
 	ctx.translate(wx + microOffset, wy);
-	ctx.rotate(side * (0.15 + spreadAngle) + microOffset * 0.02 + buzzOffset);
+	ctx.rotate(side * (0.35 + spreadAngle) + microOffset * 0.02 + buzzOffset);
+
+	// Scale wings up during flight (compensates for spread rotation)
+	var wingScale = 1.0 + anim.wingSpread * 0.3;
+	ctx.scale(wingScale, wingScale);
 
 	// Dynamic wing opacity (more visible when spread)
 	var wingAlpha = 0.3 + anim.wingSpread * 0.35;
 
-	// Teardrop wing shape
+	// Teardrop wing shape (extends backward toward abdomen)
 	ctx.beginPath();
 	ctx.moveTo(0, 0);
 	ctx.bezierCurveTo(
-		ww * 1.2, -wl * 0.2,
-		ww * 1.4, -wl * 0.7,
-		ww * 0.3, -wl
+		ww * 1.2, wl * 0.2,
+		ww * 1.4, wl * 0.7,
+		ww * 0.3, wl
 	);
 	ctx.bezierCurveTo(
-		-ww * 0.2, -wl * 0.8,
-		-ww * 0.1, -wl * 0.3,
+		-ww * 0.2, wl * 0.8,
+		-ww * 0.1, wl * 0.3,
 		0, 0
 	);
 	ctx.fillStyle = 'rgba(200, 210, 230, ' + wingAlpha.toFixed(2) + ')';
@@ -988,11 +1102,11 @@ function drawWing(side) {
 	// Wing veins
 	ctx.beginPath();
 	ctx.moveTo(0, 0);
-	ctx.lineTo(ww * 0.5, -wl * 0.8);
-	ctx.moveTo(0, -2);
-	ctx.lineTo(ww * 1.0, -wl * 0.5);
-	ctx.moveTo(0, -1);
-	ctx.lineTo(ww * 0.8, -wl * 0.3);
+	ctx.lineTo(ww * 0.5, wl * 0.8);
+	ctx.moveTo(0, 2);
+	ctx.lineTo(ww * 1.0, wl * 0.5);
+	ctx.moveTo(0, 1);
+	ctx.lineTo(ww * 0.8, wl * 0.3);
 	ctx.strokeStyle = 'rgba(160, 170, 190, ' + Math.min(1, wingAlpha + 0.1).toFixed(2) + ')';
 	ctx.lineWidth = 0.3;
 	ctx.stroke();
@@ -1300,7 +1414,7 @@ function drawLegs(state, dtScale) {
 		var ay = attach.y;
 
 		// First segment (coxa/femur)
-		var baseAngle = Math.PI / 2 * side + hipAngle;
+		var baseAngle = (side === -1 ? Math.PI : 0) + hipAngle;
 		var seg1EndX = ax + Math.cos(baseAngle) * BODY.legSeg1;
 		var seg1EndY = ay + Math.sin(baseAngle) * BODY.legSeg1;
 
@@ -1550,6 +1664,7 @@ function loop(timestamp) {
 	// Clamp dt to 100ms to prevent huge jumps after tab-backgrounding
 	if (dt > 100) dt = 100;
 	update(dt);
+	if (typeof Brain3D !== 'undefined' && Brain3D.active) { Brain3D.update(); }
 	draw();
 	requestAnimationFrame(loop);
 }

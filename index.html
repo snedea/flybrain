@@ -3,7 +3,7 @@
 <head>
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>FlyBrain</title>
-    <link rel="stylesheet" type="text/css" href="./css/main.css">
+    <link rel="stylesheet" type="text/css" href="./css/main.css?v=3">
 </head>
 
 <body>
@@ -14,6 +14,7 @@
             <button class="tool-btn" data-tool="air">Air</button>
             <button class="tool-btn" data-tool="light" id="lightBtn">Light: Bright</button>
             <button class="tool-btn" data-tool="temp" id="tempBtn">Temp: Neutral</button>
+            <button class="tool-btn" id="brain3dBtn" aria-pressed="false">Brain 3D</button>
             <button class="tool-btn" id="helpBtn">?</button>
         </div>
         <div class="toolbar-right">
@@ -37,13 +38,22 @@
         <div class="help-item"><strong>Temp</strong> -- Cycles through Neutral, Warm, and Cool. Warm makes the fly more active and avoidant. Cool makes it exploratory.</div>
     </div>
     <canvas id='canvas'></canvas>
+    <div id="brain3d-overlay" style="display:none;"></div>
+    <div id="brain3d-tooltip" style="display:none;"></div>
     <div id="bottom-panel">
         <div id="connectome-panel">
             <div class="connectome-header">
                 <span class="connectome-label">Connectome</span>
+                <div class="connectome-legend">
+                    <span class="legend-item"><span class="legend-dot" style="background:var(--neuron-sensory)"></span>Sensory</span>
+                    <span class="legend-item"><span class="legend-dot" style="background:var(--neuron-central)"></span>Central</span>
+                    <span class="legend-item"><span class="legend-dot" style="background:var(--neuron-drives)"></span>Drives</span>
+                    <span class="legend-item"><span class="legend-dot" style="background:var(--neuron-motor)"></span>Motor</span>
+                </div>
                 <button class="connectome-toggle-btn" id="connectomeToggleBtn">Hide</button>
             </div>
             <div id="nodeHolder"></div>
+            <div id="neuronTooltip" class="neuron-tooltip"></div>
         </div>
         <div id="drive-meters">
             <div class="drive-row">
@@ -72,9 +82,12 @@
             </div>
         </div>
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/controls/OrbitControls.js"></script>
     <script type="text/javascript" src="./js/constants.js"></script>
     <script type="text/javascript" src="./js/connectome.js"></script>
     <script type="text/javascript" src="./js/fly-logic.js"></script>
+    <script type="text/javascript" src="./js/brain3d.js"></script>
     <script type="text/javascript" src="./js/main.js"></script>
 </body>
 
