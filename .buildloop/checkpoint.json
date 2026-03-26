@@ -1,6 +1,0 @@
-{
-  "task_id": "D2.2",
-  "task_desc": "Fix air tool wind stimulus persisting indefinitely when mouse released outside canvas -- the mouseup listener is registered only on the canvas element at main.js:230, so if a user starts an air-tool drag on the canvas and releases the mouse button over the toolbar, bottom panel, or beyond the browser viewport, the canvas mouseup never fires, leaving isDragging=true and BRAIN.stimulate.wind=true permanently; the 500ms brain tick then continuously processes the stale wind input through MECH_JO and raises DRIVE_FEAR each tick, producing progressively more erratic escape behavior until the user clicks the canvas with the air tool again; fix by moving the mouseup listener from canvas to document (or adding a document-level fallback) so that releasing the mouse anywhere clears the drag and wind state. Files: js/main.js.",
-  "completed_stage": "builder",
-  "timestamp": "2026-03-26T04:17:19.885251+00:00"
-}
