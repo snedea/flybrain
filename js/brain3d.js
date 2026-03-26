@@ -273,6 +273,7 @@ window.Brain3D = {
             Brain3D.init();
             if (!Brain3D._initialized) {
                 Brain3D._container.style.display = 'none';
+                Brain3D.active = false;
                 return;
             }
         } else {

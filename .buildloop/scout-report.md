@@ -1,51 +1,67 @@
-# Scout Report: T6.1
+# Scout Report: T7.1
 
 ## Key Facts (read this first)
 
-- **Tech stack**: Vanilla JS, no build step, no npm, no bundler. Single-page app — scripts loaded via `<script>` tags in `index.html`. Three.js must be added via CDN (exactly as the task specifies).
-- **Global state**: `BRAIN` is the sole global object. `BRAIN.postSynaptic[neuronName][BRAIN.thisState]` gives live activation level (integer, typically 0–100+; threshold is 22). `BRAIN.drives` gives drive floats (0–1).
-- **Main render loop**: `requestAnimationFrame(loop)` in `main.js` at line 1633. Each frame calls `update(dt)` then `draw()`. Brain3D.update() should be called here.
-- **Existing script load order**: `constants.js` → `connectome.js` → `fly-logic.js` → `main.js`. `brain3d.js` must be inserted **before** `main.js` (or after connectome.js) so BRAIN is already set up when Brain3D initializes.
-- **No UPDATED_SPECS.md or CLAUDE.md found** in /work — only SPEC.md, TASKS.md, TASKS-ARCHIVE.md exist.
+- **Tech stack**: Vanilla JS frontend (no build step). Project has Node 22 and yarn but **no Python installed** in this environment — the builder must install it (`apt-get install python3 python3-pip` or use a shebang with `#!/usr/bin/env python3` plus docs on prerequisites).
+- **No `data/` directory exists** — the 4 CSV source files are not present. Script must either download them from the FlyWire GCS bucket or document clearly that the user must place them there. The TASKS.md description implies they should be at `data/connections.csv.gz`, `data/neurons.csv.gz`, `data/classification.csv.gz`, `data/coordinates.csv.gz`.
+- **No `scripts/` directory exists** — builder must create it.
+- **59 existing neuron groups** are defined in `js/connectome.js` (via `BRAIN.neuronRegions`) and `js/constants.js` (via `weights` object). These are the exact group names the output must use. Enumerated below in Architecture Notes.
+- **Output binary format is strictly specified**: header (uint32 neuron_count, uint32 edge_count) + edges (uint32 pre, uint32 post, float32 weight) + per-neuron metadata (uint8 region_type, uint16 group_id). Gzipped target ~6–7 MB.
 
 ## Relevant Files
 
-| File | Role |
-|------|------|
-| `index.html` | Add Three.js CDN, OrbitControls CDN, `<script src="js/brain3d.js">`, "Brain 3D" toolbar button, overlay `<div>`, tooltip `<div>` |
-| `js/main.js` | Add `Brain3D.update()` call in the `loop()` function (line ~1644); add button click handler for "Brain 3D" toggle |
-| `css/main.css` | Add styles for the 3D overlay panel, brain3d tooltip, and "Brain 3D" active button state |
-| `js/connectome.js` | Read-only reference: defines `BRAIN.postSynaptic`, `BRAIN.neuronRegions`, neuron names |
-| `js/brain3d.js` | **New file** — the entire Three.js Brain3D module |
+- `js/constants.js` — Defines all 59 group names (the `weights` object keys). Builder must replicate this exact set for group_id assignment.
+- `js/connectome.js` — Defines `BRAIN.neuronRegions` with 4 buckets: `sensory` (17 groups), `central` (20 groups), `drives` (5 groups), `motor` (17 groups). Region type uint8 encoding must match downstream consumers (T7.3–T7.5).
+- `TASKS.md` — Contains the full spec for T7.1 (lines 21–23) and T7.2 (lines 25–27); T7.2's mapping logic is required as part of T7.1 as well.
+- `SPEC.md` — High-level project context; not needed for implementation.
+- `index.html` — Frontend entry point; shows where output files will be consumed (no direct changes needed for T7.1).
 
 ## Architecture Notes
 
-- **`BRAIN.postSynaptic[name]`** is a 2-element array `[thisState, nextState]`. To read current activation: `BRAIN.postSynaptic[name][BRAIN.thisState]`. Values are raw integers (not normalized). Need to normalize to 0–1 for opacity/emissive (suggest dividing by ~80, clamping to 1).
-- **Neuron name completeness**: All neuron group names from the task's region-to-neuron mapping exist in `BRAIN.neuronRegions` and `BRAIN.postSynaptic`. MN_* (motor) neurons are present. Note: some neurons like `NOCI`, `CLOCK_DN`, `GNG_DESC`, `ANTENNAL_MECH` exist but are not in the task's mapping — they are fine to ignore.
-- **Color convention** already established in `regionColors` (main.js line 89): sensory `#3b82f6`, central `#8b5cf6`, drives `#f59e0b`, motor `#ef4444`. Brain3D should match these exactly.
-- **z-index layering**: toolbar is z-index 20, help overlay is z-index 30, neuron tooltip is z-index 40. Brain3D overlay needs z-index between 10 and 20 (behind toolbar) OR above toolbar at ~25 with toolbar visible on top.
-- **Bottom panel** is 90px tall (`#bottom-panel` height), toolbar is 44px. The usable canvas area is `window.innerHeight - 90 - 44`. The 3D panel overlay should account for these.
-- **Script load order matters**: `BRAIN.setup()` is called at line 159 of `main.js`. `brain3d.js` should NOT call `BRAIN.setup()` itself — it should read from BRAIN after main.js calls it. Best approach: brain3d.js defines the module, main.js calls `Brain3D.init(container)` after `BRAIN.setup()`.
-- **The `loop()` function** at line 1633 is the place to hook `Brain3D.update()` — add a guard `if (typeof Brain3D !== 'undefined' && Brain3D.active) Brain3D.update();`.
+### Existing 59 neuron groups (from `BRAIN.neuronRegions` in connectome.js)
+
+- **sensory** (region_type=0, 17 groups): VIS_R1R6, VIS_R7R8, VIS_ME, VIS_LO, VIS_LC, VIS_LPTC, OLF_ORN_FOOD, OLF_ORN_DANGER, OLF_LN, OLF_PN, MECH_BRISTLE, MECH_JO, MECH_CHORD, ANTENNAL_MECH, THERMO_WARM, THERMO_COOL, NOCI
+- **central** (region_type=1, 20 groups): MB_KC, MB_APL, MB_MBON_APP, MB_MBON_AV, MB_DAN_REW, MB_DAN_PUN, LH_APP, LH_AV, CX_EPG, CX_PFN, CX_FC, CX_HDELTA, SEZ_FEED, SEZ_GROOM, SEZ_WATER, GUS_GRN_SWEET, GUS_GRN_BITTER, GUS_GRN_WATER, GNG_DESC, CLOCK_DN
+- **drives** (region_type=2, 5 groups): DRIVE_HUNGER, DRIVE_FEAR, DRIVE_FATIGUE, DRIVE_CURIOSITY, DRIVE_GROOM
+- **motor** (region_type=3, 17 groups): DN_WALK, DN_FLIGHT, DN_TURN, DN_BACKUP, DN_STARTLE, VNC_CPG, MN_LEG_L1, MN_LEG_R1, MN_LEG_L2, MN_LEG_R2, MN_LEG_L3, MN_LEG_R3, MN_WING_L, MN_WING_R, MN_PROBOSCIS, MN_HEAD, MN_ABDOMEN
+
+Total = 59 named groups. group_id 0–58 in fixed order; each region also needs a generic fallback group for unmapped neurons, bringing the JSON group list to 63 (59 + 4 generic fallbacks).
+
+### CSV schema (from TASKS.md)
+- `connections.csv.gz`: `pre_root_id, post_root_id, neuropil, syn_count, nt_type` — 3.87M rows, 48MB compressed
+- `neurons.csv.gz`: `root_id, group, nt_type` — 139,255 rows, 1.6MB compressed
+- `classification.csv.gz`: `root_id, flow, super_class, class, sub_class, side` — 0.9MB compressed
+- `coordinates.csv.gz`: `root_id, position, supervoxel_id` — 5.1MB compressed (NOT needed for T7.1 output)
+
+### Weight derivation
+- `weight = syn_count × sign(nt_type)` where sign is +1 for excitatory (ACh, Glu, DA, OA, 5HT) and -1 for inhibitory (GABA). Store as float32.
+- Aggregate across neuropils: sum syn_count for same (pre_root_id, post_root_id) pairs before remapping.
+
+### Classification → group mapping strategy
+- `flow == 'sensory'` → region=sensory; `flow == 'motor'` → region=motor; `flow == 'intrinsic'` → region=central (drives are a subset)
+- `class` field drives specific group: `visual` → VIS_*, `olfactory` → OLF_*, `gustatory` → GUS_*, `mechanosensory` → MECH_*, `thermosensory` → THERMO_*, `kenyon_cell` → MB_KC, `mushroom_body_output` → MB_MBON_APP/AV (needs sub_class), `dopaminergic` → MB_DAN_REW/PUN, `central_complex` → CX_*, `lateral_horn` → LH_*, `descending` → DN_* or MN_*, etc.
+- Unmapped neurons: use generic group `GENERIC_SENSORY`, `GENERIC_CENTRAL`, `GENERIC_DRIVES`, `GENERIC_MOTOR` (group_ids 59–62).
+
+### Binary layout math
+- Header: 8 bytes
+- Edges: ~2.7M × 12 bytes = ~32.4 MB uncompressed → compresses well to ~6–7 MB gzipped
+- Metadata: 139,255 × 3 bytes = ~418 KB uncompressed
+- Total uncompressed: ~33 MB → gzip target 6–7 MB is achievable
 
 ## Suggested Approach
 
-1. Add Three.js r158+ CDN and OrbitControls CDN to `index.html` (importmap or plain `<script>` tags before brain3d.js).
-2. Add "Brain 3D" button to `.toolbar-left` in `index.html`.
-3. Add `<div id="brain3d-overlay">` after the canvas, and `<div id="brain3d-tooltip">` for hover tooltip.
-4. Create `js/brain3d.js` as a module-style IIFE that exposes `window.Brain3D = { init, update, show, hide, active }`.
-5. In `brain3d.js`, define region objects with their mesh(es), neuron lists, color, and emissive update logic. Keep all Three.js code inside the module to avoid global namespace pollution.
-6. In `main.js` loop function, call `Brain3D.update()` per frame when active.
-7. In `css/main.css`, add overlay styles (position: fixed, top: 44px, bottom: 90px, full width, z-index: 15) and tooltip styles.
-8. Raycasting: on `mousemove` over the renderer's canvas, cast ray against all region meshes, show tooltip on hit.
+1. **Script structure**: `scripts/build_connectome.py` with clear sections: (a) load CSVs, (b) build root_id→index remapping, (c) classify neurons → region + group, (d) aggregate edges, (e) write binary, (f) write JSON.
+2. **Use pandas**: Only stdlib dependency is `struct`, `gzip`, `json`. Pandas is highly recommended for the 48MB CSV but must be installed. Add a `requirements.txt` or inline `pip install` check.
+3. **Download logic**: Add an optional `--download` flag or a `download_data.sh` helper to fetch from the GCS bucket (`gs://flywire-data/` or similar). Alternatively, check `data/` exists and error clearly if files are missing.
+4. **Group ID ordering**: Assign group_ids 0–58 in the exact order they appear in `BRAIN.neuronRegions` (sensory first, then central, drives, motor), then 59–62 for generics. Document this ordering in neuron_meta.json so T7.3/T7.4 can decode it.
+5. **neuron_meta.json schema**: `{ "groups": [{"id": 0, "name": "VIS_R1R6", "region": "sensory", "neuron_count": N}, ...], "neuron_count": 139255, "edge_count": N }`.
 
 ## Risks and Constraints (read this last)
 
-- **Three.js CDN version consistency**: OrbitControls must match the Three.js version. Use the same release from the same CDN (e.g., both from `https://cdn.jsdelivr.net/npm/three@0.158.0/`). Using mismatched versions causes import errors.
-- **Module vs non-module**: If Three.js is loaded as ES module (`type="module"`), OrbitControls is `import`ed differently. Easiest no-build approach is to use the UMD/global build: `three.min.js` + `OrbitControls.js` (both as plain `<script>` tags) so `THREE` and `THREE.OrbitControls` are global. Check CDN path carefully — the UMD OrbitControls path changed between r140 and r158.
-- **Script load order**: `brain3d.js` must load after Three.js CDN scripts but the `Brain3D.init()` call must happen after `BRAIN.setup()` (line 159 of main.js). Brain3D should defer actual initialization to the "Brain 3D" button click or to a `DOMContentLoaded`/deferred init call from main.js after BRAIN.setup().
-- **WebGL context**: If the user's browser doesn't support WebGL, Three.js will throw. Add a try/catch around `new THREE.WebGLRenderer()`.
-- **Transparency rendering order**: Multiple transparent meshes (opacity < 1) require `depthWrite: false` on materials or explicit `renderOrder` to avoid z-fighting artifacts on overlapping brain regions (e.g., optic lobes overlapping VNC cylinder). Set `transparent: true` and `depthWrite: false` on all brain region materials.
-- **MN_* wildcard in VNC region**: The task says `MN_*` is in VNC/Motor region. All `MN_` prefixed neurons (`MN_LEG_L1`, `MN_LEG_R1`, etc.) need to be collected by prefix matching, not hardcoded, to avoid maintenance issues if neurons are added.
-- **Performance**: The 3D panel is an overlay, not replacing the canvas. Both the 2D canvas loop (RAF) and Three.js renderer will run concurrently when the panel is open. This is fine at 60fps with ~10 simple meshes, but the Three.js renderer.render() should only be called when `Brain3D.active === true`.
-- **bottom-panel occlusion**: The 3D overlay sits on top of the simulation canvas but the bottom panel floats above both. The overlay height should stop at the top of the bottom panel (i.e., `bottom: 90px`) or the Three.js canvas should have pointer-events disabled so the bottom panel remains interactive.
+- **Python not available**: Debian bookworm has `python3` in apt but it is not installed. Builder must add install instructions. The script itself cannot be tested in this environment without installing Python.
+- **Data files absent**: The 4 CSV files in `data/` don't exist yet. Builder should include a download script or clear instructions. GCS bucket URL not explicitly stated in TASKS.md — builder should use `https://storage.googleapis.com/flywire-data/` or the Codex API. The public FlyWire Codex download URL pattern should be verified.
+- **Memory pressure**: 48MB compressed connections = likely 200–400MB in memory as a pandas DataFrame. On a low-RAM environment this may OOM. Builder may want to use chunked reading or dask for large files.
+- **nt_type sign mapping**: The actual nt_type string values in the FlyWire dataset (`ACh`, `GABA`, `Glu`, `DA`, `OA`, `5HT`, `unknown`) are not confirmed from the code — builder must verify against actual CSV header or FlyWire docs. Unknown nt_type should default to excitatory (+1) with a warning.
+- **Duplicate edges after aggregation**: After summing syn_count across neuropils, the resulting edge list should be unique (pre_index, post_index) pairs — verify with a groupby + sum before writing.
+- **T7.2 overlap**: T7.2 is a separate task but T7.1's spec says "maps each neuron to one of the existing 59 behavioral groups" — T7.1 must include the full mapping logic. T7.2 appears to be a refinement/documentation task, not a blocker.
+- **coordinates.csv not needed for T7.1**: The spatial positions are only needed for T7.5 (WebGL layout). Builder should skip loading this file to save time/memory.

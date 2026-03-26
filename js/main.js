@@ -85,6 +85,8 @@ var tempLabels = ['Neutral', 'Warm', 'Cool'];
 
 // Region-based neuron color map (built after BRAIN.setup)
 var neuronColorMap = {};
+// Cached dot element arrays per neuron group (built during DOM creation)
+var neuronDotCache = {};
 var regionColors = {
 	sensory: '#3b82f6',
 	central: '#8b5cf6',
@@ -221,31 +223,78 @@ var neuronPopulations = {
 // --- Brain setup ---
 BRAIN.setup();
 
-for (var ps in BRAIN.connectome) {
-	var nameBox = document.createElement('span');
-	document.getElementById('nodeHolder').appendChild(nameBox);
-
-	var newBox = document.createElement('span');
-	newBox.cols = 3;
-	newBox.rows = 1;
-	newBox.id = ps;
-	newBox.className = 'brainNode';
-	newBox.setAttribute('data-neuron', ps);
-	document.getElementById('nodeHolder').appendChild(newBox);
-}
-
-// Inject connectome compression summary into header
+// Build connectome grid grouped by region type
 (function () {
-	var groupCount = Object.keys(neuronPopulations).length;
-	var summarySpan = document.createElement('span');
-	summarySpan.className = 'connectome-summary';
-	summarySpan.style.fontSize = '0.6rem';
-	summarySpan.style.color = '#8892a4';
-	summarySpan.style.marginLeft = '0.3rem';
-	summarySpan.textContent = groupCount + ' groups / ~130K neurons';
-	var headerLabel = document.querySelector('.connectome-label');
-	if (headerLabel) {
-		headerLabel.parentNode.insertBefore(summarySpan, headerLabel.nextSibling);
+	var holder = document.getElementById('nodeHolder');
+	var regionOrder = ['sensory', 'central', 'drives', 'motor'];
+	var regionLabels = { sensory: 'Sensory', central: 'Central', drives: 'Drives', motor: 'Motor' };
+	var regionNeurons = {};
+	for (var r = 0; r < regionOrder.length; r++) {
+		regionNeurons[regionOrder[r]] = [];
+	}
+	// Sort neurons into regions
+	for (var ps in BRAIN.connectome) {
+		var assigned = false;
+		for (var regionName in BRAIN.neuronRegions) {
+			var list = BRAIN.neuronRegions[regionName];
+			for (var ni = 0; ni < list.length; ni++) {
+				if (list[ni] === ps) {
+					regionNeurons[regionName].push(ps);
+					assigned = true;
+					break;
+				}
+			}
+			if (assigned) break;
+		}
+		if (!assigned) regionNeurons['motor'].push(ps);
+	}
+
+	for (var ri = 0; ri < regionOrder.length; ri++) {
+		var type = regionOrder[ri];
+		var neurons = regionNeurons[type];
+		if (neurons.length === 0) continue;
+
+		var section = document.createElement('div');
+		section.className = 'cg-section cg-section-' + type;
+
+		var label = document.createElement('div');
+		label.className = 'cg-label';
+		label.textContent = regionLabels[type];
+		section.appendChild(label);
+
+		var grid = document.createElement('div');
+		grid.className = 'cg-nodes';
+
+		for (var n = 0; n < neurons.length; n++) {
+			var node = document.createElement('div');
+			node.className = 'cg-node';
+			node.id = neurons[n];
+			node.setAttribute('data-neuron', neurons[n]);
+
+			var nameSpan = document.createElement('span');
+			nameSpan.className = 'cg-name';
+			nameSpan.textContent = neurons[n].replace(/_/g, ' ');
+			node.appendChild(nameSpan);
+
+			var cluster = document.createElement('span');
+			cluster.className = 'cg-dot-cluster';
+			var pop = neuronPopulations[neurons[n]] || 1;
+			var dotCount = Math.max(1, Math.min(600, Math.round(pop / 100)));
+			var dotArr = [];
+			for (var d = 0; d < dotCount; d++) {
+				var dot = document.createElement('span');
+				dot.className = 'cg-dot';
+				cluster.appendChild(dot);
+				dotArr.push(dot);
+			}
+			neuronDotCache[neurons[n]] = dotArr;
+			node.appendChild(cluster);
+
+			grid.appendChild(node);
+		}
+
+		section.appendChild(grid);
+		holder.appendChild(section);
 	}
 })();
 
@@ -260,12 +309,12 @@ for (var region in BRAIN.neuronRegions) {
 // --- Neuron tooltip on hover ---
 var neuronTooltip = document.getElementById('neuronTooltip');
 document.getElementById('nodeHolder').addEventListener('mouseover', function (e) {
-	var node = e.target.closest('.brainNode');
+	var node = e.target.closest('.cg-node');
 	if (!node) return;
 	var id = node.getAttribute('data-neuron');
 	var desc = neuronDescriptions[id] || id;
 	var pop = neuronPopulations[id];
-	var popText = pop ? ' \u2014 represents ~' + pop.toLocaleString() + ' neurons' : '';
+	var popText = pop ? ' -- represents ~' + pop.toLocaleString() + ' neurons' : '';
 	neuronTooltip.textContent = desc + popText;
 	neuronTooltip.style.display = 'block';
 });
@@ -277,7 +326,7 @@ document.getElementById('nodeHolder').addEventListener('mousemove', function (e)
 	}
 });
 document.getElementById('nodeHolder').addEventListener('mouseout', function (e) {
-	var node = e.target.closest('.brainNode');
+	var node = e.target.closest('.cg-node');
 	if (node) {
 		neuronTooltip.style.display = 'none';
 	}
@@ -398,9 +447,20 @@ function updateBrain() {
 	BRAIN.update();
 	for (var postSynaptic in BRAIN.connectome) {
 		var psBox = document.getElementById(postSynaptic);
+		if (!psBox) continue;
 		var neuron = BRAIN.postSynaptic[postSynaptic][BRAIN.thisState];
-		psBox.style.backgroundColor = neuronColorMap[postSynaptic] || '#55FF55';
-		psBox.style.opacity = Math.min(1, neuron / 50);
+		var color = neuronColorMap[postSynaptic] || '#55FF55';
+		var baseOpacity = Math.min(1, neuron / 50);
+		var dots = neuronDotCache[postSynaptic];
+		if (!dots) continue;
+		for (var di = 0; di < dots.length; di++) {
+			var variation = (Math.random() - 0.5) * 0.6;
+			var dotOpacity = Math.max(0, Math.min(1, baseOpacity + variation * baseOpacity));
+			dots[di].style.backgroundColor = color;
+			dots[di].style.opacity = dotOpacity;
+			dots[di].style.boxShadow = dotOpacity > 0.5 ? '0 0 ' + Math.round(dotOpacity * 4) + 'px ' + color : 'none';
+		}
+		psBox.classList.toggle('cg-active', baseOpacity > 0.15);
 	}
 	// Evaluate behavioral state and compute movement
 	updateBehaviorState();
@@ -543,7 +603,7 @@ function handleCanvasMousedown(event) {
 
 	if (activeTool === 'feed') {
 		var foodMinY = 44;
-		var foodMaxY = window.innerHeight - 90;
+		var foodMaxY = window.innerHeight;
 		cy = Math.max(foodMinY, Math.min(foodMaxY, cy));
 		food.push({ x: cx, y: cy, radius: 10, feedStart: 0, feedDuration: 0 });
 	} else if (activeTool === 'touch') {
@@ -1570,7 +1630,7 @@ function update(dt) {
 	var edgeBias = 0;
 	var edgeBiasY = 0;
 	var topBound = 44;
-	var bottomBound = window.innerHeight - 90;
+	var bottomBound = window.innerHeight;
 	var leftBound = 0;
 	var rightBound = window.innerWidth;
 
@@ -1632,8 +1692,8 @@ function update(dt) {
 		fly.y = 44;
 		BRAIN.stimulate.touch = true;
 		touchResetTime = Math.max(touchResetTime, Date.now() + 2000);
-	} else if (fly.y > window.innerHeight - 90) {
-		fly.y = window.innerHeight - 90;
+	} else if (fly.y > window.innerHeight) {
+		fly.y = window.innerHeight;
 		BRAIN.stimulate.touch = true;
 		touchResetTime = Math.max(touchResetTime, Date.now() + 2000);
 	}
@@ -1745,11 +1805,11 @@ function draw() {
 	// near old edges don't become unreachable after window shrinks
 	for (var i = 0; i < food.length; i++) {
 		food[i].x = Math.max(0, Math.min(food[i].x, window.innerWidth));
-		food[i].y = Math.max(44, Math.min(food[i].y, window.innerHeight - 90));
+		food[i].y = Math.max(44, Math.min(food[i].y, window.innerHeight));
 	}
 	// Also re-clamp the fly position to the new bounds
 	fly.x = Math.max(0, Math.min(fly.x, window.innerWidth));
-	fly.y = Math.max(44, Math.min(fly.y, window.innerHeight - 90));
+	fly.y = Math.max(44, Math.min(fly.y, window.innerHeight));
 	window.addEventListener('resize', resize);
 })();
 

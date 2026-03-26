@@ -125,124 +125,123 @@
         _buildContent: function () {
             var html = '';
 
-            // Introduction
-            html += '<div class="edu-section">';
-            html += '<h2 class="edu-section-title">What is this?</h2>';
-            html += '<p class="edu-text">This is a simplified functional model of the Drosophila melanogaster (fruit fly) brain. The real fly brain contains approximately 130,000 neurons forming around 50 million synaptic connections. Our model compresses this into 59 functional neuron groups \u2014 clusters of neurons that work together for a specific purpose.</p>';
-            html += '<p class="edu-text">A connectome is a complete map of neural connections in a brain. The fly connectome was fully mapped by the FlyWire consortium in 2024, making Drosophila only the second organism (after C. elegans) with a complete wiring diagram.</p>';
-            html += '</div>';
+            // Intro blurb
+            html += '<p class="edu-text" style="margin-bottom:1rem;">A simplified functional model of the fruit fly brain. 59 neuron groups model ~130,000 real neurons mapped by FlyWire (2024).</p>';
 
-            // Region sections
-            for (var i = 0; i < EDUCATION_REGIONS.length; i++) {
-                var region = EDUCATION_REGIONS[i];
-                html += '<div class="edu-section">';
-                html += '<h2 class="edu-section-title"><span class="edu-region-link" data-region="' + region.name + '">' + region.name + '</span><span class="edu-type-badge edu-type-' + region.type + '">' + region.type + '</span></h2>';
-                html += '<p class="edu-text">' + region.explanation + '</p>';
-                html += '<p class="edu-analogy"><strong>Analogy:</strong> ' + region.analogy + '</p>';
-                html += '<p class="edu-interaction"><strong>Try it:</strong> ' + region.interaction + '</p>';
-                html += '<div class="edu-neuron-list"><strong>Neuron groups in our model:</strong>';
-                for (var j = 0; j < region.neurons.length; j++) {
-                    html += '<span class="edu-neuron-tag">' + region.neurons[j] + '</span>';
-                }
-                if (region.collectMNPrefix && typeof BRAIN !== 'undefined' && BRAIN.postSynaptic) {
-                    var keys = Object.keys(BRAIN.postSynaptic);
-                    for (var k = 0; k < keys.length; k++) {
-                        if (keys[k].indexOf('MN_') === 0 && region.neurons.indexOf(keys[k]) === -1) {
-                            html += '<span class="edu-neuron-tag">' + keys[k] + '</span>';
-                        }
-                    }
-                }
-                html += '</div>';
-                var eduPopTotal = 0;
-                var mnGroupCount = 0;
-                if (typeof neuronPopulations !== 'undefined') {
-                    for (var pi = 0; pi < region.neurons.length; pi++) {
-                        eduPopTotal += (neuronPopulations[region.neurons[pi]] || 0);
-                    }
-                    if (region.collectMNPrefix && typeof BRAIN !== 'undefined' && BRAIN.postSynaptic) {
-                        var mnKeys = Object.keys(BRAIN.postSynaptic);
-                        for (var mi = 0; mi < mnKeys.length; mi++) {
-                            if (mnKeys[mi].indexOf('MN_') === 0 && region.neurons.indexOf(mnKeys[mi]) === -1) {
-                                eduPopTotal += (neuronPopulations[mnKeys[mi]] || 0);
-                                mnGroupCount++;
-                            }
-                        }
-                    }
-                }
-                if (eduPopTotal > 0) {
-                    html += '<div class="edu-population">' + (region.neurons.length + mnGroupCount) + ' neuron groups representing ~' + eduPopTotal.toLocaleString() + ' real neurons</div>';
-                } else {
-                    html += '<div class="edu-population">' + region.populationEstimate + '</div>';
+            // Group regions by type for column layout
+            var types = [
+                { key: 'sensory', label: 'Sensory', color: '#3b82f6' },
+                { key: 'central', label: 'Central', color: '#8b5cf6' },
+                { key: 'drives', label: 'Drives', color: '#f59e0b' },
+                { key: 'motor', label: 'Motor', color: '#ef4444' }
+            ];
+
+            html += '<div class="edu-columns">';
+            for (var t = 0; t < types.length; t++) {
+                var type = types[t];
+                html += '<div class="edu-column">';
+                html += '<div class="edu-column-header edu-type-' + type.key + '">' + type.label + '</div>';
+                for (var i = 0; i < EDUCATION_REGIONS.length; i++) {
+                    var region = EDUCATION_REGIONS[i];
+                    if (region.type !== type.key) continue;
+                    html += '<div class="edu-region-card" data-region-id="' + region.id + '">';
+                    html += '<span class="edu-region-link" data-region="' + region.name + '">' + region.name + '</span>';
+                    html += '</div>';
                 }
                 html += '</div>';
             }
+            html += '</div>';
 
-            // Signal Flow section
-            html += '<div class="edu-section">';
+            // Signal flow diagram
+            html += '<div class="edu-section" style="margin-top:1rem;">';
             html += '<h2 class="edu-section-title">Signal Flow</h2>';
-            html += '<p class="edu-text">Information flows through the fly brain in a consistent pattern: sensory neurons detect the environment, central processing regions interpret and decide, and motor neurons execute the chosen behavior. Internal drives (hunger, fear, fatigue) bias the central processing, shifting which actions win.</p>';
             html += '<svg class="edu-signal-flow" viewBox="0 0 600 200" xmlns="http://www.w3.org/2000/svg">';
             html += '<defs>';
             html += '<marker id="edu-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8892a4"/></marker>';
             html += '<marker id="edu-arrow-drives" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#f59e0b"/></marker>';
             html += '</defs>';
-            // Sensory box
             html += '<rect x="20" y="60" width="140" height="80" rx="8" fill="rgba(59,130,246,0.2)" stroke="#3b82f6"/>';
-            html += '<text x="90" y="105" text-anchor="middle" fill="white" font-size="14">Sensory Input</text>';
-            // Central box
+            html += '<text x="90" y="105" text-anchor="middle" fill="white" font-size="14">Sensory</text>';
             html += '<rect x="230" y="40" width="140" height="120" rx="8" fill="rgba(139,92,246,0.2)" stroke="#8b5cf6"/>';
-            html += '<text x="300" y="105" text-anchor="middle" fill="white" font-size="14">Central Processing</text>';
-            // Motor box
+            html += '<text x="300" y="105" text-anchor="middle" fill="white" font-size="14">Central</text>';
             html += '<rect x="440" y="60" width="140" height="80" rx="8" fill="rgba(239,68,68,0.2)" stroke="#ef4444"/>';
-            html += '<text x="510" y="105" text-anchor="middle" fill="white" font-size="14">Motor Output</text>';
-            // Arrows
+            html += '<text x="510" y="105" text-anchor="middle" fill="white" font-size="14">Motor</text>';
             html += '<line x1="160" y1="100" x2="230" y2="100" stroke="#8892a4" stroke-width="2" marker-end="url(#edu-arrow)"/>';
             html += '<line x1="370" y1="100" x2="440" y2="100" stroke="#8892a4" stroke-width="2" marker-end="url(#edu-arrow)"/>';
-            // Drives box
             html += '<rect x="250" y="175" width="100" height="25" rx="4" fill="rgba(245,158,11,0.2)" stroke="#f59e0b"/>';
             html += '<text x="300" y="192" text-anchor="middle" fill="white" font-size="12">Drives</text>';
             html += '<line x1="300" y1="175" x2="300" y2="160" stroke="#f59e0b" stroke-dasharray="4,3" stroke-width="2" marker-end="url(#edu-arrow-drives)"/>';
-            // Labels
-            html += '<text x="90" y="155" text-anchor="middle" fill="#8892a4" font-size="10">Eyes, antennae, bristles</text>';
-            html += '<text x="300" y="25" text-anchor="middle" fill="#8892a4" font-size="10">Mushroom bodies, central complex</text>';
-            html += '<text x="510" y="155" text-anchor="middle" fill="#8892a4" font-size="10">Legs, wings, proboscis</text>';
             html += '</svg>';
             html += '</div>';
 
-            // What's Missing section
+            // Expandable region detail (populated on click)
+            html += '<div id="edu-detail" class="edu-detail-panel" style="display:none;"></div>';
+
+            // Compact reference sections
             html += '<div class="edu-section">';
-            html += '<h2 class="edu-section-title">What\'s Missing</h2>';
-            html += '<p class="edu-text">Our 59-group model is a dramatic simplification. Here\'s what we leave out:</p>';
+            html += '<h2 class="edu-section-title">What\'s Simplified</h2>';
             html += '<ul class="edu-list">';
-            html += '<li>Individual neuron dynamics \u2014 each of our groups represents hundreds or thousands of real neurons that fire independently</li>';
-            html += '<li>Synaptic plasticity \u2014 real synapses strengthen and weaken with use; our connection weights are fixed</li>';
-            html += '<li>Neuromodulator diffusion \u2014 chemicals like dopamine and serotonin diffuse broadly in the real brain, not just through direct connections</li>';
-            html += '<li>Electrical synapses (gap junctions) \u2014 our model only represents chemical synapses</li>';
-            html += '<li>Approximate connection weights \u2014 our weights are educated estimates, not exact counts from the connectome</li>';
+            html += '<li>Each group = hundreds/thousands of real neurons</li>';
+            html += '<li>Connection weights are estimates, not exact counts</li>';
+            html += '<li>No synaptic plasticity (weights are fixed)</li>';
+            html += '<li>No neuromodulator diffusion or gap junctions</li>';
             html += '</ul>';
             html += '</div>';
 
-            // Learn More section
             html += '<div class="edu-section">';
             html += '<h2 class="edu-section-title">Learn More</h2>';
             html += '<ul class="edu-links">';
-            html += '<li><a href="https://codex.flywire.ai" target="_blank" rel="noopener noreferrer">FlyWire Codex \u2014 Browse the complete fly connectome</a></li>';
-            html += '<li><a href="https://doi.org/10.1038/s41586-024-07558-y" target="_blank" rel="noopener noreferrer">Dorkenwald et al. 2024 \u2014 The paper describing the full connectome mapping</a></li>';
-            html += '<li><a href="https://www.virtualflybrain.org" target="_blank" rel="noopener noreferrer">Virtual Fly Brain \u2014 3D atlas and neuron database</a></li>';
-            html += '<li><a href="https://github.com/heyseth/worm-sim" target="_blank" rel="noopener noreferrer">worm-sim \u2014 The C. elegans project that inspired FlyBrain</a></li>';
+            html += '<li><a href="https://codex.flywire.ai" target="_blank" rel="noopener noreferrer">FlyWire Codex</a></li>';
+            html += '<li><a href="https://doi.org/10.1038/s41586-024-07558-y" target="_blank" rel="noopener noreferrer">Dorkenwald et al. 2024</a></li>';
+            html += '<li><a href="https://www.virtualflybrain.org" target="_blank" rel="noopener noreferrer">Virtual Fly Brain</a></li>';
             html += '</ul>';
             html += '</div>';
 
             EducationPanel._content.innerHTML = html;
 
-            // Delegated click listener for region links
-            EducationPanel._content.addEventListener('click', function (e) {
-                var target = e.target.classList.contains('edu-region-link') ? e.target : e.target.closest('.edu-region-link');
-                if (target) {
-                    var regionName = target.getAttribute('data-region');
-                    EducationPanel.highlightRegion(regionName);
+            // Bind click handlers on each region card
+            var cards = EducationPanel._content.querySelectorAll('.edu-region-card');
+            for (var ci = 0; ci < cards.length; ci++) {
+                (function (card) {
+                    card.addEventListener('click', function () {
+                        var regionId = card.getAttribute('data-region-id');
+                        for (var r = 0; r < EDUCATION_REGIONS.length; r++) {
+                            if (EDUCATION_REGIONS[r].id === regionId) {
+                                EducationPanel._showDetail(EDUCATION_REGIONS[r]);
+                                EducationPanel.highlightRegion(EDUCATION_REGIONS[r].name);
+                                break;
+                            }
+                        }
+                    });
+                })(cards[ci]);
+            }
+        },
+
+        _showDetail: function (region) {
+            var detail = document.getElementById('edu-detail');
+            if (!detail) return;
+            var html = '<div class="edu-section">';
+            html += '<h2 class="edu-section-title"><span class="edu-region-link" data-region="' + region.name + '">' + region.name + '</span><span class="edu-type-badge edu-type-' + region.type + '">' + region.type + '</span></h2>';
+            html += '<p class="edu-text">' + region.explanation + '</p>';
+            html += '<p class="edu-analogy"><strong>Analogy:</strong> ' + region.analogy + '</p>';
+            html += '<p class="edu-interaction"><strong>Try it:</strong> ' + region.interaction + '</p>';
+            html += '<div class="edu-neuron-list"><strong>Neuron groups:</strong>';
+            for (var j = 0; j < region.neurons.length; j++) {
+                html += '<span class="edu-neuron-tag">' + region.neurons[j] + '</span>';
+            }
+            if (region.collectMNPrefix && typeof BRAIN !== 'undefined' && BRAIN.postSynaptic) {
+                var keys = Object.keys(BRAIN.postSynaptic);
+                for (var k = 0; k < keys.length; k++) {
+                    if (keys[k].indexOf('MN_') === 0 && region.neurons.indexOf(keys[k]) === -1) {
+                        html += '<span class="edu-neuron-tag">' + keys[k] + '</span>';
+                    }
                 }
-            });
+            }
+            html += '</div>';
+            html += '<div class="edu-population">' + region.populationEstimate + '</div>';
+            html += '</div>';
+            detail.innerHTML = html;
+            detail.style.display = 'block';
         },
 
         highlightRegion: function (regionName) {
@@ -253,7 +252,7 @@
 
         show: function () {
             if (!EducationPanel._initialized) EducationPanel.init();
-            EducationPanel._panel.style.display = 'block';
+            EducationPanel._panel.style.display = 'flex';
             EducationPanel.active = true;
         },
 
