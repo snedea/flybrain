@@ -190,14 +190,17 @@ BRAIN.updateDrives = function () {
 	d.fear *= 0.85; // exponential decay
 
 	// Fatigue: increases when moving, decreases when resting
+	// In low light (< 0.3), fatigue accumulates faster (fly winds down in darkness)
 	if (BRAIN._isMoving) {
-		d.fatigue += 0.003;
+		var fatigueGain = BRAIN.stimulate.lightLevel < 0.3 ? 0.006 : 0.003;
+		d.fatigue += fatigueGain;
 	} else {
 		d.fatigue -= 0.01;
 	}
 
-	// Curiosity: random walk
-	d.curiosity += (Math.random() - 0.5) * 0.06;
+	// Curiosity: random walk (reduced range in low light -- less exploratory in darkness)
+	var curiosityRange = BRAIN.stimulate.lightLevel < 0.3 ? 0.02 : 0.06;
+	d.curiosity += (Math.random() - 0.5) * curiosityRange;
 
 	// Grooming urge: accumulates over time, spikes on touch, drops when grooming
 	d.groom += 0.008;
@@ -366,9 +369,10 @@ BRAIN.update = function () {
 	// fly brain), signals decay too fast. Inject tonic excitation
 	// into central processing nodes to maintain reverberant activity.
 	var tonicTargets = ['CX_FC', 'CX_EPG', 'CX_PFN'];
+	var tonicLevel = BRAIN.stimulate.lightLevel === 0 ? 4 : 8;
 	for (var t = 0; t < tonicTargets.length; t++) {
 		if (BRAIN.postSynaptic[tonicTargets[t]]) {
-			BRAIN.postSynaptic[tonicTargets[t]][BRAIN.nextState] += 8;
+			BRAIN.postSynaptic[tonicTargets[t]][BRAIN.nextState] += tonicLevel;
 		}
 	}
 

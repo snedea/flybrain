@@ -485,7 +485,8 @@ function evaluateBehaviorEntry() {
 		BRAIN.accumStartle < BEHAVIOR_THRESHOLDS.startle && !isCoolingDown('brace', now)) {
 		return 'brace';
 	}
-	if (BRAIN.drives.fatigue > BEHAVIOR_THRESHOLDS.restFatigue) {
+	var restThreshold = BRAIN.stimulate.lightLevel === 0 ? 0.4 : BEHAVIOR_THRESHOLDS.restFatigue;
+	if (BRAIN.drives.fatigue > restThreshold) {
 		return 'rest';
 	}
 	if (BRAIN.stimulate.lightLevel > BEHAVIOR_THRESHOLDS.phototaxisLight &&
@@ -1164,7 +1165,8 @@ function drawAntennae(t, dtScale) {
 	// Update antenna twitch targets periodically
 	if (t - anim.antennaTimer > anim.antennaNextInterval) {
 		anim.antennaTimer = t;
-		anim.antennaNextInterval = 0.8 + Math.random() * 1.2;
+		var antennaBase = 0.8 + Math.random() * 1.2;
+		anim.antennaNextInterval = BRAIN.stimulate.lightLevel === 0 ? antennaBase * 2 : antennaBase;
 		anim.antennaTargetL = (Math.random() - 0.5) * 0.4;
 		anim.antennaTargetR = (Math.random() - 0.5) * 0.4;
 	}
@@ -1336,8 +1338,8 @@ function drawLegs(state, dtScale) {
 			hipMod *= 1.1;
 			jitter = anim.legJitter[legIdx] * 0.1;
 		} else {
-			// idle / feed / default: normal idle jitter
-			jitter = anim.legJitter[legIdx];
+			// idle / feed / default: normal idle jitter (reduced 50% in complete darkness)
+			jitter = anim.legJitter[legIdx] * (BRAIN.stimulate.lightLevel === 0 ? 0.5 : 1.0);
 		}
 
 		// Compute hip and knee angles

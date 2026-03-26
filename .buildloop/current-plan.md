@@ -1,228 +1,182 @@
-# Plan: T5.1
+# Plan: T5.2
 
 ## Dependencies
-- list: [] (no new dependencies)
-- commands: [] (no install commands)
+- list: none
+- commands: none
 
 ## File Operations (in execution order)
 
 ### 1. MODIFY js/connectome.js
 - operation: MODIFY
-- reason: Add windDirection field to BRAIN.stimulate; remove Math.max(0.3, ...) floor from wind MECH_JO stimulation so weak wind produces less fear; reset windDirection on wind stimulus clear
+- reason: Add light-level-dependent drive modulation (fatigue, curiosity) and reduce tonic background activity in darkness
 
-#### Change A: Add windDirection to BRAIN.stimulate
-- anchor: `windStrength: 0,       // 0-1`
-- After the line `windStrength: 0,       // 0-1` (line 141), add a new field:
-  ```javascript
-  windDirection: 0,      // radians, direction wind is blowing FROM (math convention: 0=right, PI/2=up)
-  ```
+#### Change 1A: Light-dependent fatigue gain rate in BRAIN.updateDrives
+- anchor: `// Fatigue: increases when moving, decreases when resting`
+- This block currently reads (lines 192-197):
+```javascript
+	// Fatigue: increases when moving, decreases when resting
+	if (BRAIN._isMoving) {
+		d.fatigue += 0.003;
+	} else {
+		d.fatigue -= 0.01;
+	}
+```
 
-#### Change B: Remove windStrength floor in wind MECH_JO stimulation
-- anchor: `var windScale = Math.max(0.3, BRAIN.stimulate.windStrength);`
-- Replace line 328:
-  ```javascript
-  var windScale = Math.max(0.3, BRAIN.stimulate.windStrength);
-  ```
-  with:
-  ```javascript
-  var windScale = BRAIN.stimulate.windStrength;
-  ```
-  This makes weak wind produce proportionally less MECH_JO activation, so weak wind no longer triggers startle/fly.
+Replace the entire fatigue block with:
+```javascript
+	// Fatigue: increases when moving, decreases when resting
+	// In low light (< 0.3), fatigue accumulates faster (fly winds down in darkness)
+	if (BRAIN._isMoving) {
+		var fatigueGain = BRAIN.stimulate.lightLevel < 0.3 ? 0.006 : 0.003;
+		d.fatigue += fatigueGain;
+	} else {
+		d.fatigue -= 0.01;
+	}
+```
 
----
+Logic:
+1. Declare local variable `fatigueGain`
+2. If `BRAIN.stimulate.lightLevel < 0.3`, set `fatigueGain` to `0.006` (double the normal rate)
+3. Otherwise set `fatigueGain` to `0.003` (the existing normal rate)
+4. Add `fatigueGain` to `d.fatigue`
+5. The rest recovery (`d.fatigue -= 0.01`) remains unchanged
+
+#### Change 1B: Light-dependent curiosity bias in BRAIN.updateDrives
+- anchor: `// Curiosity: random walk`
+- This line currently reads (line 199-200):
+```javascript
+	// Curiosity: random walk
+	d.curiosity += (Math.random() - 0.5) * 0.06;
+```
+
+Replace with:
+```javascript
+	// Curiosity: random walk (reduced range in low light -- less exploratory in darkness)
+	var curiosityRange = BRAIN.stimulate.lightLevel < 0.3 ? 0.02 : 0.06;
+	d.curiosity += (Math.random() - 0.5) * curiosityRange;
+```
+
+Logic:
+1. Declare local variable `curiosityRange`
+2. If `BRAIN.stimulate.lightLevel < 0.3`, set `curiosityRange` to `0.02` (one-third of normal, making the fly less exploratory)
+3. Otherwise set `curiosityRange` to `0.06` (the existing value)
+4. Use `curiosityRange` as the multiplier instead of the hardcoded `0.06`
+
+#### Change 1C: Reduce tonic background activity in complete darkness
+- anchor: `var tonicTargets = ['CX_FC', 'CX_EPG', 'CX_PFN'];`
+- This block currently reads (lines 368-373):
+```javascript
+	var tonicTargets = ['CX_FC', 'CX_EPG', 'CX_PFN'];
+	for (var t = 0; t < tonicTargets.length; t++) {
+		if (BRAIN.postSynaptic[tonicTargets[t]]) {
+			BRAIN.postSynaptic[tonicTargets[t]][BRAIN.nextState] += 8;
+		}
+	}
+```
+
+Replace with:
+```javascript
+	var tonicTargets = ['CX_FC', 'CX_EPG', 'CX_PFN'];
+	var tonicLevel = BRAIN.stimulate.lightLevel === 0 ? 4 : 8;
+	for (var t = 0; t < tonicTargets.length; t++) {
+		if (BRAIN.postSynaptic[tonicTargets[t]]) {
+			BRAIN.postSynaptic[tonicTargets[t]][BRAIN.nextState] += tonicLevel;
+		}
+	}
+```
+
+Logic:
+1. After declaring `tonicTargets`, declare `var tonicLevel`
+2. If `BRAIN.stimulate.lightLevel === 0` (complete darkness), set `tonicLevel` to `4`
+3. Otherwise set `tonicLevel` to `8` (the existing value)
+4. Use `tonicLevel` in place of the hardcoded `8` on the line `BRAIN.postSynaptic[tonicTargets[t]][BRAIN.nextState] += 8;`
 
 ### 2. MODIFY js/main.js
 - operation: MODIFY
-- reason: Add wind-direction tracking in input handlers, add brace behavior state to state machine, add brace animation in drawLegs and wind-sensing in drawAntennae, reset windDirection in visibility handler and wind reset timer
+- reason: (a) Lower rest fatigue threshold in darkness, (b) add dark-mode antenna and leg animation changes
 
-#### Change A: Add windDirection computation to handleCanvasMousemove
-- anchor: `BRAIN.stimulate.windStrength = Math.min(1, dragDist / 150);` (line 366, inside handleCanvasMousemove)
-- After the line `BRAIN.stimulate.windStrength = Math.min(1, dragDist / 150);` and before the line `windArrowEnd = { x: event.clientX, y: event.clientY };`, insert:
-  ```javascript
-  BRAIN.stimulate.windDirection = Math.atan2(-(dy), dx);
-  ```
-  This computes wind direction in math convention (negated Y for canvas→math conversion, per known pattern #8). The direction represents where the wind is blowing FROM (drag start to cursor = wind flow direction).
+#### Change 2A: Lower rest fatigue threshold in darkness in evaluateBehaviorEntry
+- anchor: `if (BRAIN.drives.fatigue > BEHAVIOR_THRESHOLDS.restFatigue) {`
+- This line currently reads (line 488):
+```javascript
+	if (BRAIN.drives.fatigue > BEHAVIOR_THRESHOLDS.restFatigue) {
+```
 
-#### Change B: Add windDirection computation to handleCanvasMouseup
-- anchor: `BRAIN.stimulate.windStrength = Math.max(0.1, Math.min(1, 1 - distToFly / 200));` (line 378, short-drag case)
-- In the short-drag case (dragDist < 5), after the line `BRAIN.stimulate.windStrength = Math.max(0.1, Math.min(1, 1 - distToFly / 200));`, add:
-  ```javascript
-  BRAIN.stimulate.windDirection = Math.atan2(-(fly.y - event.clientY), fly.x - event.clientX);
-  ```
-  This computes wind direction as blowing from click point toward fly. Uses negated Y for canvas→math conversion.
+Replace with:
+```javascript
+	var restThreshold = BRAIN.stimulate.lightLevel === 0 ? 0.4 : BEHAVIOR_THRESHOLDS.restFatigue;
+	if (BRAIN.drives.fatigue > restThreshold) {
+```
 
-- anchor: `BRAIN.stimulate.windStrength = Math.min(1, dragDist / 150);` (line 380, long-drag case in handleCanvasMouseup)
-- In the long-drag case (else branch), after the line `BRAIN.stimulate.windStrength = Math.min(1, dragDist / 150);`, add:
-  ```javascript
-  BRAIN.stimulate.windDirection = Math.atan2(-(dy), dx);
-  ```
+Logic:
+1. Declare local variable `restThreshold`
+2. If `BRAIN.stimulate.lightLevel === 0` (complete darkness), set `restThreshold` to `0.4`
+3. Otherwise use `BEHAVIOR_THRESHOLDS.restFatigue` (which is `0.7`)
+4. Use `restThreshold` in the comparison instead of `BEHAVIOR_THRESHOLDS.restFatigue`
 
-#### Change C: Add windDirection to handleCanvasMousedown air tool init
-- anchor: `BRAIN.stimulate.windStrength = 0.3;` (line 355, inside handleCanvasMousedown air tool branch)
-- After the line `BRAIN.stimulate.windStrength = 0.3;`, add:
-  ```javascript
-  BRAIN.stimulate.windDirection = 0;
-  ```
-  Initializes windDirection to 0 at drag start; it will be updated by mousemove.
+#### Change 2B: Double antenna twitch interval in complete darkness in drawAntennae
+- anchor: `anim.antennaNextInterval = 0.8 + Math.random() * 1.2;` (the one inside the `if (t - anim.antennaTimer > anim.antennaNextInterval)` block, at line 1167)
+- This block currently reads (lines 1165-1169):
+```javascript
+	if (t - anim.antennaTimer > anim.antennaNextInterval) {
+		anim.antennaTimer = t;
+		anim.antennaNextInterval = 0.8 + Math.random() * 1.2;
+		anim.antennaTargetL = (Math.random() - 0.5) * 0.4;
+		anim.antennaTargetR = (Math.random() - 0.5) * 0.4;
+```
 
-#### Change D: Reset windDirection in tab-resume handler
-- anchor: `BRAIN.stimulate.windStrength = 0;` (line 257, inside visibilitychange handler)
-- After the line `BRAIN.stimulate.windStrength = 0;` (in the tab-resume else branch), add:
-  ```javascript
-  BRAIN.stimulate.windDirection = 0;
-  ```
+Replace with:
+```javascript
+	if (t - anim.antennaTimer > anim.antennaNextInterval) {
+		anim.antennaTimer = t;
+		var antennaBase = 0.8 + Math.random() * 1.2;
+		anim.antennaNextInterval = BRAIN.stimulate.lightLevel === 0 ? antennaBase * 2 : antennaBase;
+		anim.antennaTargetL = (Math.random() - 0.5) * 0.4;
+		anim.antennaTargetR = (Math.random() - 0.5) * 0.4;
+```
 
-#### Change E: Reset windDirection in wind reset timer
-- anchor: `BRAIN.stimulate.windStrength = 0;` (line 1483, inside windResetTime block)
-- After the line `BRAIN.stimulate.windStrength = 0;` (inside the `if (windResetTime > 0 && Date.now() >= windResetTime)` block), add:
-  ```javascript
-  BRAIN.stimulate.windDirection = 0;
-  ```
+Logic:
+1. Compute the base interval as before: `var antennaBase = 0.8 + Math.random() * 1.2`
+2. If `BRAIN.stimulate.lightLevel === 0`, double it: `antennaBase * 2` (sleepier, slower twitching)
+3. Otherwise use `antennaBase` as-is
+4. Assign the result to `anim.antennaNextInterval`
+5. The random roll happens once when the timer fires (pre-rolled pattern per Known Pattern #1), which is preserved
 
-#### Change F: Add brace to BEHAVIOR_MIN_DURATION
-- anchor: `startle: 800,` (line 57, last entry in BEHAVIOR_MIN_DURATION)
-- After the line `startle: 800,`, add:
-  ```javascript
-  brace: 500,
-  ```
+#### Change 2C: Reduce idle leg jitter intensity by 50% in complete darkness in drawLegs
+- anchor: `// idle / feed / default: normal idle jitter`
+- This block currently reads (lines 1338-1341):
+```javascript
+		} else {
+			// idle / feed / default: normal idle jitter
+			jitter = anim.legJitter[legIdx];
+		}
+```
 
-#### Change G: Add brace to BEHAVIOR_COOLDOWN
-- anchor: `feed: 1000,` (line 65, last entry in BEHAVIOR_COOLDOWN)
-- After the line `feed: 1000,`, add:
-  ```javascript
-  brace: 1000,
-  ```
+Replace with:
+```javascript
+		} else {
+			// idle / feed / default: normal idle jitter (reduced 50% in complete darkness)
+			jitter = anim.legJitter[legIdx] * (BRAIN.stimulate.lightLevel === 0 ? 0.5 : 1.0);
+		}
+```
 
-#### Change H: Insert brace into evaluateBehaviorEntry between groom and rest
-- anchor: lines 474-477 in evaluateBehaviorEntry:
-  ```javascript
-  	if (BRAIN.accumGroom > BEHAVIOR_THRESHOLDS.groom && !isCoolingDown('groom', now)) {
-  		return 'groom';
-  	}
-  	if (BRAIN.drives.fatigue > BEHAVIOR_THRESHOLDS.restFatigue) {
-  ```
-- After the closing `}` of the groom check (after `return 'groom'; }`) and before the `if (BRAIN.drives.fatigue > BEHAVIOR_THRESHOLDS.restFatigue) {` line, insert:
-  ```javascript
-  	if (BRAIN.stimulate.wind && BRAIN.stimulate.windStrength < 0.5 &&
-  		BRAIN.accumStartle < BEHAVIOR_THRESHOLDS.startle && !isCoolingDown('brace', now)) {
-  		return 'brace';
-  	}
-  ```
-  Entry condition: wind is active AND windStrength is below 0.5 (weak-to-moderate) AND startle threshold not reached AND not cooling down from previous brace.
-
-#### Change I: Add brace to syncBrainFlags as non-moving
-- anchor: `BRAIN._isMoving = (s === 'walk' || s === 'explore' || s === 'phototaxis' ||` (line 557)
-- No change needed to this line. The brace state is not in the moving list, so `BRAIN._isMoving` will be false for brace by default. This is correct — brace is non-moving.
-
-#### Change J: Add brace branch to computeMovementForBehavior
-- anchor: `} else if (state === 'groom' || state === 'rest') {` (line 638)
-- Replace the line:
-  ```javascript
-  	} else if (state === 'groom' || state === 'rest') {
-  ```
-  with:
-  ```javascript
-  	} else if (state === 'brace') {
-  		targetSpeed = 0;
-  		speedChangeInterval = -speed * 0.1;
-  		// Orient to face into the wind (toward wind source = windDirection + PI)
-  		var braceDir = normalizeAngle(BRAIN.stimulate.windDirection + Math.PI);
-  		var braceDiff = normalizeAngle(braceDir - targetDir);
-  		targetDir += braceDiff * 0.8;
-  		targetDir = normalizeAngle(targetDir);
-  	} else if (state === 'groom' || state === 'rest') {
-  ```
-  The fly faces into the wind source (windDirection + PI). Uses normalizeAngle for angle difference (per known pattern #9). The 0.8 blend factor provides a strong but not instant turn toward wind source. normalizeAngle on targetDir prevents unbounded growth (per known pattern #10).
-
-#### Change K: Add brace to applyBehaviorMovement speed-damping block
-- anchor: `if (behavior.current === 'groom' ||` (line 671)
-- Replace:
-  ```javascript
-  	if (behavior.current === 'groom' ||
-  		behavior.current === 'rest' || behavior.current === 'idle') {
-  ```
-  with:
-  ```javascript
-  	if (behavior.current === 'groom' ||
-  		behavior.current === 'rest' || behavior.current === 'idle' ||
-  		behavior.current === 'brace') {
-  ```
-
-#### Change L: Add isBracing flag and brace animation branch to drawLegs
-- anchor: `var isResting = (state === 'rest');` (line 1219)
-- After the line `var isResting = (state === 'rest');`, add:
-  ```javascript
-  	var isBracing = (state === 'brace');
-  ```
-
-- anchor: (in the if/else chain inside drawLegs, the else block at line 1299-1301):
-  ```javascript
-  	} else if (isResting) {
-  		// Slightly tucked with slow jitter
-  		hipMod *= 0.7;
-  		jitter = anim.legJitter[legIdx] * 0.3;
-  	} else {
-  ```
-- Insert a new branch between the isResting branch and the final else. Replace:
-  ```javascript
-  	} else if (isResting) {
-  		// Slightly tucked with slow jitter
-  		hipMod *= 0.7;
-  		jitter = anim.legJitter[legIdx] * 0.3;
-  	} else {
-  ```
-  with:
-  ```javascript
-  	} else if (isResting) {
-  		// Slightly tucked with slow jitter
-  		hipMod *= 0.7;
-  		jitter = anim.legJitter[legIdx] * 0.3;
-  	} else if (isBracing) {
-  		// Widened stance with suppressed jitter to show bracing
-  		hipMod *= 1.1;
-  		jitter = anim.legJitter[legIdx] * 0.1;
-  	} else {
-  ```
-
-#### Change M: Add wind-sensing antenna bias to drawAntennae
-- anchor: `var baseAngle = -Math.PI / 2 + side * 0.5 + twitch;` (line 1161, inside drawAntennae)
-- Replace:
-  ```javascript
-  		var baseAngle = -Math.PI / 2 + side * 0.5 + twitch;
-  ```
-  with:
-  ```javascript
-  		var baseAngle = -Math.PI / 2 + side * 0.5 + twitch;
-
-  		// Wind-sensing posture: bias antennae toward wind direction
-  		if (BRAIN.stimulate.wind || behavior.current === 'brace') {
-  			// Convert world-space windDirection to body-local frame.
-  			// The canvas transform is: rotate(-facingDir + PI/2), so body-local
-  			// "forward" (-Y in body space) corresponds to facingDir in world space.
-  			// Body-local angle of wind = windDirection - facingDir, then rotate by
-  			// PI/2 because body space has forward = -Y (up on canvas).
-  			var localWindAngle = normalizeAngle(BRAIN.stimulate.windDirection - facingDir + Math.PI / 2);
-  			// Blend antenna toward wind source with modest strength
-  			var windBias = normalizeAngle(localWindAngle - baseAngle) * 0.3;
-  			baseAngle += windBias;
-  		}
-  ```
-  This converts world-space windDirection to body-local coordinates accounting for the `ctx.rotate(-facingDir + Math.PI / 2)` transform. The 0.3 blend produces a subtle but visible antenna bias toward the wind direction.
+Logic:
+1. When in the default/idle branch, multiply `anim.legJitter[legIdx]` by `0.5` if `BRAIN.stimulate.lightLevel === 0`
+2. Otherwise multiply by `1.0` (no change)
+3. This only affects the idle/feed/default case. The resting and bracing cases already have their own jitter multipliers and are unaffected.
 
 ## Verification
-- build: N/A (no build step — pure browser JavaScript loaded via script tags)
-- lint: N/A (no linter configured)
-- test: N/A (no existing test suite)
-- smoke: Open index.html in a browser. Select the Air tool. (1) Click and release near the fly without dragging — verify weak wind causes the fly to brace (slow down, widen stance) and orient toward the wind source, not startle. (2) Click and drag a long distance — verify strong wind (long drag) causes startle/fly escape as before. (3) During brace, verify antennae visually bias toward the wind direction. (4) Verify that after 2 seconds the wind stimulus clears and the fly returns to idle. (5) Switch tabs and return — verify no stuck wind/brace state.
+- build: no build step (vanilla JS loaded via script tags)
+- lint: no linter configured
+- test: no existing tests
+- smoke: Open index.html in a browser. Click the Light toggle until it shows "Dark" (lightLevel = 0). Observe: (1) the fly should become less active and settle into rest state significantly sooner than in bright mode (fatigue threshold drops from 0.7 to 0.4), (2) antennae should twitch at roughly half the frequency compared to bright mode, (3) idle leg jitter should be visibly reduced, (4) toggling back to Bright should restore normal activity levels within a few brain ticks. Also test Dim mode (lightLevel = 0.5): verify the fatigue gain rate is doubled (lightLevel 0.5 >= 0.3 so it should NOT be doubled — only < 0.3 triggers it). Then test with lightLevel = 0 (Dark): curiosity should stabilize near its current value rather than fluctuating widely.
 
 ## Constraints
-- Do not modify js/constants.js (read-only weights)
-- Do not modify index.html or css/main.css (no UI changes needed for this task)
-- Do not add new files
-- Do not add new dependencies or build steps
-- Do not change the BRAIN.dendriteAccumulateScaled function signature
-- Do not modify the connectome weight values — only the scale parameter passed to dendriteAccumulateScaled for wind
-- When computing angles, always negate canvas Y (use `Math.atan2(-dy, dx)`) per known pattern #8
-- Always normalize angle differences to [-PI, PI] before blending per known pattern #9
-- Normalize targetDir after modification per known pattern #10
-- The brace behavior entry condition must check `BRAIN.stimulate.wind && BRAIN.stimulate.windStrength < 0.5 && BRAIN.accumStartle < BEHAVIOR_THRESHOLDS.startle && !isCoolingDown('brace', now)` — all four conditions are required
+- Do not modify SPEC.md, TASKS.md, CLAUDE.md, or any files in .buildloop/ other than current-plan.md
+- Do not add new files — all changes are within the two existing files js/connectome.js and js/main.js
+- Do not add any new dependencies or imports
+- Do not modify any behavior state machine logic beyond the restThreshold change in evaluateBehaviorEntry — the brace behavior, startle, fly, groom, feed, walk, explore, phototaxis states must remain unchanged
+- Do not change the BEHAVIOR_THRESHOLDS.restFatigue constant itself (0.7) — the darkness override is local to evaluateBehaviorEntry
+- Do not change the lightLevel values associated with the light toggle states (1, 0.5, 0) — those are existing UI state
+- Preserve the pre-rolled timer interval pattern (Known Pattern #1): the antenna interval is re-rolled only when the timer fires, not every frame. The dark-mode scaling must happen at re-roll time, not in the timer check condition
+- Use `=== 0` (strict equality) for complete darkness checks, and `< 0.3` (less-than comparison) for low-light checks, matching the thresholds specified in the task description
