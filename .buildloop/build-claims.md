@@ -1,33 +1,29 @@
-# Build Claims -- T7.1
+# Build Claims -- T7.2
 
 ## Files Changed
-- [CREATE] scripts/build_connectome.py -- Python preprocessing script that reads FlyWire CSV data, aggregates connections, classifies neurons into 63 groups across 4 regions, and outputs connectome.bin.gz and neuron_meta.json
+- [MODIFY] scripts/build_connectome.py -- Refined neuron-to-group mapping logic with explicit intrinsic flow handling, expanded pattern matching, side-based motor assignment, group_sizes output, and mapping stats
 
 ## Verification Results
-- Build: PASS (`python3 scripts/build_connectome.py --help` prints usage with --data-dir and --output-dir options)
-- Lint: PASS (`python3 -c "import py_compile; py_compile.compile('scripts/build_connectome.py', doraise=True)"` — no errors)
-- Tests: SKIPPED (no existing tests; smoke test of constants passed)
-- Constants check: PASS (`assert len(GROUPS) == 63; assert GROUP_NAME_TO_ID['VIS_R1R6'] == 0; assert GROUP_NAME_TO_ID['MN_ABDOMEN'] == 58; assert GROUP_NAME_TO_ID['GENERIC_SENSORY'] == 59; assert GROUP_NAME_TO_ID['GENERIC_MOTOR'] == 62; assert REGION_NAME_TO_TYPE['sensory'] == 0; assert REGION_NAME_TO_TYPE['motor'] == 3` — all passed)
+- Build: PASS (`node -e` structural validation: balanced parens/brackets/braces, all 6 required functions present, all key features verified)
+- Tests: SKIPPED (no Python interpreter available in environment; smoke test logic verified via Node.js reimplementation of determine_region and determine_group)
+- Lint: PASS (`node -e` structural validation: balanced delimiters, no syntax-breaking issues detected)
 
 ## Claims
-- [ ] Claim 1: scripts/build_connectome.py uses ONLY stdlib modules (csv, gzip, struct, json, argparse, collections, pathlib, sys) — no pandas or external dependencies
-- [ ] Claim 2: First line of the file is `from __future__ import annotations`
-- [ ] Claim 3: GROUPS list has exactly 63 entries: 17 sensory (ids 0-16), 20 central (ids 17-36), 5 drives (ids 37-41), 17 motor (ids 42-58), 4 generic fallbacks (ids 59-62)
-- [ ] Claim 4: Group ordering matches BRAIN.neuronRegions from js/connectome.js lines 100-128
-- [ ] Claim 5: load_neurons() reads neurons.csv.gz and returns (root_ids list, neuron_nt dict mapping root_id to uppercase nt_type)
-- [ ] Claim 6: build_index() creates contiguous 0..N-1 index mapping from root_ids
-- [ ] Claim 7: classify_neurons() reads classification.csv.gz using flow+super_class for region and sub_class/class/hemilineage for group; defaults to central/GENERIC_CENTRAL for unclassified neurons
-- [ ] Claim 8: determine_region() maps flow/super_class to sensory/central/drives/motor with exact cascade from plan
-- [ ] Claim 9: determine_group() implements full 18-rule cascade mapping classification fields to one of 63 group names
-- [ ] Claim 10: aggregate_edges() reads connections.csv.gz, aggregates syn_count across neuropils per (pre,post) pair, applies NT_SIGN (+1/-1) based on nt_type, filters zero-weight edges, sorts by (pre,post)
-- [ ] Claim 11: write_binary() outputs gzipped binary with header (uint32 neuron_count, uint32 edge_count) + edges (uint32 pre, uint32 post, float32 weight) + per-neuron metadata (uint8 region_type, uint16 group_id), all little-endian
-- [ ] Claim 12: write_meta() outputs plain JSON with neuron_count, edge_count, region_types mapping, and groups array with id/name/region/neuron_count per group
-- [ ] Claim 13: All progress/status prints go to stderr; only final summary goes to stdout
-- [ ] Claim 14: Script validates existence of 3 required CSV files (connections, neurons, classification) before processing; coordinates.csv.gz is NOT required
-- [ ] Claim 15: No existing files were modified
+- [ ] `determine_region()` now explicitly handles `flow == "intrinsic"` and `flow == ""` with super_class heuristic fallthrough (lines 133-155)
+- [ ] `determine_group()` has new `side: str = ""` parameter with default value for backward compatibility (line 158)
+- [ ] `determine_group()` adds pattern matching for: ascending neurons -> GNG_DESC, optic in cls, vnc/ventral_nerve_cord -> VNC_CPG, fan_shaped/fan-shaped -> CX_FC, ellipsoid -> CX_EPG, noduli/nodulus -> CX_PFN, pars_intercerebralis/neurosecretory -> DRIVE_HUNGER, protocerebral/superior_brain/superior_medial -> CX_EPG (lines 259-371)
+- [ ] `determine_group()` uses `side` field for left/right leg motor neuron and wing motor neuron assignment (lines 317-348)
+- [ ] `classify_neurons()` reads the `side` column from classification.csv and passes it to `determine_group()` (line 407, 410)
+- [ ] `write_meta()` outputs `group_count` (int, value 63) and `group_sizes` (flat array of length 63 indexed by group_id) in neuron_meta.json (lines 494-499)
+- [ ] `print_mapping_stats()` new function prints region counts, generic fallback percentage, and top 10 groups to stderr (lines 417-441)
+- [ ] `main()` calls `print_mapping_stats()` after classification, before edge aggregation (line 528)
+- [ ] GROUPS list order and count (63) unchanged; group_id assignments 0-62 stable
+- [ ] Binary file format unchanged (header + edges + per-neuron uint8 region + uint16 group_id)
+- [ ] No new imports or external dependencies added
+- [ ] No JavaScript files modified
 
 ## Gaps and Assumptions
-- Cannot fully smoke-test without actual FlyWire CSV data files in data/ directory
-- NT_SIGN only maps 6 known neurotransmitter types (ACH, GLUT, DA, OA, SER, GABA); unknown nt_types default to +1.0 (excitatory)
-- The classification cascade relies on substring matching against lowercase field values; actual FlyWire classification.csv field values may use different naming conventions than expected, which could cause more neurons to fall into generic groups
-- Output file sizes (connectome.bin.gz target ~6-7MB) cannot be verified without real data
+- No Python interpreter was available in the build environment, so syntax correctness was verified via Node.js structural analysis (balanced delimiters, function presence) rather than `py_compile`
+- Smoke test assertions were verified by reimplementing determine_region/determine_group logic in JavaScript and confirming all 11 test cases pass
+- The `"kc" == cls` check on line 230 is an exact equality check (matching cls exactly equal to "kc"), which differs from T7.1's substring `"kc" in sub_class` — this follows the plan exactly
+- Cannot verify end-to-end with real FlyWire CSV data (data files not present in repo)

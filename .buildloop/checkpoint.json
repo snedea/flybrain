@@ -1,6 +1,6 @@
 {
-  "task_id": "T7.1",
-  "task_desc": "Build Python preprocessing script (scripts/build_connectome.py) that reads the 4 CSV files from data/, aggregates connections across neuropils into a single sparse edge list, remaps root_ids to contiguous indices 0..139254, classifies each neuron into a functional region (sensory/central/drives/motor) using classification.csv flow+super_class fields, maps each neuron to one of the existing 59 behavioral groups using sub_class/class/hemilineage annotations (unmapped neurons get a generic group per region), and outputs two files: (1) connectome.bin.gz (~6-7MB target) with header (uint32 neuron_count, uint32 edge_count) + edges (uint32 pre, uint32 post, float32 weight derived from syn_count and nt_type sign) + per-neuron metadata (uint8 region_type, uint16 group_id), and (2) neuron_meta.json with group names, region assignments, and neuron count per group for the UI.",
+  "task_id": "T7.2",
+  "task_desc": "Define the mapping from 139K individual neurons to the 59 functional groups used by fly-logic.js. Use classification.csv fields: flow (sensory/intrinsic/motor) maps to region type, super_class+class maps to specific groups (e.g., class=visual -> VIS_*, class=olfactory -> OLF_*, class=kenyon_cell -> MB_KC). Write mapping logic in the preprocessing script. Output a lookup table in the binary file (uint16 group_id per neuron). The behavioral layer reads aggregated activation per group as before -- sum of fire states for all neurons in that group, normalized by group size.",
   "completed_stage": "builder",
-  "timestamp": "2026-03-26T23:18:07.582877+00:00"
+  "timestamp": "2026-03-26T23:25:42.938689+00:00"
 }

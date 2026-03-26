@@ -24,7 +24,7 @@ Data source: FlyWire Codex GCS bucket (public, no auth). Files in data/:
 
 ### T7.2: Neuron-to-Group Mapping
 
-- [ ] T7.2: Define the mapping from 139K individual neurons to the 59 functional groups used by fly-logic.js. Use classification.csv fields: flow (sensory/intrinsic/motor) maps to region type, super_class+class maps to specific groups (e.g., class=visual -> VIS_*, class=olfactory -> OLF_*, class=kenyon_cell -> MB_KC). Write mapping logic in the preprocessing script. Output a lookup table in the binary file (uint16 group_id per neuron). The behavioral layer reads aggregated activation per group as before -- sum of fire states for all neurons in that group, normalized by group size.
+- [x] T7.2: Define the mapping from 139K individual neurons to the 59 functional groups used by fly-logic.js. Use classification.csv fields: flow (sensory/intrinsic/motor) maps to region type, super_class+class maps to specific groups (e.g., class=visual -> VIS_*, class=olfactory -> OLF_*, class=kenyon_cell -> MB_KC). Write mapping logic in the preprocessing script. Output a lookup table in the binary file (uint16 group_id per neuron). The behavioral layer reads aggregated activation per group as before -- sum of fire states for all neurons in that group, normalized by group size. [-PI-]
 
 ### T7.3: LIF Simulation Engine (Web Worker)
 

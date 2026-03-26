@@ -136,6 +136,16 @@ def determine_region(flow: str, super_class: str) -> str:
         return "sensory"
     if flow == "motor":
         return "motor"
+    # FlyWire uses "intrinsic" for interneurons; these map to central or drives
+    if flow == "intrinsic" or flow == "":
+        if super_class.startswith("motor") or super_class == "motor":
+            return "motor"
+        if super_class.startswith("descending") or super_class == "descending":
+            return "motor"
+        if "endocrine" in super_class or "modulatory" in super_class:
+            return "drives"
+        return "central"
+    # flow not recognized — fall back to super_class heuristics
     if super_class.startswith("motor") or super_class == "motor":
         return "motor"
     if super_class.startswith("descending") or super_class == "descending":
@@ -145,10 +155,14 @@ def determine_region(flow: str, super_class: str) -> str:
     return "central"
 
 
-def determine_group(flow: str, super_class: str, cls: str, sub_class: str, region: str) -> str:
-    """Map classification fields to one of the 63 group names (59 named + 4 generic)."""
+def determine_group(flow: str, super_class: str, cls: str, sub_class: str, region: str, side: str = "") -> str:
+    """Map classification fields to one of the 63 group names (59 named + 4 generic).
+
+    Uses FlyWire classification.csv fields: flow, super_class, class, sub_class, side.
+    Priority: specific class matches first, then super_class fallbacks, then region generic.
+    """
     # Visual system
-    if "visual" in cls or "visual" in super_class or "optic" in super_class:
+    if "visual" in cls or "optic" in cls or "visual" in super_class or "optic" in super_class:
         if "r1" in sub_class or "r6" in sub_class:
             return "VIS_R1R6"
         if "r7" in sub_class or "r8" in sub_class:
@@ -157,12 +171,13 @@ def determine_group(flow: str, super_class: str, cls: str, sub_class: str, regio
             return "VIS_ME"
         if "lobula" in sub_class and "plate" in sub_class:
             return "VIS_LPTC"
+        if "lptc" in sub_class or "tangential" in sub_class:
+            return "VIS_LPTC"
         if "lc" in sub_class or "loom" in sub_class:
             return "VIS_LC"
         if "lobula" in sub_class or "lo" in sub_class:
             return "VIS_LO"
-        if "lptc" in sub_class or "tangential" in sub_class:
-            return "VIS_LPTC"
+        # Default visual neuron to medulla (largest visual processing area)
         return "VIS_ME"
 
     # Olfactory system
@@ -211,13 +226,15 @@ def determine_group(flow: str, super_class: str, cls: str, sub_class: str, regio
     if "nocicep" in cls or "nocicep" in super_class:
         return "NOCI"
 
-    # Mushroom body
-    if "kenyon" in cls or "kenyon" in sub_class or "kc" in sub_class:
+    # Mushroom body — Kenyon cells
+    if "kenyon" in cls or "kenyon" in sub_class or "kc" == cls or ("kc" in sub_class and "kc" != "back"):
         return "MB_KC"
+
+    # Mushroom body — other types
     if "mushroom" in cls or "mushroom" in super_class:
         if "apl" in sub_class:
             return "MB_APL"
-        if "mbon" in sub_class:
+        if "mbon" in sub_class or "output" in cls:
             if "avers" in sub_class or "avoid" in sub_class:
                 return "MB_MBON_AV"
             return "MB_MBON_APP"
@@ -234,13 +251,25 @@ def determine_group(flow: str, super_class: str, cls: str, sub_class: str, regio
         return "MB_DAN_REW"
 
     # Lateral horn
-    if "lateral_horn" in cls or "lateral horn" in cls or "lateral horn" in super_class:
+    if "lateral_horn" in cls or "lateral horn" in cls or "lateral_horn" in super_class or "lateral horn" in super_class:
         if "avers" in sub_class or "avoid" in sub_class:
             return "LH_AV"
         return "LH_APP"
 
-    # Central complex
-    if "central_complex" in cls or "central complex" in cls or "central complex" in super_class:
+    # Central complex — fan-shaped body
+    if "fan_shaped" in cls or "fan-shaped" in cls or "fan_shaped" in sub_class:
+        return "CX_FC"
+
+    # Central complex — ellipsoid body
+    if "ellipsoid" in cls or "ellipsoid" in sub_class:
+        return "CX_EPG"
+
+    # Central complex — noduli
+    if "noduli" in cls or "noduli" in sub_class or "nodulus" in sub_class:
+        return "CX_PFN"
+
+    # Central complex — general
+    if "central_complex" in cls or "central complex" in cls or "central_complex" in super_class or "central complex" in super_class:
         if "epg" in sub_class or "compass" in sub_class:
             return "CX_EPG"
         if "pfn" in sub_class or "path" in sub_class:
@@ -252,7 +281,7 @@ def determine_group(flow: str, super_class: str, cls: str, sub_class: str, regio
         return "CX_EPG"
 
     # SEZ/feeding/grooming
-    if "subesophageal" in cls or "sez" in super_class:
+    if "subesophageal" in cls or "sez" in cls or "sez" in super_class:
         if "feed" in sub_class:
             return "SEZ_FEED"
         if "groom" in sub_class:
@@ -260,6 +289,10 @@ def determine_group(flow: str, super_class: str, cls: str, sub_class: str, regio
         if "water" in sub_class:
             return "SEZ_WATER"
         return "SEZ_FEED"
+
+    # Ascending neurons
+    if "ascending" in cls or "ascending" in super_class:
+        return "GNG_DESC"
 
     # Descending neurons
     if "descend" in cls or "descend" in super_class:
@@ -275,26 +308,42 @@ def determine_group(flow: str, super_class: str, cls: str, sub_class: str, regio
             return "DN_STARTLE"
         return "GNG_DESC"
 
+    # VNC / ventral nerve cord interneurons
+    if "vnc" in cls or "ventral_nerve_cord" in cls or "vnc" in super_class:
+        return "VNC_CPG"
+
     # Motor neurons
     if "motor" in cls or "motor" in super_class:
         if "leg" in sub_class:
-            if "l1" in sub_class or ("front" in sub_class and "left" in sub_class):
+            # Use side field for left/right assignment when available
+            is_left = "left" in side or "_l" in side
+            is_right = "right" in side or "_r" in side
+            if "l1" in sub_class or "t1" in sub_class or "front" in sub_class:
+                if is_right:
+                    return "MN_LEG_R1"
                 return "MN_LEG_L1"
-            if "r1" in sub_class or ("front" in sub_class and "right" in sub_class):
+            if "r1" in sub_class:
                 return "MN_LEG_R1"
-            if "l2" in sub_class or ("mid" in sub_class and "left" in sub_class):
+            if "l2" in sub_class or "t2" in sub_class or "mid" in sub_class:
+                if is_right:
+                    return "MN_LEG_R2"
                 return "MN_LEG_L2"
-            if "r2" in sub_class or ("mid" in sub_class and "right" in sub_class):
+            if "r2" in sub_class:
                 return "MN_LEG_R2"
-            if "l3" in sub_class or ("hind" in sub_class and "left" in sub_class):
+            if "l3" in sub_class or "t3" in sub_class or "hind" in sub_class:
+                if is_right:
+                    return "MN_LEG_R3"
                 return "MN_LEG_L3"
-            if "r3" in sub_class or ("hind" in sub_class and "right" in sub_class):
+            if "r3" in sub_class:
                 return "MN_LEG_R3"
-            return "MN_LEG_L1"
-        if "wing" in sub_class:
-            if "left" in sub_class or "_l" in sub_class:
-                return "MN_WING_L"
-            if "right" in sub_class or "_r" in sub_class:
+            # No segment info: use side to distribute evenly
+            if is_right:
+                return "MN_LEG_R2"
+            return "MN_LEG_L2"
+        if "wing" in sub_class or "flight" in sub_class:
+            is_left = "left" in side or "_l" in side
+            is_right = "right" in side or "_r" in side
+            if is_right:
                 return "MN_WING_R"
             return "MN_WING_L"
         if "proboscis" in sub_class:
@@ -306,12 +355,20 @@ def determine_group(flow: str, super_class: str, cls: str, sub_class: str, regio
         return "VNC_CPG"
 
     # Clock neurons
-    if "clock" in cls or "clock" in sub_class or "circadian" in sub_class:
+    if "clock" in cls or "clock" in sub_class or "circadian" in cls or "circadian" in sub_class:
         return "CLOCK_DN"
 
-    # GNG
+    # GNG (gnathal ganglia)
     if "gnathal" in cls or "gnathal" in super_class:
         return "GNG_DESC"
+
+    # Pars intercerebralis / neurosecretory (neuromodulatory neurons mapping to drives)
+    if "pars_intercerebralis" in cls or "neurosecretory" in cls or "median_neurosecretory" in sub_class:
+        return "DRIVE_HUNGER"
+
+    # Superior brain / protocerebral neurons without more specific classification
+    if "protocerebral" in cls or "superior_brain" in cls or "superior_medial" in cls:
+        return "CX_EPG"
 
     # Drives (neuromodulatory neurons)
     if region == "drives":
@@ -347,13 +404,41 @@ def classify_neurons(path: Path, root_ids: list[str], id_to_index: dict[str, int
             super_class = row.get("super_class", "").strip().lower()
             cls = row.get("class", "").strip().lower()
             sub_class = row.get("sub_class", "").strip().lower()
+            side = row.get("side", "").strip().lower()
             region = determine_region(flow, super_class)
             neuron_region[idx] = REGION_NAME_TO_TYPE[region]
-            group_name = determine_group(flow, super_class, cls, sub_class, region)
+            group_name = determine_group(flow, super_class, cls, sub_class, region, side)
             neuron_group[idx] = GROUP_NAME_TO_ID[group_name]
             count += 1
     print(f"Classified {count} neurons from {path}", file=sys.stderr)
     return (neuron_region, neuron_group)
+
+
+def print_mapping_stats(neuron_count: int, neuron_region: list[int], neuron_group: list[int]) -> None:
+    """Print mapping quality statistics to stderr."""
+    region_names = {0: "sensory", 1: "central", 2: "drives", 3: "motor"}
+    region_counts: dict[int, int] = defaultdict(int)
+    group_counts: dict[int, int] = defaultdict(int)
+    for i in range(neuron_count):
+        region_counts[neuron_region[i]] += 1
+        group_counts[neuron_group[i]] += 1
+
+    print("\n=== Mapping Statistics ===", file=sys.stderr)
+    print(f"Total neurons: {neuron_count}", file=sys.stderr)
+    for rt, name in sorted(region_names.items()):
+        print(f"  {name}: {region_counts.get(rt, 0)}", file=sys.stderr)
+
+    generic_total = 0
+    for gid in [GENERIC_GROUP["sensory"], GENERIC_GROUP["central"], GENERIC_GROUP["drives"], GENERIC_GROUP["motor"]]:
+        generic_total += group_counts.get(gid, 0)
+    print(f"Generic fallback neurons: {generic_total} ({100.0 * generic_total / neuron_count:.1f}%)", file=sys.stderr)
+
+    print("Top 10 groups by neuron count:", file=sys.stderr)
+    sorted_groups = sorted(group_counts.items(), key=lambda x: x[1], reverse=True)
+    for gid, count in sorted_groups[:10]:
+        name = GROUPS[gid][0]
+        print(f"  {name}: {count}", file=sys.stderr)
+    print("=========================\n", file=sys.stderr)
 
 
 def aggregate_edges(path: Path, id_to_index: dict[str, int], neuron_nt: dict[str, str]) -> list[tuple[int, int, float]]:
@@ -397,17 +482,22 @@ def write_binary(path: Path, neuron_count: int, edges: list[tuple[int, int, floa
 
 
 def write_meta(path: Path, neuron_count: int, edge_count: int, neuron_region: list[int], neuron_group: list[int]) -> None:
-    """Write neuron_meta.json with group names, region assignments, and neuron counts."""
+    """Write neuron_meta.json with group names, region assignments, neuron counts, and flat group_sizes array."""
     group_counts: dict[int, int] = defaultdict(int)
     for i in range(neuron_count):
         group_counts[neuron_group[i]] += 1
     groups = []
     for gid, (name, region) in enumerate(GROUPS):
         groups.append({"id": gid, "name": name, "region": region, "neuron_count": group_counts.get(gid, 0)})
+    # Flat array indexed by group_id for efficient JS-side aggregation:
+    # groupActivation[g] = sum(fireState[i] for i where groupId[i]==g) / group_sizes[g]
+    group_sizes = [group_counts.get(gid, 0) for gid in range(len(GROUPS))]
     meta = {
         "neuron_count": neuron_count,
         "edge_count": edge_count,
         "region_types": {"sensory": 0, "central": 1, "drives": 2, "motor": 3},
+        "group_count": len(GROUPS),
+        "group_sizes": group_sizes,
         "groups": groups,
     }
     with open(path, "w", encoding="utf-8") as f:
@@ -435,6 +525,7 @@ def main() -> None:
     root_ids, neuron_nt = load_neurons(args.data_dir / "neurons.csv.gz")
     id_to_index = build_index(root_ids)
     neuron_region, neuron_group = classify_neurons(args.data_dir / "classification.csv.gz", root_ids, id_to_index)
+    print_mapping_stats(len(root_ids), neuron_region, neuron_group)
     edges = aggregate_edges(args.data_dir / "connections.csv.gz", id_to_index, neuron_nt)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
