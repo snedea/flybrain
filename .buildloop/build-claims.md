@@ -1,23 +1,25 @@
-# Build Claims -- D20.1
+# Build Claims -- D21.1
 
 ## Files Changed
-- MODIFY js/brain3d.js -- Added _onMouseLeave handler and mouseleave listener registration in show()/removal in hide() to fix ghost tooltip
-- MODIFY js/main.js -- Added brain3d-overlay to education panel outside-click exclusion check
+- MODIFY js/brain3d.js -- Fix WebGL init failure leaving unrecoverable empty overlay and add null guards to hide()
 
 ## Verification Results
-- Build: SKIPPED (vanilla JS, no build step)
+- Build: PASS (no build step — vanilla JS loaded via script tags)
 - Tests: SKIPPED (no existing tests)
 - Lint: SKIPPED (no linter configured)
 
 ## Claims
-- [ ] Claim 1: Brain3D object has a new named `_onMouseLeave` method (line 420-422) that sets `Brain3D._tooltipEl.style.display = 'none'`
-- [ ] Claim 2: `Brain3D.show()` (line 277) registers a `mouseleave` event listener on `Brain3D._renderer.domElement` using `Brain3D._onMouseLeave`
-- [ ] Claim 3: `Brain3D.hide()` (line 284) removes the `mouseleave` event listener from `Brain3D._renderer.domElement` using `Brain3D._onMouseLeave`
-- [ ] Claim 4: The education panel document click handler in main.js (line 370-371) now gets the `brain3d-overlay` element and checks `(!brain3dOverlay || !brain3dOverlay.contains(e.target))` before closing the education panel
-- [ ] Claim 5: Clicks/drags on the brain3d canvas no longer close the education panel because the click target is inside brain3d-overlay
-- [ ] Claim 6: The tooltip disappears when the mouse leaves the 3D canvas area (mouseleave fires on renderer.domElement)
-- [ ] Claim 7: No other files were modified; no new dependencies added; existing mousemove listener in init() unchanged
+- [ ] Claim 1: `_initFailed: false` property added to Brain3D object literal at line 137, immediately after `_animFrameId: null,`
+- [ ] Claim 2: `Brain3D._initFailed = true;` is set in the init() catch block (line 182), before `_initialized = false`, so that once WebGL init fails, the flag is permanently set
+- [ ] Claim 3: show() checks `Brain3D._initFailed` as its first guard (line 269) and returns immediately without setting container display to 'block', preventing infinite retry loop on devices without WebGL
+- [ ] Claim 4: show() resets `Brain3D._container.style.display = 'none'` (line 275) when init() fails (!_initialized after init call), preventing the empty overlay from covering the main canvas
+- [ ] Claim 5: hide() guards `Brain3D._renderer.domElement` access with `if (Brain3D._renderer)` (line 290)
+- [ ] Claim 6: hide() guards `Brain3D._container.style` access with `if (Brain3D._container)` (line 293)
+- [ ] Claim 7: hide() guards `Brain3D._tooltipEl.style` access with `if (Brain3D._tooltipEl)` (line 297)
+- [ ] Claim 8: Known Pattern #6 preserved — container display is still set to 'block' BEFORE init() is called (line 272), so init() can read DOM dimensions
+- [ ] Claim 9: No other functions modified — init() (except catch block), _buildRegions(), update(), toggle(), _renderLoop(), highlightRegion(), _onMouseMove(), _onMouseLeave(), _onResize() are all unchanged
+- [ ] Claim 10: No new dependencies or script tags added
 
 ## Gaps and Assumptions
-- No automated tests exist; verification is manual browser smoke testing only
-- The mouseleave event may not fire if the mouse moves very quickly off-screen on some older browsers, but this is standard DOM behavior and acceptable
+- Smoke testing (browser-based) cannot be performed in this CLI environment; all changes are verified by code review against the plan
+- The _initFailed flag is permanent — once set, the only recovery is a page refresh (this matches the plan's intent)

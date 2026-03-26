@@ -1,4 +1,4 @@
-# Plan: D20.1
+# Plan: D21.1
 
 ## Dependencies
 - list: []
@@ -8,71 +8,150 @@
 
 ### 1. MODIFY js/brain3d.js
 - operation: MODIFY
-- reason: Add mouseleave handler to hide tooltip when cursor leaves the 3D canvas, fixing the ghost tooltip bug
+- reason: Fix WebGL init failure leaving unrecoverable empty overlay, and add null guards to hide()
 
-#### Change A: Add a named _onMouseLeave handler to the Brain3D object
+#### Change A: Add `_initFailed` property to the Brain3D object literal
+- anchor: `_animFrameId: null,`
 
-- anchor: `_onResize: function () {`
-- location: Immediately BEFORE the `_onResize` property definition (insert a new property above it in the Brain3D object literal)
+Add a new property `_initFailed: false,` immediately after the `_animFrameId: null,` line (before the blank line preceding `init: function`).
 
-Add this new property to the Brain3D object:
+**Exact edit:** Replace:
+```
+    _animFrameId: null,
 
-```js
-_onMouseLeave: function () {
-    Brain3D._tooltipEl.style.display = 'none';
-},
+    init: function () {
+```
+With:
+```
+    _animFrameId: null,
+    _initFailed: false,
+
+    init: function () {
 ```
 
-Exact insertion: Place `_onMouseLeave: function () { ... },` on new lines directly before the line `_onResize: function () {`.
+#### Change B: Set `_initFailed = true` in the init() catch block
+- anchor: `console.warn('Brain3D: WebGL not available', e);`
 
-#### Change B: Add mouseleave listener in show()
+In the catch block (lines 179-183), add `Brain3D._initFailed = true;` after the console.warn line and before the `Brain3D._initialized = false;` line.
 
-- anchor: `window.addEventListener('resize', Brain3D._onResize);` (inside the `show` function, line 276)
-- location: Immediately AFTER that line, add one new line:
-
-```js
-Brain3D._renderer.domElement.addEventListener('mouseleave', Brain3D._onMouseLeave);
+**Exact edit:** Replace:
+```
+        } catch (e) {
+            console.warn('Brain3D: WebGL not available', e);
+            Brain3D._initialized = false;
+            return;
+        }
+```
+With:
+```
+        } catch (e) {
+            console.warn('Brain3D: WebGL not available', e);
+            Brain3D._initFailed = true;
+            Brain3D._initialized = false;
+            return;
+        }
 ```
 
-#### Change C: Remove mouseleave listener in hide()
+#### Change C: Guard show() against _initFailed and fix container display on init failure
+- anchor: `show: function () {`
 
-- anchor: `window.removeEventListener('resize', Brain3D._onResize);` (inside the `hide` function, line 282)
-- location: Immediately AFTER that line, add one new line:
+Replace the entire `show` function body. The new logic:
+1. If `_initFailed` is true, return immediately (do not set display to block, do not retry init).
+2. If not initialized, get container, set display to block (needed for init to read DOM dimensions per Known Pattern #6), call init(). If init fails (!_initialized), reset container display to 'none' and return.
+3. If already initialized, set display to block.
+4. Rest of function unchanged.
 
-```js
-Brain3D._renderer.domElement.removeEventListener('mouseleave', Brain3D._onMouseLeave);
+**Exact edit:** Replace:
+```
+    show: function () {
+        if (!Brain3D._initialized) {
+            Brain3D._container = document.getElementById('brain3d-overlay');
+            Brain3D._container.style.display = 'block';
+            Brain3D.init();
+            if (!Brain3D._initialized) return;
+        } else {
+            Brain3D._container.style.display = 'block';
+        }
+        Brain3D.active = true;
+        window.addEventListener('resize', Brain3D._onResize);
+        Brain3D._renderer.domElement.addEventListener('mouseleave', Brain3D._onMouseLeave);
+        Brain3D._onResize();
+        Brain3D._renderLoop();
+    },
+```
+With:
+```
+    show: function () {
+        if (Brain3D._initFailed) return;
+        if (!Brain3D._initialized) {
+            Brain3D._container = document.getElementById('brain3d-overlay');
+            Brain3D._container.style.display = 'block';
+            Brain3D.init();
+            if (!Brain3D._initialized) {
+                Brain3D._container.style.display = 'none';
+                return;
+            }
+        } else {
+            Brain3D._container.style.display = 'block';
+        }
+        Brain3D.active = true;
+        window.addEventListener('resize', Brain3D._onResize);
+        Brain3D._renderer.domElement.addEventListener('mouseleave', Brain3D._onMouseLeave);
+        Brain3D._onResize();
+        Brain3D._renderLoop();
+    },
 ```
 
-### 2. MODIFY js/main.js
-- operation: MODIFY
-- reason: Add brain3d-overlay to the education panel outside-click exclusion check so clicking/dragging on the 3D brain canvas does not close the education panel
+#### Change D: Add null guards to hide()
+- anchor: `hide: function () {`
 
-#### Change A: Expand the exclusion check in the education panel document click handler
+Replace the entire `hide` function body. Every property access on `_renderer`, `_container`, and `_tooltipEl` must be guarded with an `if` check.
 
-- anchor: `if (panel && !panel.contains(e.target) && e.target !== learnBtnEl) {` (line 370)
-- Replace this exact line with:
-
-```js
-        var brain3dOverlay = document.getElementById('brain3d-overlay');
-        if (panel && !panel.contains(e.target) && e.target !== learnBtnEl && (!brain3dOverlay || !brain3dOverlay.contains(e.target))) {
+**Exact edit:** Replace:
 ```
-
-This adds two new conditions to the if-check:
-1. `!brain3dOverlay` — if the element doesn't exist, the check is skipped (safe fallback)
-2. `!brain3dOverlay.contains(e.target)` — if the click target is inside the brain3d-overlay (including the canvas, any child elements), the education panel stays open
-
-The `brain3dOverlay` variable is declared on the line before the if-statement so the if-line does not become excessively long. The indentation must match the existing code (8 spaces for the var, 8 spaces for the if).
+    hide: function () {
+        window.removeEventListener('resize', Brain3D._onResize);
+        Brain3D._renderer.domElement.removeEventListener('mouseleave', Brain3D._onMouseLeave);
+        Brain3D._container.style.display = 'none';
+        Brain3D.active = false;
+        Brain3D._tooltipEl.style.display = 'none';
+        if (Brain3D._animFrameId !== null) {
+            cancelAnimationFrame(Brain3D._animFrameId);
+            Brain3D._animFrameId = null;
+        }
+    },
+```
+With:
+```
+    hide: function () {
+        window.removeEventListener('resize', Brain3D._onResize);
+        if (Brain3D._renderer) {
+            Brain3D._renderer.domElement.removeEventListener('mouseleave', Brain3D._onMouseLeave);
+        }
+        if (Brain3D._container) {
+            Brain3D._container.style.display = 'none';
+        }
+        Brain3D.active = false;
+        if (Brain3D._tooltipEl) {
+            Brain3D._tooltipEl.style.display = 'none';
+        }
+        if (Brain3D._animFrameId !== null) {
+            cancelAnimationFrame(Brain3D._animFrameId);
+            Brain3D._animFrameId = null;
+        }
+    },
+```
 
 ## Verification
-- build: No build step — vanilla JS loaded via script tags
-- lint: No linter configured
-- test: No existing tests
-- smoke: Open index.html in a browser. (1) Click "Brain 3D" to open the 3D overlay. Hover over a brain region to see the tooltip. Move the mouse off the canvas to the toolbar or outside the browser window — the tooltip must disappear immediately. Move back over the canvas and hover a region — tooltip reappears. (2) Click "Learn" to open the education panel. Click on the 3D brain canvas and drag to rotate — the education panel must stay open. Click a region name in the education panel to highlight it in 3D — the education panel must stay open. Click on an area outside both panels (e.g., the toolbar background) — the education panel should close.
+- build: no build step (vanilla JS loaded via script tags)
+- lint: no linter configured
+- test: no existing tests
+- smoke: Open index.html in a browser. (1) Click the "Brain 3D" button — the 3D brain overlay should appear and be interactive. Click again to toggle off. This confirms the normal path still works. (2) To test the WebGL failure path: temporarily add `throw new Error('test')` as the first line inside the `try` block of `init()` (line 143, before `Brain3D._scene = new THREE.Scene();`), then click "Brain 3D" — the overlay should NOT appear (container stays display:none), and clicking the button again should not retry init or show the overlay. Remove the temporary throw after testing. (3) To test hide() null guards: open browser console and run `Brain3D.hide()` before ever opening the 3D panel — it should not throw any TypeError.
 
 ## Constraints
-- Do NOT modify any files other than js/brain3d.js and js/main.js
-- Do NOT move the existing mousemove listener registration from init() — it stays in init() at line 176
+- Do NOT modify any file other than js/brain3d.js
 - Do NOT modify SPEC.md, TASKS.md, CLAUDE.md, or any file in .buildloop/ other than current-plan.md
-- Do NOT add any new dependencies or CDN scripts
-- Do NOT refactor or rename existing functions — only add the new handler and modify the existing if-condition
-- The _onMouseLeave handler must be a named method on Brain3D (not an anonymous function) so it can be properly added and removed via addEventListener/removeEventListener
+- Do NOT add any new dependencies or script tags
+- Do NOT change the structure or order of properties in the Brain3D object beyond adding `_initFailed`
+- Do NOT modify init(), _buildRegions(), update(), toggle(), _renderLoop(), highlightRegion(), _onMouseMove(), _onMouseLeave(), or _onResize() (except the catch block inside init())
+- Preserve the Known Pattern #6 behavior: container display is set to 'block' BEFORE init() so init() can read DOM dimensions

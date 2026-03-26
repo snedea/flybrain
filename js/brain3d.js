@@ -134,6 +134,7 @@ window.Brain3D = {
     _container: null,
     _tooltipEl: null,
     _animFrameId: null,
+    _initFailed: false,
 
     init: function () {
         if (Brain3D._initialized) return;
@@ -178,6 +179,7 @@ window.Brain3D = {
             Brain3D._initialized = true;
         } catch (e) {
             console.warn('Brain3D: WebGL not available', e);
+            Brain3D._initFailed = true;
             Brain3D._initialized = false;
             return;
         }
@@ -264,11 +266,15 @@ window.Brain3D = {
     },
 
     show: function () {
+        if (Brain3D._initFailed) return;
         if (!Brain3D._initialized) {
             Brain3D._container = document.getElementById('brain3d-overlay');
             Brain3D._container.style.display = 'block';
             Brain3D.init();
-            if (!Brain3D._initialized) return;
+            if (!Brain3D._initialized) {
+                Brain3D._container.style.display = 'none';
+                return;
+            }
         } else {
             Brain3D._container.style.display = 'block';
         }
@@ -281,10 +287,16 @@ window.Brain3D = {
 
     hide: function () {
         window.removeEventListener('resize', Brain3D._onResize);
-        Brain3D._renderer.domElement.removeEventListener('mouseleave', Brain3D._onMouseLeave);
-        Brain3D._container.style.display = 'none';
+        if (Brain3D._renderer) {
+            Brain3D._renderer.domElement.removeEventListener('mouseleave', Brain3D._onMouseLeave);
+        }
+        if (Brain3D._container) {
+            Brain3D._container.style.display = 'none';
+        }
         Brain3D.active = false;
-        Brain3D._tooltipEl.style.display = 'none';
+        if (Brain3D._tooltipEl) {
+            Brain3D._tooltipEl.style.display = 'none';
+        }
         if (Brain3D._animFrameId !== null) {
             cancelAnimationFrame(Brain3D._animFrameId);
             Brain3D._animFrameId = null;
