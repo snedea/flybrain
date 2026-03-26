@@ -1,41 +1,30 @@
-# Build Claims -- T5.3
+# Build Claims -- T5.4
 
 ## Files Changed
-- MODIFY js/connectome.js -- Replaced lightDirection with nociception in BRAIN.stimulate, added nociception stimulus processing block (single-tick auto-clear), added dormant infrastructure comment on dangerOdor
-- MODIFY js/constants.js -- Added dormant infrastructure comments to OLF_ORN_DANGER, GUS_GRN_BITTER, and GUS_GRN_WATER weight blocks
-- MODIFY js/main.js -- Added temperature cycle button state (tempStates, tempStateIndex, tempLabels), touchTimestamps array, temp button wiring in tool handler loop, nociception detection in applyTouchTool (3+ touches in 4s), cycleTempLevel function, nociception/touchTimestamps reset in visibility handler, excluded temp from active-class removal
-- MODIFY index.html -- Added Temp: Neutral button after lightBtn, added Temp help overlay entry after Light, updated Touch help text to mention pain response
+- [CREATE] tests/run.html -- HTML test runner page that loads constants.js, connectome.js, and tests.js; displays pass/fail results with styled summary
+- [CREATE] tests/tests.js -- Test suite with 32 test functions covering connectome propagation, drive system, angle math, and behavior thresholds; includes assertion helpers, copied pure functions from main.js, and auto-discovery test runner
 
 ## Verification Results
-- Build: PASS (no build step; plain browser JS)
-- Tests: SKIPPED (no test suite configured)
-- Lint: PASS (node -c js/connectome.js && node -c js/constants.js && node -c js/main.js -- all passed syntax check)
+- Build: PASS (no build step required -- vanilla JS)
+- Tests: PASS (node -e "..." ran all 32 tests: 32 passed / 0 failed / 32 total)
+- Lint: SKIPPED (no lint configured)
 
 ## Claims
-- [ ] BRAIN.stimulate.lightDirection has been removed from connectome.js; the property no longer exists
-- [ ] BRAIN.stimulate.nociception field added as boolean (default false) in connectome.js BRAIN.stimulate block
-- [ ] Nociception stimulus processing block in BRAIN.update sensory section fires BRAIN.dendriteAccumulate('NOCI') when nociception is true, then auto-clears to false (single-tick)
-- [ ] NOCI neuron weights (DN_STARTLE: 10, DRIVE_FEAR: 8, DN_FLIGHT: 6, SEZ_GROOM: 4, SEZ_FEED: -5) in constants.js are unchanged and will be propagated by the new processing block
-- [ ] Temperature cycle button (id=tempBtn, data-tool=temp) in toolbar after lightBtn, displays "Temp: Neutral" initially
-- [ ] cycleTempLevel function cycles through Neutral(0.5) -> Warm(0.75) -> Cool(0.25) -> Neutral, setting BRAIN.stimulate.temperature and updating button text
-- [ ] Temperature button uses cycle-button pattern: separate click handler, no active-class management, does not deselect feed/touch/air tools
-- [ ] Temp button excluded from active-class removal in tool handler (t !== 'light' && t !== 'temp')
-- [ ] Rapid touch nociception: touchTimestamps array tracks touch times; 3+ touches within 4 seconds sets BRAIN.stimulate.nociception = true and clears the array
-- [ ] touchTimestamps self-bounding: pruned to 4-second window on each push, cleared to empty after triggering
-- [ ] Tab visibility handler resets BRAIN.stimulate.nociception to false and touchTimestamps.length to 0
-- [ ] Existing temperature processing in connectome.js (lines 343-351 original, now ~347-355) is unchanged -- warm(>0.65) fires THERMO_WARM, cool(<0.35) fires THERMO_COOL
-- [ ] Dormant comment on dangerOdor processing in connectome.js: "NOTE: connectome weights are wired but no user interaction currently sets BRAIN.stimulate.dangerOdor"
-- [ ] Dormant comment on OLF_ORN_DANGER in constants.js: "NOTE: weights defined but no user interaction currently sets dangerOdor stimulus"
-- [ ] Dormant comment on GUS_GRN_BITTER in constants.js: "NOTE: weights defined but not yet wired to any user interaction"
-- [ ] Dormant comment on GUS_GRN_WATER in constants.js: "NOTE: weights defined but not yet wired to any user interaction"
-- [ ] Help overlay has Temp entry: "Cycles through Neutral, Warm, and Cool. Warm makes the fly more active and avoidant. Cool makes it exploratory."
-- [ ] Touch help text updated to mention: "Tap 3+ times in 4 seconds for a pain response."
-- [ ] No new CSS rules added; temp button uses existing .tool-btn styling
-- [ ] No new files created
-- [ ] NOCI, THERMO_WARM, THERMO_COOL weights in constants.js are unmodified
-- [ ] GUS_GRN_WATER, GUS_GRN_BITTER, OLF_ORN_DANGER are NOT wired to user interactions -- comments only
+- [ ] tests/run.html is valid HTML5, starts with <!DOCTYPE html>, loads ../js/constants.js, ../js/connectome.js, and ./tests.js in order, and calls runAllTests() on window.onload
+- [ ] tests/run.html uses only the specified CSS custom properties (--bg, --surface, --border, --text, --success, --error, --radius, etc.) with no additional hex colors or gradients
+- [ ] tests/tests.js defines assertEqual, assertTrue, and assertClose assertion helpers that throw TestFailure on failure
+- [ ] tests/tests.js copies normalizeAngle, BEHAVIOR_THRESHOLDS, isCoolingDown, hasNearbyFood, evaluateBehaviorEntry verbatim from main.js (cannot import main.js due to top-level DOM access)
+- [ ] tests/tests.js defines resetBrainState() that calls BRAIN.setup() and resets all accumulators, stimulate, drives, behavior, food, and fly to clean defaults
+- [ ] Every test function name starts with test_ and calls resetBrainState() first (except angle tests which are pure)
+- [ ] Connectome tests (7 tests): test_setup_initializes_all_neurons, test_dendriteAccumulate_propagates_to_targets, test_dendriteAccumulate_is_additive, test_dendriteAccumulateScaled_applies_scale, test_fireNeuron_cascades_and_resets, test_readMotor_drains_to_zero, test_motor_accumulator_floors_at_zero
+- [ ] Drive tests (8 tests): test_hunger_increases_per_tick, test_hunger_decreases_when_feeding, test_fear_spikes_on_touch, test_fear_exponential_decay, test_drives_clamped_to_zero, test_drives_clamped_to_one, test_fear_wind_contribution, test_fear_no_wind_contribution_below_threshold
+- [ ] Angle tests (6 tests): test_normalizeAngle_zero, test_normalizeAngle_pi, test_normalizeAngle_neg_pi, test_normalizeAngle_3pi, test_normalizeAngle_neg5pi, test_normalizeAngle_large_positive
+- [ ] Behavior tests (11 tests): test_startle_entry, test_startle_blocked_by_cooldown, test_fly_entry, test_feed_entry, test_feed_blocked_without_food, test_groom_entry, test_rest_entry_high_fatigue, test_rest_lower_threshold_in_dark, test_brace_entry, test_idle_when_nothing_active, test_priority_startle_over_feed
+- [ ] runAllTests() discovers all test_ functions on window, sorts alphabetically, runs each, and renders results to #summary and #results divs
+- [ ] No existing files were modified (js/main.js, js/connectome.js, js/constants.js, index.html, css/main.css are untouched)
+- [ ] No external dependencies or npm packages added; no build step required
 
 ## Gaps and Assumptions
-- No automated browser tests exist; behavioral correctness (warm=active/avoidant, cool=exploratory) relies on the existing connectome weight propagation which was verified by reading the weight tables
-- The nociception trigger requires the user to be in Touch tool mode and actually hit the fly; touches that miss the fly body don't call applyTouchTool and won't count toward nociception
-- No CSS changes were needed per the plan; the temp button inherits .tool-btn styling which handles button appearance
+- The copied functions (normalizeAngle, evaluateBehaviorEntry, etc.) are exact copies from main.js at the time of writing; if main.js changes, these copies will not auto-update
+- Browser-based test execution was not verified (only Node.js with a minimal DOM shim); the HTML runner should work identically in any modern browser
+- The plan specified 24+ test functions; implementation provides 32 (all categories covered with the exact tests specified in the plan)

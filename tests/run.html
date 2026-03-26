@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>FlyBrain Tests</title>
+<style>
+:root {
+  --bg: #1a1a2e;
+  --surface: #16213e;
+  --surface-hover: #1a2744;
+  --border: #2a3a5c;
+  --text: #e8e8e8;
+  --text-muted: #8892a4;
+  --accent: #E3734B;
+  --accent-hover: #f0855f;
+  --accent-subtle: rgba(227, 115, 75, 0.15);
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --error: #f87171;
+  --radius: 8px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+  font-size: 0.9rem;
+}
+h1 {
+  font-size: 1.75rem;
+  margin-bottom: 1rem;
+  color: var(--text);
+}
+#summary {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.5rem;
+  margin-bottom: 1.5rem;
+  font-size: 1.25rem;
+}
+.test-result {
+  padding: 0.5rem 1rem;
+  border-left: 3px solid var(--border);
+  margin-bottom: 0.25rem;
+  font-size: 0.9rem;
+  background: var(--surface);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+.test-result.pass { border-left-color: var(--success); }
+.test-result.fail { border-left-color: var(--error); }
+.test-result.pass::before { content: 'PASS '; color: var(--success); font-weight: bold; }
+.test-result.fail::before { content: 'FAIL '; color: var(--error); font-weight: bold; }
+.summary-pass { color: var(--success); }
+.summary-fail { color: var(--error); }
+</style>
+</head>
+<body>
+<h1>FlyBrain Test Suite</h1>
+<div id="summary"></div>
+<div id="results"></div>
+<script src="../js/constants.js"></script>
+<script src="../js/connectome.js"></script>
+<script src="./tests.js"></script>
+<script>
+window.onload = function () { runAllTests(); };
+</script>
+</body>
+</html>
