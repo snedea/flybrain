@@ -1336,22 +1336,12 @@ function update(dt) {
 	speed += speedChangeInterval * dtScale;
 	if (speed < 0) speed = 0;
 
-	var facingMinusTarget = facingDir - targetDir;
-	var angleDiff = facingMinusTarget;
-
-	if (Math.abs(facingMinusTarget) > Math.PI) {
-		if (facingDir > targetDir) {
-			angleDiff = -1 * (2 * Math.PI - facingDir + targetDir);
-		} else {
-			angleDiff = 2 * Math.PI - targetDir + facingDir;
-		}
-	}
-
-	if (angleDiff > 0) {
-		facingDir -= 0.1 * dtScale;
-	} else if (angleDiff < 0) {
-		facingDir += 0.1 * dtScale;
-	}
+	// Exponential interpolation toward targetDir using shortest-arc angle difference.
+	// Retention factor 0.9 matches proboscisExtend (line 691); at dtScale=1 (60fps),
+	// facingDir closes 10% of the remaining gap per frame -- fast enough to track
+	// quick heading changes but cannot overshoot because it never exceeds the gap.
+	var angleDiffTurn = normalizeAngle(targetDir - facingDir);
+	facingDir += angleDiffTurn * (1 - Math.pow(0.9, dtScale));
 
 	// Edge avoidance: bias targetDir away from screen edges when within 50px
 	var edgeMargin = 50;

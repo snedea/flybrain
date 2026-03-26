@@ -1,29 +1,25 @@
-# Build Claims -- D7.1
+# Build Claims -- D7.2
 
 ## Files Changed
-- [MODIFY] js/main.js -- Store brain tick interval ID, add visibilitychange handler to pause/resume brain tick and clear stale stimuli on tab hide/show
+- [MODIFY] js/main.js -- Replaced fixed-step facingDir turning (lines 1339-1354) with exponential interpolation to eliminate overshoot oscillation
 
 ## Verification Results
-- Build: PASS (no build step -- vanilla JS, open index.html directly)
-- Tests: SKIPPED (no existing tests)
+- Build: PASS (vanilla JS project, no build step; `node -c js/main.js` passes syntax check)
+- Tests: SKIPPED (no test suite exists)
 - Lint: SKIPPED (no linter configured)
 
 ## Claims
-- [ ] Claim 1: `setInterval(updateBrain, 500)` at line 226 now assigns its return value to `var brainTickId` instead of discarding it
-- [ ] Claim 2: A `visibilitychange` event listener is registered on `document` at lines 238-280
-- [ ] Claim 3: When `document.hidden` becomes true, the handler calls `clearInterval(brainTickId)` and sets `brainTickId = null`, fully stopping the brain tick
-- [ ] Claim 4: On hide, all 5 drive values (hunger, fear, fatigue, curiosity, groom) are snapshot into `driveSnapshotOnHide`
-- [ ] Claim 5: When the tab becomes visible again, all 6 stale stimuli flags are cleared: `touch=false`, `touchLocation=null`, `wind=false`, `windStrength=0`, `foodNearby=false`, `foodContact=false`
-- [ ] Claim 6: On resume, `touchResetTime` and `windResetTime` are reset to 0, preventing stale timer-based stimulus re-activation
-- [ ] Claim 7: On resume, drives are restored from the snapshot taken at hide time, undoing any drift from throttled ticks that fired before clearInterval took effect
-- [ ] Claim 8: On resume, `lastTime` is set to -1, causing the RAF loop to skip the first frame and reinitialize timing (matching the existing startup pattern at line 1467)
-- [ ] Claim 9: On resume, `brainTickId = setInterval(updateBrain, 500)` restarts the brain tick at the original 500ms interval
-- [ ] Claim 10: No changes were made to `updateBrain()`, `update()`, `draw()`, the RAF `loop()` function, or `js/connectome.js`
-- [ ] Claim 11: No new files or dependencies were added
-- [ ] Claim 12: The fix is entirely additive -- one line modified (store interval ID) and one new block inserted (visibilitychange handler + driveSnapshotOnHide variable)
+- [ ] The 16-line fixed-step facingDir interpolation block (old lines 1339-1354) has been fully removed -- no references to `facingMinusTarget` remain in the file
+- [ ] Replacement uses `normalizeAngle(targetDir - facingDir)` to compute shortest-arc signed angle difference, leveraging the existing `normalizeAngle()` helper at lines 31-36
+- [ ] Replacement uses exponential interpolation `facingDir += angleDiffTurn * (1 - Math.pow(0.9, dtScale))` with retention factor 0.9, matching the pattern used by proboscisExtend and other animation parameters
+- [ ] The blend factor `(1 - Math.pow(0.9, dtScale))` is always in (0, 1), so facingDir moves toward targetDir by a fraction of the remaining gap and mathematically cannot overshoot
+- [ ] The downstream `facingDir = normalizeAngle(facingDir)` at line 1377 remains intact as a safety normalization
+- [ ] No new global variables or functions were introduced -- the fix is purely local (one new local variable `angleDiffTurn`)
+- [ ] No other animation interpolations (wingSpread, proboscis, antenna, legs, wings) were modified
+- [ ] The file passes `node -c js/main.js` syntax validation
+- [ ] The replacement is frame-rate-independent via dtScale exponent, consistent with the D5.1 fix pattern
 
 ## Gaps and Assumptions
-- The `visibilitychange` event fires synchronously when the tab is hidden, but there is a small race window where one or two throttled setInterval callbacks could fire between the OS-level tab switch and the event delivery. The drive snapshot restore on resume handles this by overwriting any drift.
-- If the browser does not support the `visibilitychange` API (very old browsers), the handler simply never fires and behavior is unchanged from before the fix (graceful degradation).
-- `lastTime` is declared at line 1519 (after the edit offset) with `var` at top level, so it is in global scope and accessible from the visibilitychange handler. This was verified by reading the code.
-- Manual smoke testing was not performed (headless environment). The claims above are based on code inspection.
+- Visual smoke testing (idle jitter, feed drift, startle turns) requires manual browser observation -- not automated
+- The 0.9 retention factor was specified in the plan; if turning feels too slow at runtime it could be lowered (e.g. 0.85) but this matches proboscisExtend and the task description's suggestion
+- Edge avoidance code immediately below the edit (line 1346+) modifies targetDir, not facingDir, so it is unaffected by this change

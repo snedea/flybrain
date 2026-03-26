@@ -1,128 +1,74 @@
-# Plan: D7.1
+# Plan: D7.2
 
 ## Dependencies
-- list: none
-- commands: none
+- list: []
+- commands: []
 
 ## File Operations (in execution order)
 
 ### 1. MODIFY js/main.js
 - operation: MODIFY
-- reason: Store the brain tick interval ID, add visibilitychange handler to pause/resume the brain tick when the tab is backgrounded/foregrounded, and clear stale stimuli and snapshot drives on resume to prevent runaway accumulation
+- reason: Replace fixed-step facingDir turning with exponential interpolation to eliminate overshoot oscillation
+- anchor: the 16-line block from line 1339 to line 1354, starting with `var facingMinusTarget = facingDir - targetDir;` and ending with the closing brace of `} else if (angleDiff < 0) {`
 
-#### Change 1: Store brain tick interval ID in a variable
-- anchor: `setInterval(updateBrain, 500);` (line 226)
-- Replace the bare `setInterval` call with an assignment to a new variable `brainTickId`
+#### Functions
 
-Before:
+The entire facingDir interpolation block (lines 1339-1354) must be replaced. Here is the exact existing code to find and replace:
+
+**EXISTING CODE (exact, remove all of this):**
 ```js
-BRAIN.randExcite();
-setInterval(updateBrain, 500);
-```
+	var facingMinusTarget = facingDir - targetDir;
+	var angleDiff = facingMinusTarget;
 
-After:
-```js
-BRAIN.randExcite();
-var brainTickId = setInterval(updateBrain, 500);
-```
-
-#### Change 2: Add visibilitychange handler immediately after the brainTickId assignment (after line 226, before `// --- Canvas setup ---` comment at line 228)
-
-Insert the following block between `var brainTickId = setInterval(updateBrain, 500);` and `// --- Canvas setup ---`:
-
-```js
-// --- Tab visibility handling ---
-// When the tab is backgrounded, browsers throttle setInterval to ~1/s but
-// pause requestAnimationFrame entirely. This means the brain tick keeps
-// running (accumulating drives, processing stale stimuli) while update()
-// never runs to clear stimulus timers or reset food flags. On resume,
-// drives are maxed out causing a jarring behavioral cascade.
-// Fix: pause the brain tick when hidden, resume when visible. On resume,
-// clear all stale stimuli and snapshot drives to prevent drift.
-var driveSnapshotOnHide = null;
-
-document.addEventListener('visibilitychange', function () {
-	if (document.hidden) {
-		// Tab is being hidden: stop the brain tick entirely
-		clearInterval(brainTickId);
-		brainTickId = null;
-
-		// Snapshot current drive values so we can restore them on resume
-		driveSnapshotOnHide = {
-			hunger: BRAIN.drives.hunger,
-			fear: BRAIN.drives.fear,
-			fatigue: BRAIN.drives.fatigue,
-			curiosity: BRAIN.drives.curiosity,
-			groom: BRAIN.drives.groom,
-		};
-	} else {
-		// Tab is becoming visible again: clear all stale stimuli
-		BRAIN.stimulate.touch = false;
-		BRAIN.stimulate.touchLocation = null;
-		BRAIN.stimulate.wind = false;
-		BRAIN.stimulate.windStrength = 0;
-		BRAIN.stimulate.foodNearby = false;
-		BRAIN.stimulate.foodContact = false;
-		touchResetTime = 0;
-		windResetTime = 0;
-
-		// Restore drive snapshot to undo any drift from throttled ticks
-		// that may have fired between the hide event and clearInterval
-		if (driveSnapshotOnHide) {
-			BRAIN.drives.hunger = driveSnapshotOnHide.hunger;
-			BRAIN.drives.fear = driveSnapshotOnHide.fear;
-			BRAIN.drives.fatigue = driveSnapshotOnHide.fatigue;
-			BRAIN.drives.curiosity = driveSnapshotOnHide.curiosity;
-			BRAIN.drives.groom = driveSnapshotOnHide.groom;
-			driveSnapshotOnHide = null;
+	if (Math.abs(facingMinusTarget) > Math.PI) {
+		if (facingDir > targetDir) {
+			angleDiff = -1 * (2 * Math.PI - facingDir + targetDir);
+		} else {
+			angleDiff = 2 * Math.PI - targetDir + facingDir;
 		}
-
-		// Reset lastTime so the RAF loop does not compute a huge dt on resume
-		lastTime = -1;
-
-		// Restart the brain tick
-		brainTickId = setInterval(updateBrain, 500);
 	}
-});
+
+	if (angleDiff > 0) {
+		facingDir -= 0.1 * dtScale;
+	} else if (angleDiff < 0) {
+		facingDir += 0.1 * dtScale;
+	}
 ```
 
-#### Detailed logic for the visibilitychange handler:
+**REPLACEMENT CODE (exact, insert this in its place):**
+```js
+	// Exponential interpolation toward targetDir using shortest-arc angle difference.
+	// Retention factor 0.9 matches proboscisExtend (line 691); at dtScale=1 (60fps),
+	// facingDir closes 10% of the remaining gap per frame -- fast enough to track
+	// quick heading changes but cannot overshoot because it never exceeds the gap.
+	var angleDiffTurn = normalizeAngle(targetDir - facingDir);
+	facingDir += angleDiffTurn * (1 - Math.pow(0.9, dtScale));
+```
 
-**On hide (document.hidden === true):**
-1. Call `clearInterval(brainTickId)` to stop the brain tick completely
-2. Set `brainTickId = null` (defensive, not strictly needed)
-3. Snapshot all 5 drive values (`hunger`, `fear`, `fatigue`, `curiosity`, `groom`) from `BRAIN.drives` into `driveSnapshotOnHide` object
+**Why this works and why there is no oscillation:**
+- `normalizeAngle(targetDir - facingDir)` computes the shortest-arc signed difference in [-PI, PI]. No manual quadrant logic needed.
+- `(1 - Math.pow(0.9, dtScale))` is the frame-rate-independent exponential blend factor, identical to the pattern at lines 684 (wingSpread, base 0.85), 691 (proboscisExtend, base 0.9), 1129-1130 (antenna, base 0.92), 1207 (legJitter, base 0.95), 1216 (wingMicro, base 0.97).
+- The blend factor is always in (0, 1), so `facingDir` moves toward `targetDir` by a fraction of the remaining gap. It can never overshoot. The old code applied a fixed 0.1-radian step regardless of remaining angle, which overshot when the gap was < 0.1 radians.
+- At dtScale=1 (60fps): closes 10% of gap per frame. A 1-radian offset reaches 0.01 rad in ~44 frames (~0.73s). A 0.05-radian offset (the old oscillation threshold) reaches 0.005 rad in ~24 frames (~0.4s). Responsive enough for all behavioral transitions.
+- Retention 0.9 chosen to match proboscisExtend, giving a natural feel. Values tested against the task description's suggested `0.9` base.
 
-**On show (document.hidden === false):**
-1. Clear stale stimuli: set `BRAIN.stimulate.touch = false`, `BRAIN.stimulate.touchLocation = null`, `BRAIN.stimulate.wind = false`, `BRAIN.stimulate.windStrength = 0`, `BRAIN.stimulate.foodNearby = false`, `BRAIN.stimulate.foodContact = false`
-2. Reset timer variables: set `touchResetTime = 0`, `windResetTime = 0`
-3. Restore drive snapshot: copy all 5 values from `driveSnapshotOnHide` back to `BRAIN.drives`, then set `driveSnapshotOnHide = null`
-4. Reset RAF timing: set `lastTime = -1` (this causes the RAF loop at line 1467 to skip the first frame and reinitialize timing, matching the existing startup pattern)
-5. Restart brain tick: `brainTickId = setInterval(updateBrain, 500)`
+#### Wiring / Integration
 
-#### Variable placement note:
-- `brainTickId` is declared with `var` at line 226 (replacing the bare setInterval call), so it is function-scoped (or global-scoped since this is top-level)
-- `driveSnapshotOnHide` is declared with `var` right before the event listener
-- `lastTime` is already declared at line 1465 as `var lastTime = -1` -- since this is top-level `var`, it is accessible from the visibilitychange handler (same global scope)
-- `touchResetTime` is already declared at line 25
-- `windResetTime` is already declared at line 26
-
-#### No other changes to js/main.js
-
-No changes to update(), draw(), updateBrain(), or any other function. The fix is entirely additive: one line change (store interval ID) and one new event listener block.
+- No new variables, functions, or imports needed.
+- The existing `normalizeAngle()` helper at lines 31-36 is already used elsewhere in this function (line 1382, 1388) and handles the shortest-arc computation.
+- The subsequent `facingDir = normalizeAngle(facingDir);` at line 1387 (which will shift down by ~12 lines after the replacement) continues to bound facingDir, providing a safety net. The exponential interpolation already keeps facingDir bounded via normalizeAngle in the delta, but the post-normalization is harmless and consistent with the codebase pattern.
+- No other code references `facingMinusTarget` or `angleDiff` (the local variable) -- these names are local to the removed block. The variable `angleDiffTurn` is new and local. No naming conflicts.
 
 ## Verification
-- build: no build step (vanilla JS, open index.html directly)
-- lint: no linter configured
-- test: no existing tests
-- smoke: Open the simulation in a browser. Let the fly settle for a few seconds. Place food near the fly. Switch to another browser tab for 30 seconds. Switch back. Verify: (1) the fly is NOT in a panicked startle/fly/groom cascade, (2) drive meters are at roughly the same levels as when you left, (3) the simulation resumes smoothly without a visible jump or freeze. Also test: trigger a touch or wind event, immediately switch tabs, wait 5 seconds, switch back -- verify the touch/wind stimulus is cleared and drives are normal.
+- build: Open `index.html` in a browser (no build step -- vanilla JS project)
+- lint: No linter configured in this project
+- test: No existing tests
+- smoke: 1. Open the page and observe the fly during idle/groom/rest states -- the body should NOT exhibit rapid rotational jitter (the old ~5.7-degree peak-to-peak oscillation). 2. Place food near the fly and enter feed state -- the fly should smoothly orient toward the food without zigzag. 3. Trigger a startle (touch tool) and observe the fly turn to flee -- turns should be smooth and complete without oscillation at the end. 4. Observe at both normal and slowed frame rates (throttle via DevTools Performance tab) -- turning speed should feel consistent regardless of frame rate.
 
 ## Constraints
-- Do NOT modify js/connectome.js -- all changes are in js/main.js only
-- Do NOT modify the updateBrain() function itself
-- Do NOT modify the update() function
-- Do NOT modify the RAF loop (loop function at line 1466)
-- Do NOT add any new dependencies or files
-- Do NOT change the brain tick interval from 500ms
-- Do NOT modify SPEC.md, TASKS.md, or CLAUDE.md
-- The `var brainTickId` must replace the existing `setInterval(updateBrain, 500);` line, not be added as a separate line (to avoid calling setInterval twice)
+- Do NOT modify any file other than `js/main.js`
+- Do NOT change the `normalizeAngle()` helper function (lines 31-36)
+- Do NOT change the subsequent `facingDir = normalizeAngle(facingDir)` or `targetDir = normalizeAngle(targetDir)` normalization at lines 1387-1388 (these line numbers will shift after the edit)
+- Do NOT change any other animation interpolation (wingSpread, proboscis, antenna, legs, wings)
+- Do NOT add new global variables or functions -- the fix is purely local to the update() function body
+- The replacement must use a single `Edit` operation replacing the exact old block with the exact new block. Use tabs for indentation (matching the existing file).
