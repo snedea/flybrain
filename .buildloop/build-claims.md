@@ -1,25 +1,24 @@
-# Build Claims -- D9.1
+# Build Claims -- D13.1
 
 ## Files Changed
-- [MODIFY] js/main.js -- Three fixes: (1) reordered edge avoidance before facingDir interpolation in update(), (2) added behavior/speed state resets in visibilitychange resume handler, (3) removed dead isWalking variable in drawFlyBody
+- [MODIFY] js/main.js -- (1) clamp food and fly positions to current bounds in resize handler, (2) clear behavior.cooldowns on visibilitychange resume, (3) remove dead targetPair variable in drawLegs
 
 ## Verification Results
-- Build: PASS (`node -c js/main.js` -- no syntax errors)
-- Tests: SKIPPED (no test suite exists)
+- Build: PASS (node --check js/main.js)
+- Tests: SKIPPED (no test suite)
 - Lint: SKIPPED (no linter configured)
 
 ## Claims
-- [ ] Claim 1: In update(), the edge avoidance block (edgeMargin/edgeBias/edgeBiasY computation and targetDir modification) now runs BEFORE the facingDir exponential interpolation (angleDiffTurn computation), so facingDir tracks the edge-corrected targetDir in the same frame -- verify by reading js/main.js lines 1359-1394
-- [ ] Claim 2: The edge avoidance math (thresholds, bias calculations, awayAngle/awayStrength, 0.3 factor) is unchanged -- only its position relative to facingDir interpolation changed
-- [ ] Claim 3: The angle normalization of facingDir and targetDir still occurs AFTER both the edge avoidance and facingDir interpolation blocks
-- [ ] Claim 4: The visibilitychange resume handler (else branch) now resets behavior.current to 'idle', behavior.startlePhase to 'none', behavior.enterTime to Date.now(), speed to 0, and speedChangeInterval to 0 -- verify at js/main.js lines 287-293
-- [ ] Claim 5: The new behavior/speed resets are placed after the drive snapshot restore and before the lastTime reset, preserving the existing reset ordering
-- [ ] Claim 6: Existing visibilitychange resume resets (stimuli, drag state, food timestamps, drive snapshot) are unmodified
-- [ ] Claim 7: The dead `var isWalking = (state === 'walk' || state === 'explore' || state === 'phototaxis');` in drawFlyBody has been removed -- verify by grepping for `isWalking` which should only appear once, in drawLegs at line 1211
-- [ ] Claim 8: The live isWalking declaration in drawLegs (line 1211) is untouched
-- [ ] Claim 9: No other files were modified
+- [ ] Claim 1: The resize handler at js/main.js:1526-1534 now clamps all food[i].x to [0, innerWidth] and food[i].y to [44, innerHeight-90] on every resize event, preventing food from becoming unreachable after window shrinks
+- [ ] Claim 2: The resize handler also re-clamps fly.x and fly.y to the same bounds, preventing a spurious wall-touch stimulus on the next update() frame
+- [ ] Claim 3: The visibilitychange resume branch at js/main.js:292 now sets behavior.cooldowns = {} immediately after behavior.enterTime reset, clearing stale cooldowns that would block re-entering behaviors after tab resume
+- [ ] Claim 4: The dead variable `var targetPair = pairIdx;` has been removed from the drawLegs groomLoc==='leg' branch; grep for "targetPair" in js/main.js returns zero matches
+- [ ] Claim 5: Food clamping bounds [0, innerWidth] x [44, innerHeight-90] exactly match the fly's position-clamp bounds used in update() at lines 1404-1421
+- [ ] Claim 6: No other files were modified; no new files were created (except this claims file)
+- [ ] Claim 7: The food proximity threshold (50px), feeding contact distance (20px), and food/behavior object structures are unchanged
 
 ## Gaps and Assumptions
-- Smoke testing (browser interaction: edge avoidance smoothness, tab-switch resume behavior) was not performed -- only syntax validation via node -c
-- The behavior.enterTime reset uses Date.now() which is correct for the idle state but was not verified against all code paths that read behavior.enterTime
-- No automated tests exist to verify the behavioral changes at runtime
+- No automated tests exist to verify these behaviors; verification is manual (browser smoke test)
+- The fly position clamp in the resize handler assumes the `fly` object is already initialized when resize fires; this is safe because `fly` is declared at module scope before the resize IIFE runs
+- The food clamp assumes food array may be empty (the for loop handles this correctly with length check)
+- Clearing cooldowns on resume means a rapid hide/show cycle could let behaviors fire sooner than their normal cooldown; this is acceptable since all stimuli/drives are also reset

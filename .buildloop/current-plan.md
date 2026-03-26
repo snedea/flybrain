@@ -1,121 +1,136 @@
-# Plan: D9.1
+# Plan: D13.1
 
 ## Dependencies
-- list: none
-- commands: none
+- list: []
+- commands: []
 
 ## File Operations (in execution order)
 
 ### 1. MODIFY js/main.js
 - operation: MODIFY
-- reason: Three fixes: (a) reorder edge avoidance before facingDir interpolation, (b) reset behavior/speed state in visibilitychange resume handler, (c) remove dead isWalking variable in drawFlyBody
+- reason: Three fixes — (1) clamp food positions after resize, (2) clear behavior.cooldowns on visibilitychange resume, (3) remove dead targetPair variable in drawLegs
 
-#### Fix 1: Edge avoidance ordering (move edge avoidance block BEFORE facingDir interpolation)
+#### Change 1: Clamp food positions in resize handler
 
-- anchor: `var angleDiffTurn = normalizeAngle(targetDir - facingDir);`
+- anchor: the resize IIFE at line 1518:
+  ```js
+  (function resize() {
+  	var dpr = window.devicePixelRatio || 1;
+  	canvas.width = window.innerWidth * dpr;
+  	canvas.height = window.innerHeight * dpr;
+  	canvas.style.width = window.innerWidth + 'px';
+  	canvas.style.height = window.innerHeight + 'px';
+  	ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  	window.addEventListener('resize', resize);
+  })();
+  ```
 
-The current code in update() at lines 1352-1391 is ordered:
+- action: Insert a food-clamping loop immediately after the `ctx.setTransform(dpr, 0, 0, dpr, 0, 0);` line and before the `window.addEventListener('resize', resize);` line.
 
-```
-// [A] facingDir interpolation (lines 1356-1357)
-var angleDiffTurn = normalizeAngle(targetDir - facingDir);
-facingDir += angleDiffTurn * (1 - Math.pow(0.9, dtScale));
+- exact code to insert between those two lines:
+  ```js
+  	// Clamp food positions to current visible bounds so food items
+  	// near old edges don't become unreachable after window shrinks
+  	for (var i = 0; i < food.length; i++) {
+  		food[i].x = Math.max(0, Math.min(food[i].x, window.innerWidth));
+  		food[i].y = Math.max(44, Math.min(food[i].y, window.innerHeight - 90));
+  	}
+  ```
 
-// [B] edge avoidance (lines 1359-1387)
-var edgeMargin = 50;
-... (edge avoidance modifies targetDir) ...
+- rationale: The fly is clamped to `[0, innerWidth] x [44, innerHeight-90]` (lines 1404-1421). Food must be clamped to the same bounds so the fly can always reach it. Clamping X to `[0, innerWidth]` and Y to `[44, innerHeight-90]` matches the fly's reachable area exactly. This runs on every resize event, so food is re-clamped whenever the window shrinks.
 
-// [C] angle normalization (lines 1389-1391)
-facingDir = normalizeAngle(facingDir);
-targetDir = normalizeAngle(targetDir);
-```
+- also clamp fly position in the same block: Insert after the food clamp loop and before `window.addEventListener`:
+  ```js
+  	// Also re-clamp the fly position to the new bounds
+  	fly.x = Math.max(0, Math.min(fly.x, window.innerWidth));
+  	fly.y = Math.max(44, Math.min(fly.y, window.innerHeight - 90));
+  ```
 
-Replace the entire block from the comment `// Exponential interpolation toward targetDir` (line 1352) through `targetDir = normalizeAngle(targetDir);` (line 1391) with the reordered version:
+- rationale: The fly itself may be past the new bounds after resize, and while the next update() frame would clamp it, that clamp triggers touch stimulus. Re-clamping silently in the resize handler avoids a spurious wall-touch event.
 
-```js
-	// Edge avoidance: bias targetDir away from screen edges when within 50px
-	var edgeMargin = 50;
-	var edgeBias = 0;
-	var edgeBiasY = 0;
-	var topBound = 44;
-	var bottomBound = window.innerHeight - 90;
-	var leftBound = 0;
-	var rightBound = window.innerWidth;
+- final resize function should read:
+  ```js
+  (function resize() {
+  	var dpr = window.devicePixelRatio || 1;
+  	canvas.width = window.innerWidth * dpr;
+  	canvas.height = window.innerHeight * dpr;
+  	canvas.style.width = window.innerWidth + 'px';
+  	canvas.style.height = window.innerHeight + 'px';
+  	ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  	// Clamp food positions to current visible bounds so food items
+  	// near old edges don't become unreachable after window shrinks
+  	for (var i = 0; i < food.length; i++) {
+  		food[i].x = Math.max(0, Math.min(food[i].x, window.innerWidth));
+  		food[i].y = Math.max(44, Math.min(food[i].y, window.innerHeight - 90));
+  	}
+  	// Also re-clamp the fly position to the new bounds
+  	fly.x = Math.max(0, Math.min(fly.x, window.innerWidth));
+  	fly.y = Math.max(44, Math.min(fly.y, window.innerHeight - 90));
+  	window.addEventListener('resize', resize);
+  })();
+  ```
 
-	if (fly.x - leftBound < edgeMargin) {
-		edgeBias += (edgeMargin - (fly.x - leftBound)) / edgeMargin; // push right (+x)
-	} else if (rightBound - fly.x < edgeMargin) {
-		edgeBias -= (edgeMargin - (rightBound - fly.x)) / edgeMargin; // push left (-x)
-	}
-	if (fly.y - topBound < edgeMargin) {
-		edgeBiasY -= (edgeMargin - (fly.y - topBound)) / edgeMargin; // push down (-y, but facingDir uses -sin for y)
-	} else if (bottomBound - fly.y < edgeMargin) {
-		edgeBiasY += (edgeMargin - (bottomBound - fly.y)) / edgeMargin; // push up
-	}
+#### Change 2: Clear behavior.cooldowns on visibilitychange resume
 
-	if (edgeBias !== 0 || edgeBiasY !== 0) {
-		// Compute desired direction away from edges
-		var awayAngle = Math.atan2(edgeBiasY, edgeBias);
-		var awayStrength = Math.min(1, Math.sqrt(edgeBias * edgeBias + edgeBiasY * edgeBiasY));
-		var angleDiffEdge = awayAngle - targetDir;
-		// Normalize to [-PI, PI]
-		angleDiffEdge = normalizeAngle(angleDiffEdge);
-		targetDir += angleDiffEdge * awayStrength * 0.3 * dtScale;
-	}
+- anchor: the resume branch of the visibilitychange handler. Locate these exact consecutive lines (around lines 289-293):
+  ```js
+  		behavior.current = 'idle';
+  		behavior.startlePhase = 'none';
+  		behavior.enterTime = Date.now();
+  		speed = 0;
+  		speedChangeInterval = 0;
+  ```
 
-	// Exponential interpolation toward targetDir using shortest-arc angle difference.
-	// Retention factor 0.9 matches proboscisExtend (line 691); at dtScale=1 (60fps),
-	// facingDir closes 10% of the remaining gap per frame -- fast enough to track
-	// quick heading changes but cannot overshoot because it never exceeds the gap.
-	var angleDiffTurn = normalizeAngle(targetDir - facingDir);
-	facingDir += angleDiffTurn * (1 - Math.pow(0.9, dtScale));
+- action: Insert `behavior.cooldowns = {};` immediately after the `behavior.enterTime = Date.now();` line and before the `speed = 0;` line.
 
-	// Normalize angles to [-PI, PI] to prevent unbounded growth
-	facingDir = normalizeAngle(facingDir);
-	targetDir = normalizeAngle(targetDir);
-```
+- exact lines after the edit:
+  ```js
+  		behavior.current = 'idle';
+  		behavior.startlePhase = 'none';
+  		behavior.enterTime = Date.now();
+  		behavior.cooldowns = {};
+  		speed = 0;
+  		speedChangeInterval = 0;
+  ```
 
-The logic is identical -- just [B] moved before [A]. The facingDir interpolation now sees the edge-avoidance-corrected targetDir in the same frame.
+- rationale: When the tab is resumed, all stimuli and drives are reset to a clean state. Stale cooldowns from the pre-hide state would block re-entering behaviors (groom blocked up to 3s, startle 2s, fly 1s, feed 1s) even though the triggering conditions were fully cleared. Resetting cooldowns to an empty object lets behavior evaluation start fresh, matching the clean-slate intent of the resume handler.
 
-#### Fix 2: Visibilitychange resume state gaps (add behavior/speed resets)
+#### Change 3: Remove dead targetPair variable in drawLegs
 
-- anchor: `// Reset lastTime so the RAF loop does not compute a huge dt on resume`
+- anchor: inside the drawLegs function, the `groomLoc === 'leg'` branch. Locate these exact lines (around lines 1272-1275):
+  ```js
+  		} else if (groomLoc === 'leg') {
+  			// Targeted single-leg cleaning: only the leg on the touched side moves
+  			// Use side-based targeting: left legs clean when side=-1 touch
+  			var targetPair = pairIdx; // all legs may participate
+  ```
 
-Insert the following block immediately BEFORE the line `// Reset lastTime so the RAF loop does not compute a huge dt on resume` (line 287) and AFTER the closing brace `}` of the driveSnapshotOnHide restore block (line 285):
+- action: Delete the line `var targetPair = pairIdx; // all legs may participate` entirely.
 
-```js
-		// Reset behavior and speed state to prevent high-speed transient
-		// states from persisting after stimuli have been cleared
-		behavior.current = 'idle';
-		behavior.startlePhase = 'none';
-		behavior.enterTime = Date.now();
-		speed = 0;
-		speedChangeInterval = 0;
-```
+- exact lines after the edit:
+  ```js
+  		} else if (groomLoc === 'leg') {
+  			// Targeted single-leg cleaning: only the leg on the touched side moves
+  			// Use side-based targeting: left legs clean when side=-1 touch
+  			if (pairIdx === 1) {
+  ```
 
-This goes between the drive snapshot restore (line 284-285) and the lastTime reset comment (line 287). The exact insertion point is after `driveSnapshotOnHide = null;` + `}` and before `// Reset lastTime`.
-
-#### Fix 3: Remove dead isWalking in drawFlyBody
-
-- anchor: `var isWalking = (state === 'walk' || state === 'explore' || state === 'phototaxis');` inside `function drawFlyBody(dtScale)`
-
-Delete the entire line 931:
-```js
-	var isWalking = (state === 'walk' || state === 'explore' || state === 'phototaxis');
-```
-
-This is at line 931 inside `drawFlyBody`. There is a separate `isWalking` declaration at line 1204 inside `drawLegs` -- that one is live and must NOT be touched. The line to delete is the one preceded by `var state = behavior.current;` (line 930) and followed by a blank line then `// --- Wings (drawn first, behind body) ---` (line 933).
+- rationale: `targetPair` is assigned but never read. It was noted as a gap in the D4.2 build claims. Removing it eliminates dead code.
 
 ## Verification
-- build: no build step (vanilla JS, loaded directly by index.html)
-- lint: no configured linter
+- build: no build step (vanilla JS project)
+- lint: no linter configured
 - test: no existing tests
-- smoke: open index.html in a browser; (1) move the fly near a screen edge and observe that it turns away smoothly without hitting the wall first -- compare with the old behavior where the fly would contact the wall and then turn, (2) wait for a startle or high-speed state, then switch to another tab for 2+ seconds and switch back -- the fly should be idle and stationary on resume, not zooming across the screen, (3) open browser devtools console and type `typeof drawFlyBody` to confirm it loads without syntax errors (verifying the dead code removal did not break parsing)
+- smoke: Open `index.html` in a browser. Perform these checks:
+  1. Place 2-3 food items near the right edge of the screen. Resize the browser window narrower so the right edge shrinks past the food positions. Verify food items are clamped to the new visible area (not past the right edge). Verify the fly can reach and consume them without getting stuck at the wall.
+  2. While the fly is in groom or startle state, switch to a different tab, wait 3 seconds, switch back. Verify the fly resumes in idle state and can immediately enter any behavior (groom, feed, etc.) without being blocked by stale cooldowns.
+  3. Open browser devtools console. Search for "targetPair" in main.js source. Verify it does not appear anywhere.
 
 ## Constraints
-- Do NOT modify any file other than js/main.js
-- Do NOT modify SPEC.md, CLAUDE.md, TASKS.md, or any file in .buildloop/ other than current-plan.md
-- Do NOT change the drawLegs isWalking declaration at line 1204 -- only remove the dead one at line 931 in drawFlyBody
-- Do NOT change the edge avoidance logic itself (the math, thresholds, or strength values) -- only move the existing block
-- Do NOT change the existing visibilitychange resume resets for stimuli, drag state, food, or drives -- only add the new behavior/speed resets
-- The edge avoidance block and facingDir interpolation block must remain adjacent (just swapped in order), with the angle normalization still AFTER both
+- Do NOT modify any file other than `js/main.js`
+- Do NOT modify SPEC.md, TASKS.md, CLAUDE.md, or any file in .buildloop/ other than current-plan.md
+- Do NOT add new dependencies or libraries
+- Do NOT change the food proximity threshold (50px) or feeding contact distance (20px)
+- Do NOT change the fly's position-clamp bounds (they are correct as-is)
+- Do NOT change the structure of the `food` array items or the `behavior` object beyond adding/clearing the `cooldowns` property
+- The three changes are independent and can be applied in any order, but apply them in the order listed above for consistency

@@ -289,6 +289,7 @@ document.addEventListener('visibilitychange', function () {
 		behavior.current = 'idle';
 		behavior.startlePhase = 'none';
 		behavior.enterTime = Date.now();
+		behavior.cooldowns = {};
 		speed = 0;
 		speedChangeInterval = 0;
 
@@ -1272,7 +1273,6 @@ function drawLegs(state, dtScale) {
 			} else if (groomLoc === 'leg') {
 				// Targeted single-leg cleaning: only the leg on the touched side moves
 				// Use side-based targeting: left legs clean when side=-1 touch
-				var targetPair = pairIdx; // all legs may participate
 				if (pairIdx === 1) {
 					// Middle legs do the cleaning motion
 					hipMod = 0.1 + Math.sin(anim.groomPhase * 1.1) * 0.4;
@@ -1522,6 +1522,15 @@ function draw() {
 	canvas.style.width = window.innerWidth + 'px';
 	canvas.style.height = window.innerHeight + 'px';
 	ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+	// Clamp food positions to current visible bounds so food items
+	// near old edges don't become unreachable after window shrinks
+	for (var i = 0; i < food.length; i++) {
+		food[i].x = Math.max(0, Math.min(food[i].x, window.innerWidth));
+		food[i].y = Math.max(44, Math.min(food[i].y, window.innerHeight - 90));
+	}
+	// Also re-clamp the fly position to the new bounds
+	fly.x = Math.max(0, Math.min(fly.x, window.innerWidth));
+	fly.y = Math.max(44, Math.min(fly.y, window.innerHeight - 90));
 	window.addEventListener('resize', resize);
 })();
 
