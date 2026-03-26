@@ -260,6 +260,19 @@ document.addEventListener('visibilitychange', function () {
 		touchResetTime = 0;
 		windResetTime = 0;
 
+		// Reset drag/interaction state that may be stale from a mid-drag tab hide
+		isDragging = false;
+		dragToolOrigin = null;
+		windArrowEnd = null;
+
+		// Reset food feeding timestamps to prevent instant food consumption on resume
+		for (var fi = 0; fi < food.length; fi++) {
+			if (food[fi].feedStart !== 0) {
+				food[fi].feedStart = 0;
+				food[fi].radius = 10;
+			}
+		}
+
 		// Restore drive snapshot to undo any drift from throttled ticks
 		// that may have fired between the hide event and clearInterval
 		if (driveSnapshotOnHide) {

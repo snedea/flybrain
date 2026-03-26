@@ -1,4 +1,4 @@
-# Plan: D7.2
+# Plan: D8.1
 
 ## Dependencies
 - list: []
@@ -8,67 +8,55 @@
 
 ### 1. MODIFY js/main.js
 - operation: MODIFY
-- reason: Replace fixed-step facingDir turning with exponential interpolation to eliminate overshoot oscillation
-- anchor: the 16-line block from line 1339 to line 1354, starting with `var facingMinusTarget = facingDir - targetDir;` and ending with the closing brace of `} else if (angleDiff < 0) {`
+- reason: Add drag state resets and food feedStart resets to the visibilitychange resume branch
+- anchor: `// Tab is becoming visible again: clear all stale stimuli` (line 253 inside the `else` block of the visibilitychange handler)
 
-#### Functions
+#### Change 1: Reset drag/interaction state on resume
 
-The entire facingDir interpolation block (lines 1339-1354) must be replaced. Here is the exact existing code to find and replace:
+Insert 4 lines immediately after the existing `windResetTime = 0;` line (line 261) and before the blank line preceding the drive snapshot restoration comment. The new lines go between the timer variable resets and the drive snapshot block.
 
-**EXISTING CODE (exact, remove all of this):**
+Locate this exact existing block:
 ```js
-	var facingMinusTarget = facingDir - targetDir;
-	var angleDiff = facingMinusTarget;
+		touchResetTime = 0;
+		windResetTime = 0;
 
-	if (Math.abs(facingMinusTarget) > Math.PI) {
-		if (facingDir > targetDir) {
-			angleDiff = -1 * (2 * Math.PI - facingDir + targetDir);
-		} else {
-			angleDiff = 2 * Math.PI - targetDir + facingDir;
+		// Restore drive snapshot to undo any drift from throttled ticks
+```
+
+Replace with:
+```js
+		touchResetTime = 0;
+		windResetTime = 0;
+
+		// Reset drag/interaction state that may be stale from a mid-drag tab hide
+		isDragging = false;
+		dragToolOrigin = null;
+		windArrowEnd = null;
+
+		// Reset food feeding timestamps to prevent instant food consumption on resume
+		for (var fi = 0; fi < food.length; fi++) {
+			if (food[fi].feedStart !== 0) {
+				food[fi].feedStart = 0;
+				food[fi].radius = 10;
+			}
 		}
-	}
 
-	if (angleDiff > 0) {
-		facingDir -= 0.1 * dtScale;
-	} else if (angleDiff < 0) {
-		facingDir += 0.1 * dtScale;
-	}
+		// Restore drive snapshot to undo any drift from throttled ticks
 ```
 
-**REPLACEMENT CODE (exact, insert this in its place):**
-```js
-	// Exponential interpolation toward targetDir using shortest-arc angle difference.
-	// Retention factor 0.9 matches proboscisExtend (line 691); at dtScale=1 (60fps),
-	// facingDir closes 10% of the remaining gap per frame -- fast enough to track
-	// quick heading changes but cannot overshoot because it never exceeds the gap.
-	var angleDiffTurn = normalizeAngle(targetDir - facingDir);
-	facingDir += angleDiffTurn * (1 - Math.pow(0.9, dtScale));
-```
-
-**Why this works and why there is no oscillation:**
-- `normalizeAngle(targetDir - facingDir)` computes the shortest-arc signed difference in [-PI, PI]. No manual quadrant logic needed.
-- `(1 - Math.pow(0.9, dtScale))` is the frame-rate-independent exponential blend factor, identical to the pattern at lines 684 (wingSpread, base 0.85), 691 (proboscisExtend, base 0.9), 1129-1130 (antenna, base 0.92), 1207 (legJitter, base 0.95), 1216 (wingMicro, base 0.97).
-- The blend factor is always in (0, 1), so `facingDir` moves toward `targetDir` by a fraction of the remaining gap. It can never overshoot. The old code applied a fixed 0.1-radian step regardless of remaining angle, which overshot when the gap was < 0.1 radians.
-- At dtScale=1 (60fps): closes 10% of gap per frame. A 1-radian offset reaches 0.01 rad in ~44 frames (~0.73s). A 0.05-radian offset (the old oscillation threshold) reaches 0.005 rad in ~24 frames (~0.4s). Responsive enough for all behavioral transitions.
-- Retention 0.9 chosen to match proboscisExtend, giving a natural feel. Values tested against the task description's suggested `0.9` base.
-
-#### Wiring / Integration
-
-- No new variables, functions, or imports needed.
-- The existing `normalizeAngle()` helper at lines 31-36 is already used elsewhere in this function (line 1382, 1388) and handles the shortest-arc computation.
-- The subsequent `facingDir = normalizeAngle(facingDir);` at line 1387 (which will shift down by ~12 lines after the replacement) continues to bound facingDir, providing a safety net. The exponential interpolation already keeps facingDir bounded via normalizeAngle in the delta, but the post-normalization is harmless and consistent with the codebase pattern.
-- No other code references `facingMinusTarget` or `angleDiff` (the local variable) -- these names are local to the removed block. The variable `angleDiffTurn` is new and local. No naming conflicts.
+No other changes to this file. No imports, no new functions, no signature changes.
 
 ## Verification
-- build: Open `index.html` in a browser (no build step -- vanilla JS project)
-- lint: No linter configured in this project
-- test: No existing tests
-- smoke: 1. Open the page and observe the fly during idle/groom/rest states -- the body should NOT exhibit rapid rotational jitter (the old ~5.7-degree peak-to-peak oscillation). 2. Place food near the fly and enter feed state -- the fly should smoothly orient toward the food without zigzag. 3. Trigger a startle (touch tool) and observe the fly turn to flee -- turns should be smooth and complete without oscillation at the end. 4. Observe at both normal and slowed frame rates (throttle via DevTools Performance tab) -- turning speed should feel consistent regardless of frame rate.
+- build: Open `index.html` in a browser and confirm no console errors on page load
+- lint: No linter configured (vanilla JS project, no build step)
+- test: No existing test suite
+- smoke: (1) Select the air tool, start dragging on the canvas, then switch to a different browser tab while still holding the mouse button. Switch back. Verify: no wind arrow is drawn, clicking the canvas does not produce a spurious wind stimulus, isDragging is false (check by attempting a normal tool click -- it should work normally). (2) Place a food item near the fly, wait for the fly to begin feeding (proboscis extends, food starts shrinking), then switch tabs. Wait 5+ seconds, switch back. Verify: the food item is still visible at full size (radius 10) and the gradual feeding animation restarts from the beginning rather than the food instantly disappearing.
 
 ## Constraints
-- Do NOT modify any file other than `js/main.js`
-- Do NOT change the `normalizeAngle()` helper function (lines 31-36)
-- Do NOT change the subsequent `facingDir = normalizeAngle(facingDir)` or `targetDir = normalizeAngle(targetDir)` normalization at lines 1387-1388 (these line numbers will shift after the edit)
-- Do NOT change any other animation interpolation (wingSpread, proboscis, antenna, legs, wings)
-- Do NOT add new global variables or functions -- the fix is purely local to the update() function body
-- The replacement must use a single `Edit` operation replacing the exact old block with the exact new block. Use tabs for indentation (matching the existing file).
+- Do NOT modify any file other than js/main.js
+- Do NOT modify SPEC.md, TASKS.md, CLAUDE.md, or any file in .buildloop/ other than current-plan.md
+- Do NOT add new global variables -- use only the existing `isDragging`, `dragToolOrigin`, `windArrowEnd`, and `food` array
+- Do NOT change the structure of the visibilitychange handler beyond adding the new reset block
+- The food feedStart reset loop must use the same pattern as the existing D5.1 reset at main.js:496-502 (check `feedStart !== 0`, reset to 0, restore radius to 10)
+- Place the drag state resets BEFORE the drive snapshot restoration (the drive restore must remain the last state-fixup step before restarting the brain tick)
+- Place the food feedStart resets AFTER the drag state resets and BEFORE the drive snapshot restoration
