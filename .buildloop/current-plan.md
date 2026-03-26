@@ -1,584 +1,691 @@
-# Plan: T5.4
+# Plan: D16.1
 
 ## Dependencies
-- list: [] (no packages — pure browser JS, no build step)
-- commands: [] (nothing to install)
+- list: none (vanilla JS, no build step, no packages)
+- commands: none
 
 ## File Operations (in execution order)
 
-### 1. CREATE tests/run.html
+### 1. CREATE js/fly-logic.js
 - operation: CREATE
-- reason: HTML test runner page that loads source scripts and test file, runs tests on load, displays pass/fail results
+- reason: Extract shared pure/testable functions from main.js into a standalone file that both main.js and tests.js can reference, eliminating copy-paste drift
 
-#### Content Structure
+#### Functions
 
-The HTML page must contain:
+- signature: `function normalizeAngle(a)`
+  - purpose: Normalize angle to [-PI, PI] range
+  - logic:
+    1. `a = a % (2 * Math.PI);`
+    2. `if (a > Math.PI) a -= 2 * Math.PI;`
+    3. `if (a < -Math.PI) a += 2 * Math.PI;`
+    4. `return a;`
+  - returns: number in [-PI, PI]
+  - error handling: none
 
-1. A `<!DOCTYPE html>` declaration
-2. `<head>` with `<title>FlyBrain Tests</title>` and an inline `<style>` block using project CSS custom properties (see Constraints for exact values)
-3. `<body>` with:
-   - An `<h1>` with text `FlyBrain Test Suite`
-   - A `<div id="summary"></div>` for the pass/fail count summary
-   - A `<div id="results"></div>` for individual test results
-4. Script tags loading source files in order:
-   - `<script src="../js/constants.js"></script>`
-   - `<script src="../js/connectome.js"></script>`
-   - `<script src="./tests.js"></script>`
-5. A final inline `<script>` block that calls `runAllTests()` on window load
+- declaration: `var BEHAVIOR_THRESHOLDS = { ... }`
+  - purpose: Accumulator thresholds for entering each behavior state
+  - exact value:
+    ```
+    var BEHAVIOR_THRESHOLDS = {
+    	startle: 30,
+    	fly: 15,
+    	feed: 8,
+    	groom: 8,
+    	walk: 5,
+    	restFatigue: 0.7,
+    	exploreCuriosity: 0.4,
+    	phototaxisLight: 0.5,
+    };
+    ```
 
-#### Inline Style Block
+- signature: `function isCoolingDown(state, now)`
+  - purpose: Check if a behavior state is in cooldown
+  - logic: `return behavior.cooldowns[state] !== undefined && now < behavior.cooldowns[state];`
+  - calls: reads global `behavior.cooldowns`
+  - returns: boolean
 
-```css
-:root {
-  --bg: #1a1a2e;
-  --surface: #16213e;
-  --surface-hover: #1a2744;
-  --border: #2a3a5c;
-  --text: #e8e8e8;
-  --text-muted: #8892a4;
-  --accent: #E3734B;
-  --accent-hover: #f0855f;
-  --accent-subtle: rgba(227, 115, 75, 0.15);
-  --success: #4ade80;
-  --warning: #fbbf24;
-  --error: #f87171;
-  --radius: 8px;
-}
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body {
-  font-family: system-ui, -apple-system, sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  max-width: 1080px;
-  margin: 0 auto;
-  padding: 2rem 1rem;
-  font-size: 0.9rem;
-}
-h1 {
-  font-size: 1.75rem;
-  margin-bottom: 1rem;
-  color: var(--text);
-}
-#summary {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 1rem 1.5rem;
-  margin-bottom: 1.5rem;
-  font-size: 1.25rem;
-}
-.test-result {
-  padding: 0.5rem 1rem;
-  border-left: 3px solid var(--border);
-  margin-bottom: 0.25rem;
-  font-size: 0.9rem;
-  background: var(--surface);
-  border-radius: 0 var(--radius) var(--radius) 0;
-}
-.test-result.pass { border-left-color: var(--success); }
-.test-result.fail { border-left-color: var(--error); }
-.test-result.pass::before { content: 'PASS '; color: var(--success); font-weight: bold; }
-.test-result.fail::before { content: 'FAIL '; color: var(--error); font-weight: bold; }
-.summary-pass { color: var(--success); }
-.summary-fail { color: var(--error); }
-```
+- signature: `function hasNearbyFood()`
+  - purpose: Check if any food item is within 50px of the fly
+  - logic:
+    1. Loop over global `food` array
+    2. For each item, compute `Math.hypot(fly.x - food[i].x, fly.y - food[i].y)`
+    3. Return true if any distance <= 50
+    4. Return false if none found
+  - calls: reads globals `food` (array) and `fly` (object with x, y)
+  - returns: boolean
 
-#### Inline Script Block (after test.js loads)
+- signature: `function evaluateBehaviorEntry()`
+  - purpose: Evaluate accumulators and drives to determine which behavior state should be active
+  - logic: Copy the exact function body from main.js lines 490-526 (including brace and dark rest threshold logic). Priority order: startle, fly, feed, groom, brace, rest, phototaxis, explore, walk, idle.
+  - calls: `isCoolingDown(state, now)`, `hasNearbyFood()`, reads global `BRAIN` (accumStartle, accumFlight, accumFeed, accumGroom, accumWalkLeft, accumWalkRight, stimulate.wind, stimulate.windStrength, stimulate.lightLevel, drives.fatigue, drives.curiosity)
+  - returns: string (behavior state name)
 
+#### Wiring / Integration
+- This file defines global functions via `function` declarations and a `var` for BEHAVIOR_THRESHOLDS
+- It references globals `BRAIN`, `behavior`, `food`, `fly` which are defined in connectome.js (BRAIN) and main.js/tests.js (behavior, food, fly) — these are resolved at call time, not load time
+- Must be loaded AFTER connectome.js (needs BRAIN to exist for runtime calls) and BEFORE main.js and tests.js
+
+#### File structure
+The file should have this exact structure (with section comment at top):
 ```javascript
-window.onload = function () { runAllTests(); };
-```
+// ============================================================
+// Shared Pure Functions and Constants
+// Used by both main.js (browser) and tests.js (test runner).
+// Loaded after connectome.js, before main.js.
+// Functions reference globals (BRAIN, behavior, food, fly)
+// which are defined by the consumer (main.js or tests.js).
+// ============================================================
 
-This calls `runAllTests()` which is defined in tests.js.
-
-### 2. CREATE tests/tests.js
-- operation: CREATE
-- reason: Contains all assertion helpers, test functions, and the test runner entry point
-
-#### Overview
-
-This file defines:
-1. Assertion helper functions (`assertEqual`, `assertTrue`, `assertClose`)
-2. A test runner (`runAllTests`) that collects and runs all `test_*` functions, then renders results to the DOM
-3. Test functions grouped by category (connectome, drives, angle math, behavior thresholds)
-4. Copies of pure functions from main.js needed for testing (`normalizeAngle`, `evaluateBehaviorEntry`, `isCoolingDown`, `hasNearbyFood`) plus the constants they depend on — these are copied verbatim because main.js cannot be loaded (it immediately accesses DOM elements like `document.getElementById('clearButton')` on line 9)
-
-#### Section 1: Assertion Helpers
-
-```
-function TestFailure(message)
-```
-- purpose: Custom error class for assertion failures
-- logic:
-  1. Set `this.message = message`
-
-```
-function assertEqual(actual, expected, msg)
-```
-- purpose: Assert strict equality
-- logic:
-  1. If `actual !== expected`, throw `new TestFailure(msg + ': expected ' + JSON.stringify(expected) + ' but got ' + JSON.stringify(actual))`
-
-```
-function assertTrue(value, msg)
-```
-- purpose: Assert value is truthy
-- logic:
-  1. If `!value`, throw `new TestFailure(msg + ': expected truthy but got ' + JSON.stringify(value))`
-
-```
-function assertClose(actual, expected, tolerance, msg)
-```
-- purpose: Assert two floats are within tolerance
-- logic:
-  1. If `Math.abs(actual - expected) > tolerance`, throw `new TestFailure(msg + ': expected ' + expected + ' ± ' + tolerance + ' but got ' + actual)`
-
-#### Section 2: Copied Pure Functions from main.js
-
-Copy these verbatim from the current source. These are small pure functions that cannot be loaded from main.js because main.js has top-level DOM access calls.
-
-**normalizeAngle** — copy from js/main.js lines 31-36:
-```javascript
+// Normalize angle to [-PI, PI] range
 function normalizeAngle(a) {
-    a = a % (2 * Math.PI);
-    if (a > Math.PI) a -= 2 * Math.PI;
-    if (a < -Math.PI) a += 2 * Math.PI;
-    return a;
+	a = a % (2 * Math.PI);
+	if (a > Math.PI) a -= 2 * Math.PI;
+	if (a < -Math.PI) a += 2 * Math.PI;
+	return a;
+}
+
+// Accumulator thresholds for entering each behavior state
+var BEHAVIOR_THRESHOLDS = {
+	startle: 30,
+	fly: 15,
+	feed: 8,
+	groom: 8,
+	walk: 5,
+	restFatigue: 0.7,
+	exploreCuriosity: 0.4,
+	phototaxisLight: 0.5,
+};
+
+/**
+ * Returns true if the given behavior state is in its cooldown period.
+ * Requires global `behavior` object with a `cooldowns` map.
+ */
+function isCoolingDown(state, now) {
+	return behavior.cooldowns[state] !== undefined && now < behavior.cooldowns[state];
+}
+
+/**
+ * Returns true if any food item is within 50px of the fly.
+ * Requires globals `food` (array) and `fly` (object with x, y).
+ */
+function hasNearbyFood() {
+	for (var i = 0; i < food.length; i++) {
+		if (Math.hypot(fly.x - food[i].x, fly.y - food[i].y) <= 50) return true;
+	}
+	return false;
+}
+
+/**
+ * Evaluates accumulator outputs and drives to determine which behavior
+ * state should be active. Returns the state name string.
+ * Priority order (highest first): startle, fly, feed, groom, brace, rest, phototaxis, explore, walk, idle.
+ * Requires globals `BRAIN`, `behavior`, `food`, `fly`.
+ */
+function evaluateBehaviorEntry() {
+	var now = Date.now();
+	var totalWalk = BRAIN.accumWalkLeft + BRAIN.accumWalkRight;
+
+	if (BRAIN.accumStartle > BEHAVIOR_THRESHOLDS.startle && !isCoolingDown('startle', now)) {
+		return 'startle';
+	}
+	if (BRAIN.accumFlight > BEHAVIOR_THRESHOLDS.fly && !isCoolingDown('fly', now)) {
+		return 'fly';
+	}
+	if (BRAIN.accumFeed > BEHAVIOR_THRESHOLDS.feed && hasNearbyFood() && !isCoolingDown('feed', now)) {
+		return 'feed';
+	}
+	if (BRAIN.accumGroom > BEHAVIOR_THRESHOLDS.groom && !isCoolingDown('groom', now)) {
+		return 'groom';
+	}
+	if (BRAIN.stimulate.wind && BRAIN.stimulate.windStrength < 0.5 &&
+		BRAIN.accumStartle < BEHAVIOR_THRESHOLDS.startle && !isCoolingDown('brace', now)) {
+		return 'brace';
+	}
+	var restThreshold = BRAIN.stimulate.lightLevel === 0 ? 0.4 : BEHAVIOR_THRESHOLDS.restFatigue;
+	if (BRAIN.drives.fatigue > restThreshold) {
+		return 'rest';
+	}
+	if (BRAIN.stimulate.lightLevel > BEHAVIOR_THRESHOLDS.phototaxisLight &&
+		BRAIN.drives.curiosity > 0.2 && totalWalk > 3) {
+		return 'phototaxis';
+	}
+	if (totalWalk > BEHAVIOR_THRESHOLDS.walk &&
+		BRAIN.drives.curiosity > BEHAVIOR_THRESHOLDS.exploreCuriosity) {
+		return 'explore';
+	}
+	if (totalWalk > BEHAVIOR_THRESHOLDS.walk) {
+		return 'walk';
+	}
+	return 'idle';
 }
 ```
 
-**BEHAVIOR_THRESHOLDS** — copy from js/main.js lines 71-80:
-```javascript
+---
+
+### 2. MODIFY js/connectome.js
+- operation: MODIFY
+- reason: Fix misleading windDirection comment — field stores wind travel direction (drag vector), not the direction wind is blowing FROM
+- anchor: `windDirection: 0,      // radians, direction wind is blowing FROM (math convention: 0=right, PI/2=up)`
+
+#### Change
+Replace the comment on line 142:
+- old: `windDirection: 0,      // radians, direction wind is blowing FROM (math convention: 0=right, PI/2=up)`
+- new: `windDirection: 0,      // radians, wind travel direction (drag vector; 0=right, PI/2=up). Wind SOURCE = windDirection + PI.`
+
+No other changes to connectome.js.
+
+---
+
+### 3. MODIFY js/main.js
+- operation: MODIFY
+- reason: Remove the 5 functions/constants now extracted to js/fly-logic.js
+
+#### Removal 1: normalizeAngle (lines 30-36)
+- anchor: `// Normalize angle to [-PI, PI] range`
+- Delete these exact 7 lines (comment + function):
+```
+// Normalize angle to [-PI, PI] range
+function normalizeAngle(a) {
+	a = a % (2 * Math.PI);
+	if (a > Math.PI) a -= 2 * Math.PI;
+	if (a < -Math.PI) a += 2 * Math.PI;
+	return a;
+}
+```
+- Replace with nothing (blank line is fine for readability)
+
+#### Removal 2: BEHAVIOR_THRESHOLDS (lines 70-80)
+- anchor: `// Accumulator thresholds for entering each state`
+- Delete these exact 11 lines:
+```
+// Accumulator thresholds for entering each state
 var BEHAVIOR_THRESHOLDS = {
-    startle: 30,
-    fly: 15,
-    feed: 8,
-    groom: 8,
-    walk: 5,
-    restFatigue: 0.7,
-    exploreCuriosity: 0.4,
-    phototaxisLight: 0.5,
+	startle: 30,
+	fly: 15,
+	feed: 8,
+	groom: 8,
+	walk: 5,
+	restFatigue: 0.7,
+	exploreCuriosity: 0.4,
+	phototaxisLight: 0.5,
 };
 ```
+- Replace with nothing
 
-**behavior** (mutable test state) — declare as:
-```javascript
-var behavior = { current: 'idle', enterTime: 0, cooldowns: {} };
+#### Removal 3: hasNearbyFood (lines 451-459)
+- anchor: `function hasNearbyFood() {`
+- Delete the JSDoc comment and function (9 lines):
 ```
-
-**food** (mutable test state) — declare as:
-```javascript
-var food = [];
-```
-
-**fly** (mutable test state) — declare as:
-```javascript
-var fly = { x: 400, y: 300 };
-```
-
-**isCoolingDown** — copy from js/main.js lines 481-483:
-```javascript
-function isCoolingDown(state, now) {
-    return behavior.cooldowns[state] !== undefined && now < behavior.cooldowns[state];
-}
-```
-
-**hasNearbyFood** — copy from js/main.js lines 454-458:
-```javascript
+/**
+ * Returns true if any food item is within 50px of the fly.
+ */
 function hasNearbyFood() {
-    for (var i = 0; i < food.length; i++) {
-        if (Math.hypot(fly.x - food[i].x, fly.y - food[i].y) <= 50) return true;
-    }
-    return false;
+	for (var i = 0; i < food.length; i++) {
+		if (Math.hypot(fly.x - food[i].x, fly.y - food[i].y) <= 50) return true;
+	}
+	return false;
 }
 ```
+- Replace with nothing
 
-**evaluateBehaviorEntry** — copy from js/main.js lines 490-526:
-```javascript
+#### Removal 4: isCoolingDown (lines 478-483)
+- anchor: `function isCoolingDown(state, now) {`
+- Delete the JSDoc comment and function (6 lines):
+```
+/**
+ * Returns true if the given state is in its cooldown period.
+ */
+function isCoolingDown(state, now) {
+	return behavior.cooldowns[state] !== undefined && now < behavior.cooldowns[state];
+}
+```
+- Replace with nothing
+
+#### Removal 5: evaluateBehaviorEntry (lines 485-526)
+- anchor: `function evaluateBehaviorEntry() {`
+- Delete the JSDoc comment and entire function (42 lines):
+```
+/**
+ * Evaluates accumulator outputs and drives to determine which behavior
+ * state should be active. Returns the state name string.
+ * Priority order (highest first): startle, fly, feed, groom, rest, phototaxis, explore, walk, idle.
+ */
 function evaluateBehaviorEntry() {
-    var now = Date.now();
-    var totalWalk = BRAIN.accumWalkLeft + BRAIN.accumWalkRight;
-    if (BRAIN.accumStartle > BEHAVIOR_THRESHOLDS.startle && !isCoolingDown('startle', now)) {
-        return 'startle';
-    }
-    if (BRAIN.accumFlight > BEHAVIOR_THRESHOLDS.fly && !isCoolingDown('fly', now)) {
-        return 'fly';
-    }
-    if (BRAIN.accumFeed > BEHAVIOR_THRESHOLDS.feed && hasNearbyFood() && !isCoolingDown('feed', now)) {
-        return 'feed';
-    }
-    if (BRAIN.accumGroom > BEHAVIOR_THRESHOLDS.groom && !isCoolingDown('groom', now)) {
-        return 'groom';
-    }
-    if (BRAIN.stimulate.wind && BRAIN.stimulate.windStrength < 0.5 &&
-        BRAIN.accumStartle < BEHAVIOR_THRESHOLDS.startle && !isCoolingDown('brace', now)) {
-        return 'brace';
-    }
-    var restThreshold = BRAIN.stimulate.lightLevel === 0 ? 0.4 : BEHAVIOR_THRESHOLDS.restFatigue;
-    if (BRAIN.drives.fatigue > restThreshold) {
-        return 'rest';
-    }
-    if (BRAIN.stimulate.lightLevel > BEHAVIOR_THRESHOLDS.phototaxisLight &&
-        BRAIN.drives.curiosity > 0.2 && totalWalk > 3) {
-        return 'phototaxis';
-    }
-    if (totalWalk > BEHAVIOR_THRESHOLDS.walk &&
-        BRAIN.drives.curiosity > BEHAVIOR_THRESHOLDS.exploreCuriosity) {
-        return 'explore';
-    }
-    if (totalWalk > BEHAVIOR_THRESHOLDS.walk) {
-        return 'walk';
-    }
-    return 'idle';
+	var now = Date.now();
+	var totalWalk = BRAIN.accumWalkLeft + BRAIN.accumWalkRight;
+
+	if (BRAIN.accumStartle > BEHAVIOR_THRESHOLDS.startle && !isCoolingDown('startle', now)) {
+		return 'startle';
+	}
+	if (BRAIN.accumFlight > BEHAVIOR_THRESHOLDS.fly && !isCoolingDown('fly', now)) {
+		return 'fly';
+	}
+	if (BRAIN.accumFeed > BEHAVIOR_THRESHOLDS.feed && hasNearbyFood() && !isCoolingDown('feed', now)) {
+		return 'feed';
+	}
+	if (BRAIN.accumGroom > BEHAVIOR_THRESHOLDS.groom && !isCoolingDown('groom', now)) {
+		return 'groom';
+	}
+	if (BRAIN.stimulate.wind && BRAIN.stimulate.windStrength < 0.5 &&
+		BRAIN.accumStartle < BEHAVIOR_THRESHOLDS.startle && !isCoolingDown('brace', now)) {
+		return 'brace';
+	}
+	var restThreshold = BRAIN.stimulate.lightLevel === 0 ? 0.4 : BEHAVIOR_THRESHOLDS.restFatigue;
+	if (BRAIN.drives.fatigue > restThreshold) {
+		return 'rest';
+	}
+	if (BRAIN.stimulate.lightLevel > BEHAVIOR_THRESHOLDS.phototaxisLight &&
+		BRAIN.drives.curiosity > 0.2 && totalWalk > 3) {
+		return 'phototaxis';
+	}
+	if (totalWalk > BEHAVIOR_THRESHOLDS.walk &&
+		BRAIN.drives.curiosity > BEHAVIOR_THRESHOLDS.exploreCuriosity) {
+		return 'explore';
+	}
+	if (totalWalk > BEHAVIOR_THRESHOLDS.walk) {
+		return 'walk';
+	}
+	return 'idle';
+}
+```
+- Replace with nothing
+
+#### Wiring / Integration
+- After these removals, main.js still references normalizeAngle (in computeMovementForBehavior at line 676-679), BEHAVIOR_THRESHOLDS (nowhere else — only evaluateBehaviorEntry used it), isCoolingDown (nowhere else), hasNearbyFood (nowhere else — only evaluateBehaviorEntry used it), evaluateBehaviorEntry (in updateBehaviorState at line 544). All these references will resolve to the global functions defined in fly-logic.js, which is loaded before main.js.
+- The `nearestFood()` function at main.js:464-476 stays in main.js (not duplicated in tests).
+- The `behavior`, `food`, `fly` var declarations stay in main.js.
+- `BEHAVIOR_MIN_DURATION` and `BEHAVIOR_COOLDOWN` stay in main.js (not shared with tests).
+
+---
+
+### 4. MODIFY index.html
+- operation: MODIFY
+- reason: Add fly-logic.js script tag between connectome.js and main.js
+- anchor: `<script type="text/javascript" src="./js/connectome.js"></script>`
+
+#### Change
+Replace:
+```html
+    <script type="text/javascript" src="./js/connectome.js"></script>
+    <script type="text/javascript" src="./js/main.js"></script>
+```
+With:
+```html
+    <script type="text/javascript" src="./js/connectome.js"></script>
+    <script type="text/javascript" src="./js/fly-logic.js"></script>
+    <script type="text/javascript" src="./js/main.js"></script>
+```
+
+---
+
+### 5. MODIFY tests/run.html
+- operation: MODIFY
+- reason: Add fly-logic.js script tag between connectome.js and tests.js so shared functions are available to tests
+- anchor: `<script src="../js/connectome.js"></script>`
+
+#### Change
+Replace:
+```html
+<script src="../js/connectome.js"></script>
+<script src="./tests.js"></script>
+```
+With:
+```html
+<script src="../js/connectome.js"></script>
+<script src="../js/fly-logic.js"></script>
+<script src="./tests.js"></script>
+```
+
+---
+
+### 6. MODIFY tests/tests.js
+- operation: MODIFY
+- reason: (a) Remove copied function snapshots (now provided by fly-logic.js), (b) fix runAllTests for Node/CLI compatibility, (c) add new T5.1-T5.3 test coverage
+
+#### Removal: Section 2 copied functions (lines 27-105)
+- anchor: `// Section 2: Copied Pure Functions from main.js`
+- Delete everything from line 27 (`// ============================================================`) through line 105 (`}`) inclusive. This removes normalizeAngle, BEHAVIOR_THRESHOLDS, the mutable test state vars (behavior, food, fly), isCoolingDown, hasNearbyFood, and evaluateBehaviorEntry.
+- IMPORTANT: The mutable test state vars (behavior, food, fly) must be preserved. Move them into Section 3 (Reset Helper). Insert them immediately BEFORE the `resetBrainState` function definition.
+
+After removal, Section 2 becomes the mutable test state + reset helper. The code between Section 1 and the reset helper should be:
+
+```javascript
+
+// ============================================================
+// Section 2: Mutable Test State and Reset Helper
+// ============================================================
+
+// Mutable test state (these globals are used by the shared
+// functions in fly-logic.js: evaluateBehaviorEntry, isCoolingDown, hasNearbyFood)
+var behavior = { current: 'idle', enterTime: 0, cooldowns: {} };
+var food = [];
+var fly = { x: 400, y: 300 };
+
+function resetBrainState() {
+```
+
+(The resetBrainState function body is unchanged.)
+
+#### Renumber Section 3 → Section 2, Section 4 → Section 3, Section 5 → Section 4
+
+Actually, simpler: just change the section header comments as follows:
+- Delete the `// Section 2: Copied Pure Functions from main.js` header
+- Delete the `// Section 3: Reset Helper` header
+- Add a combined `// Section 2: Mutable Test State and Reset Helper` header
+- Rename `// Section 4: Test Functions` to `// Section 3: Test Functions`
+- Rename `// Section 5: Test Runner` to `// Section 4: Test Runner`
+
+#### Addition: New test functions for T5.1-T5.3 coverage
+- anchor: Add after the last existing test function (`test_priority_startle_over_feed`) and before the Test Runner section
+
+Add the following 13 new test functions:
+
+```javascript
+// --- T5.2: Dark Settling Drive Modulation Tests ---
+
+function test_dark_fatigue_gain_doubled() {
+	resetBrainState();
+	BRAIN.stimulate.lightLevel = 0.2; // < 0.3 threshold
+	BRAIN._isMoving = true;
+	BRAIN.drives.fatigue = 0.0;
+	BRAIN.updateDrives();
+	assertClose(BRAIN.drives.fatigue, 0.006, 0.0001, 'fatigue gain doubled in dark (0.006)');
+}
+
+function test_bright_fatigue_gain_normal() {
+	resetBrainState();
+	BRAIN.stimulate.lightLevel = 0.5; // >= 0.3 threshold
+	BRAIN._isMoving = true;
+	BRAIN.drives.fatigue = 0.0;
+	BRAIN.updateDrives();
+	assertClose(BRAIN.drives.fatigue, 0.003, 0.0001, 'fatigue gain normal in bright (0.003)');
+}
+
+function test_dark_curiosity_range_reduced() {
+	resetBrainState();
+	BRAIN.stimulate.lightLevel = 0.2; // < 0.3 threshold
+	BRAIN.drives.curiosity = 0.5;
+	var origRandom = Math.random;
+	Math.random = function () { return 1.0; };
+	BRAIN.updateDrives();
+	Math.random = origRandom;
+	// (1.0 - 0.5) * 0.02 = 0.01, curiosity = 0.5 + 0.01 = 0.51
+	assertClose(BRAIN.drives.curiosity, 0.51, 0.001, 'dark curiosity range is 0.02');
+}
+
+function test_bright_curiosity_range_normal() {
+	resetBrainState();
+	BRAIN.stimulate.lightLevel = 0.5; // >= 0.3 threshold
+	BRAIN.drives.curiosity = 0.5;
+	var origRandom = Math.random;
+	Math.random = function () { return 1.0; };
+	BRAIN.updateDrives();
+	Math.random = origRandom;
+	// (1.0 - 0.5) * 0.06 = 0.03, curiosity = 0.5 + 0.03 = 0.53
+	assertClose(BRAIN.drives.curiosity, 0.53, 0.001, 'bright curiosity range is 0.06');
+}
+
+function test_tonic_injection_halved_in_dark() {
+	// lightLevel=0 → tonic=4; lightLevel=0.15 (below visual threshold 0.2) → tonic=8
+	// With zero drives and no stimuli, tonic is the ONLY signal into CX_FC.
+	// CX_FC value after one tick: tonic level (< fireThreshold 22, so no cascade).
+	resetBrainState();
+	BRAIN.drives.hunger = 0; BRAIN.drives.fear = 0; BRAIN.drives.fatigue = 0;
+	BRAIN.drives.curiosity = 0; BRAIN.drives.groom = 0;
+	BRAIN.stimulate.lightLevel = 0;
+	BRAIN._isMoving = false;
+	BRAIN.update();
+	var darkVal = BRAIN.postSynaptic['CX_FC'][BRAIN.thisState];
+
+	resetBrainState();
+	BRAIN.drives.hunger = 0; BRAIN.drives.fear = 0; BRAIN.drives.fatigue = 0;
+	BRAIN.drives.curiosity = 0; BRAIN.drives.groom = 0;
+	BRAIN.stimulate.lightLevel = 0.15; // not zero → tonic=8, but below 0.2 → no visual pathway
+	BRAIN._isMoving = false;
+	BRAIN.update();
+	var dimVal = BRAIN.postSynaptic['CX_FC'][BRAIN.thisState];
+
+	assertEqual(darkVal, 4, 'CX_FC tonic in complete dark should be 4');
+	assertEqual(dimVal, 8, 'CX_FC tonic in dim (non-zero light) should be 8');
+}
+
+// --- T5.3: Temperature Stimulus Routing Tests ---
+
+function test_temperature_warm_activates_pathway() {
+	resetBrainState();
+	BRAIN.stimulate.temperature = 0.75; // > 0.65 → THERMO_WARM fires
+	BRAIN.stimulate.lightLevel = 0.15; // below visual threshold
+	BRAIN.drives.hunger = 0; BRAIN.drives.fear = 0; BRAIN.drives.fatigue = 0;
+	BRAIN.drives.curiosity = 0; BRAIN.drives.groom = 0;
+	BRAIN._isMoving = false;
+	BRAIN.update();
+	// THERMO_WARM → LH_AV: weight 3, warmIntensity = (0.75-0.5)*2 = 0.5
+	// Math.round(3 * 0.5) = 2, so LH_AV should be 2 (no other source active)
+	assertTrue(BRAIN.postSynaptic['LH_AV'][BRAIN.thisState] > 0,
+		'warm temperature activates LH_AV via THERMO_WARM');
+}
+
+function test_temperature_cool_activates_pathway() {
+	resetBrainState();
+	BRAIN.stimulate.temperature = 0.25; // < 0.35 → THERMO_COOL fires
+	BRAIN.stimulate.lightLevel = 0.15;
+	BRAIN.drives.hunger = 0; BRAIN.drives.fear = 0; BRAIN.drives.fatigue = 0;
+	BRAIN.drives.curiosity = 0; BRAIN.drives.groom = 0;
+	BRAIN._isMoving = false;
+	BRAIN.update();
+	// THERMO_COOL → LH_APP: weight 2, coolIntensity = (0.5-0.25)*2 = 0.5
+	// Math.round(2 * 0.5) = 1, so LH_APP should be 1
+	assertTrue(BRAIN.postSynaptic['LH_APP'][BRAIN.thisState] > 0,
+		'cool temperature activates LH_APP via THERMO_COOL');
+}
+
+function test_temperature_neutral_no_thermo() {
+	resetBrainState();
+	BRAIN.stimulate.temperature = 0.5; // neutral: not > 0.65 and not < 0.35
+	BRAIN.stimulate.lightLevel = 0.15;
+	BRAIN.drives.hunger = 0; BRAIN.drives.fear = 0; BRAIN.drives.fatigue = 0;
+	BRAIN.drives.curiosity = 0; BRAIN.drives.groom = 0;
+	BRAIN._isMoving = false;
+	BRAIN.update();
+	// Neither THERMO_WARM nor THERMO_COOL should fire
+	assertEqual(BRAIN.postSynaptic['LH_AV'][BRAIN.thisState], 0,
+		'neutral temperature does not activate LH_AV');
+	assertEqual(BRAIN.postSynaptic['LH_APP'][BRAIN.thisState], 0,
+		'neutral temperature does not activate LH_APP');
+}
+
+// --- T5.3: Nociception Tests ---
+
+function test_nociception_auto_clears() {
+	resetBrainState();
+	BRAIN.stimulate.nociception = true;
+	BRAIN.update();
+	assertEqual(BRAIN.stimulate.nociception, false, 'nociception auto-clears after one tick');
+}
+
+function test_nociception_activates_startle_pathway() {
+	resetBrainState();
+	BRAIN.stimulate.nociception = true;
+	BRAIN.stimulate.lightLevel = 0.15;
+	BRAIN.drives.hunger = 0; BRAIN.drives.fear = 0; BRAIN.drives.fatigue = 0;
+	BRAIN.drives.curiosity = 0; BRAIN.drives.groom = 0;
+	BRAIN._isMoving = false;
+	BRAIN.update();
+	// NOCI → DN_STARTLE weight 10. After one tick, DN_STARTLE[thisState] = 10.
+	assertTrue(BRAIN.postSynaptic['DN_STARTLE'][BRAIN.thisState] > 0,
+		'nociception activates DN_STARTLE pathway');
+}
+
+// --- T5.1: Brace Entry Condition Tests ---
+
+function test_brace_blocked_by_strong_wind() {
+	resetBrainState();
+	BRAIN.accumStartle = 0;
+	BRAIN.accumFlight = 0;
+	BRAIN.accumFeed = 0;
+	BRAIN.accumGroom = 0;
+	BRAIN.stimulate.wind = true;
+	BRAIN.stimulate.windStrength = 0.7; // >= 0.5 threshold
+	assertTrue(evaluateBehaviorEntry() !== 'brace', 'brace blocked when windStrength >= 0.5');
+}
+
+function test_brace_blocked_by_no_wind() {
+	resetBrainState();
+	BRAIN.accumStartle = 0;
+	BRAIN.accumFlight = 0;
+	BRAIN.accumFeed = 0;
+	BRAIN.accumGroom = 0;
+	BRAIN.stimulate.wind = false;
+	BRAIN.stimulate.windStrength = 0.3;
+	assertTrue(evaluateBehaviorEntry() !== 'brace', 'brace blocked when wind is not active');
+}
+
+function test_brace_blocked_by_high_startle() {
+	resetBrainState();
+	BRAIN.accumStartle = 35; // > threshold 30
+	BRAIN.accumFlight = 0;
+	BRAIN.accumFeed = 0;
+	BRAIN.accumGroom = 0;
+	BRAIN.stimulate.wind = true;
+	BRAIN.stimulate.windStrength = 0.3;
+	var result = evaluateBehaviorEntry();
+	assertEqual(result, 'startle', 'high startle takes priority over brace');
 }
 ```
 
-#### Section 3: Reset Helper
+#### Modification: runAllTests function (Section 5 → Section 4)
+- anchor: `function runAllTests() {`
+- Replace the ENTIRE runAllTests function (lines 433-459) with the following Node/CLI-compatible version:
 
+```javascript
+function runAllTests() {
+	var scope = typeof globalThis !== 'undefined' ? globalThis :
+	            typeof window !== 'undefined' ? window :
+	            typeof global !== 'undefined' ? global : this;
+	var tests = [];
+	for (var key in scope) {
+		if (key.indexOf('test_') === 0 && typeof scope[key] === 'function') {
+			tests.push({ name: key, fn: scope[key] });
+		}
+	}
+	tests.sort(function (a, b) {
+		return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0);
+	});
+
+	var passed = 0, failed = 0, failures = [];
+	var resultsHTML = '';
+	for (var i = 0; i < tests.length; i++) {
+		var test = tests[i];
+		try {
+			test.fn();
+			passed++;
+			resultsHTML += '<div class="test-result pass">' + test.name + '</div>';
+		} catch (e) {
+			failed++;
+			var msg = test.name + ': ' + (e.message || e);
+			failures.push(msg);
+			resultsHTML += '<div class="test-result fail">' + msg + '</div>';
+		}
+	}
+
+	// DOM output (browser path)
+	if (typeof document !== 'undefined') {
+		var resultsEl = document.getElementById('results');
+		if (resultsEl) resultsEl.innerHTML = resultsHTML;
+		var summaryEl = document.getElementById('summary');
+		if (summaryEl) {
+			var total = passed + failed;
+			summaryEl.innerHTML = '<span class="summary-pass">' + passed + ' passed</span> / <span class="summary-fail">' + failed + ' failed</span> / ' + total + ' total';
+		}
+	}
+
+	// CLI output (always log to console when available)
+	if (typeof console !== 'undefined') {
+		var total = passed + failed;
+		console.log(passed + ' passed / ' + failed + ' failed / ' + total + ' total');
+		for (var f = 0; f < failures.length; f++) {
+			console.log('FAIL ' + failures[f]);
+		}
+	}
+
+	// Node.js exit code (surface failures to CI/automation)
+	if (failed > 0 && typeof process !== 'undefined') {
+		process.exitCode = 1;
+	}
+}
 ```
-function resetBrainState()
+
+Key differences from the old runAllTests:
+1. `window` → `scope` via typeof fallback chain (`globalThis` → `window` → `global` → `this`) for Node.js compatibility
+2. `document.getElementById` calls guarded behind `typeof document !== 'undefined'`
+3. Added console.log output block: logs summary line and each failure message
+4. Added `process.exitCode = 1` when `failed > 0`, guarded behind `typeof process !== 'undefined'`
+5. Failure messages collected into `failures` array for both DOM and console output
+
+---
+
+### 7. CREATE tests/run-node.js
+- operation: CREATE
+- reason: Provide a Node.js entry point that loads all script files into global scope (via vm.runInThisContext) and runs the test suite, enabling `node tests/run-node.js` as the CLI test command
+
+#### File content (exact):
+```javascript
+#!/usr/bin/env node
+// Node.js test runner for FlyBrain.
+// Loads all scripts into the V8 global context (simulating browser <script> tags)
+// then calls runAllTests().
+var fs = require('fs');
+var vm = require('vm');
+var path = require('path');
+
+var root = path.join(__dirname, '..');
+var files = [
+	'js/constants.js',
+	'js/connectome.js',
+	'js/fly-logic.js',
+	'tests/tests.js',
+];
+
+for (var i = 0; i < files.length; i++) {
+	var filePath = path.join(root, files[i]);
+	var code = fs.readFileSync(filePath, 'utf8');
+	vm.runInThisContext(code, { filename: files[i] });
+}
+
+runAllTests();
 ```
-- purpose: Reset BRAIN to a clean initialized state for each test
-- logic:
-  1. Call `BRAIN.setup()`
-  2. Set `BRAIN.thisState = 0`
-  3. Set `BRAIN.nextState = 1`
-  4. Set `BRAIN.accumWalkLeft = 0`
-  5. Set `BRAIN.accumWalkRight = 0`
-  6. Set `BRAIN.accumFlight = 0`
-  7. Set `BRAIN.accumFeed = 0`
-  8. Set `BRAIN.accumGroom = 0`
-  9. Set `BRAIN.accumStartle = 0`
-  10. Set `BRAIN.accumHead = 0`
-  11. Set `BRAIN.accumleft = 0`
-  12. Set `BRAIN.accumright = 0`
-  13. Set `BRAIN._isMoving = false`
-  14. Set `BRAIN._isFeeding = false`
-  15. Set `BRAIN._isGrooming = false`
-  16. Reset `BRAIN.stimulate` to: `{ touch: false, touchLocation: null, foodNearby: false, foodContact: false, dangerOdor: false, wind: false, windStrength: 0, windDirection: 0, lightLevel: 1, nociception: false, temperature: 0.5 }`
-  17. Reset `BRAIN.drives` to: `{ hunger: 0.3, fear: 0.0, fatigue: 0.0, curiosity: 0.5, groom: 0.1 }`
-  18. Reset `behavior` to: `{ current: 'idle', enterTime: 0, cooldowns: {} }`
-  19. Reset `food` to: `[]`
-  20. Reset `fly` to: `{ x: 400, y: 300 }`
 
-#### Section 4: Test Functions
+#### Wiring / Integration
+- `vm.runInThisContext` executes each file's code in the current V8 context, so `var` and `function` declarations become globals — this simulates the browser's `<script>` tag loading behavior
+- Load order matches the browser: constants.js → connectome.js → fly-logic.js → tests.js
+- After loading, `runAllTests` is a global function (from tests.js) and is called directly
+- When tests fail, `process.exitCode = 1` is set inside runAllTests, so the Node process exits with code 1
 
-All test functions are named `test_*` and take no arguments. They call assertion helpers and throw `TestFailure` on failure. Each test must call `resetBrainState()` first.
-
-##### Connectome Signal Propagation Tests
-
-**test_setup_initializes_all_neurons**
-- purpose: Verify BRAIN.setup() creates postSynaptic entries for all neurons in weights
-- logic:
-  1. Call `resetBrainState()`
-  2. For each key `pre` in `weights`: call `assertTrue(BRAIN.postSynaptic[pre] !== undefined, 'missing postSynaptic for ' + pre)`
-  3. For each key `pre` in `weights`, for each key `post` in `weights[pre]`: call `assertTrue(BRAIN.postSynaptic[post] !== undefined, 'missing postSynaptic for target ' + post)`
-  4. Verify each postSynaptic entry is a 2-element array initialized to `[0, 0]`: for a sample neuron `'VIS_R1R6'`, call `assertEqual(BRAIN.postSynaptic['VIS_R1R6'][0], 0, 'VIS_R1R6 state 0')` and `assertEqual(BRAIN.postSynaptic['VIS_R1R6'][1], 0, 'VIS_R1R6 state 1')`
-
-**test_dendriteAccumulate_propagates_to_targets**
-- purpose: Verify dendriteAccumulate('VIS_R1R6') propagates signal to VIS_ME and VIS_LO
-- logic:
-  1. Call `resetBrainState()`
-  2. Call `BRAIN.dendriteAccumulate('VIS_R1R6')`
-  3. Assert `BRAIN.postSynaptic['VIS_ME'][BRAIN.nextState] === 8` (weight from constants.js VIS_R1R6 -> VIS_ME is 8)
-  4. Assert `BRAIN.postSynaptic['VIS_LPTC'][BRAIN.nextState] === 4` (weight from VIS_R1R6 -> VIS_LPTC is 4)
-  5. Assert `BRAIN.postSynaptic['DRIVE_CURIOSITY'][BRAIN.nextState] === 2` (weight from VIS_R1R6 -> DRIVE_CURIOSITY is 2)
-  6. Verify a neuron NOT in VIS_R1R6's targets is still 0: assert `BRAIN.postSynaptic['MN_PROBOSCIS'][BRAIN.nextState] === 0`
-
-**test_dendriteAccumulate_is_additive**
-- purpose: Verify calling dendriteAccumulate twice doubles the signal
-- logic:
-  1. Call `resetBrainState()`
-  2. Call `BRAIN.dendriteAccumulate('VIS_R1R6')` twice
-  3. Assert `BRAIN.postSynaptic['VIS_ME'][BRAIN.nextState] === 16` (8 * 2)
-
-**test_dendriteAccumulateScaled_applies_scale**
-- purpose: Verify dendriteAccumulateScaled applies the scale factor and rounds
-- logic:
-  1. Call `resetBrainState()`
-  2. Call `BRAIN.dendriteAccumulateScaled('VIS_R1R6', 0.5)`
-  3. Assert `BRAIN.postSynaptic['VIS_ME'][BRAIN.nextState] === Math.round(8 * 0.5)` which is 4
-  4. Assert `BRAIN.postSynaptic['VIS_LPTC'][BRAIN.nextState] === Math.round(4 * 0.5)` which is 2
-
-**test_fireNeuron_cascades_and_resets**
-- purpose: Verify fireNeuron propagates signal and resets the fired neuron's nextState to 0
-- logic:
-  1. Call `resetBrainState()`
-  2. Manually set `BRAIN.postSynaptic['VIS_ME'][BRAIN.nextState] = 50` (above fire threshold, though fireNeuron doesn't check threshold — it just fires)
-  3. Call `BRAIN.fireNeuron('VIS_ME')`
-  4. Assert `BRAIN.postSynaptic['VIS_ME'][BRAIN.nextState] === 0` (reset after firing)
-  5. Assert `BRAIN.postSynaptic['VIS_LO'][BRAIN.nextState] === 7` (VIS_ME -> VIS_LO weight is 7)
-  6. Assert `BRAIN.postSynaptic['VIS_LPTC'][BRAIN.nextState] === 6` (VIS_ME -> VIS_LPTC weight is 6)
-
-**test_readMotor_drains_to_zero**
-- purpose: Verify motorcontrol reads motor neuron state and drains it to zero
-- logic:
-  1. Call `resetBrainState()`
-  2. Set `BRAIN.postSynaptic['MN_PROBOSCIS'][BRAIN.nextState] = 25`
-  3. Call `BRAIN.motorcontrol()`
-  4. Assert `BRAIN.postSynaptic['MN_PROBOSCIS'][BRAIN.nextState] === 0` (drained by readMotor)
-  5. Assert `BRAIN.accumFeed === 25` (the value was read into accumFeed)
-
-**test_motor_accumulator_floors_at_zero**
-- purpose: Verify negative motor accumulations are floored at 0
-- logic:
-  1. Call `resetBrainState()`
-  2. Set `BRAIN.postSynaptic['MN_PROBOSCIS'][BRAIN.nextState] = -5`
-  3. Call `BRAIN.motorcontrol()`
-  4. Assert `BRAIN.accumFeed === 0` (floored)
-
-##### Drive System Tests
-
-**test_hunger_increases_per_tick**
-- purpose: Verify hunger increases by 0.005 when not feeding
-- logic:
-  1. Call `resetBrainState()`
-  2. Set `BRAIN.drives.hunger = 0.3`
-  3. Set `BRAIN._isFeeding = false`
-  4. Call `BRAIN.updateDrives()`
-  5. Assert `assertClose(BRAIN.drives.hunger, 0.305, 0.0001, 'hunger increase')`
-
-**test_hunger_decreases_when_feeding**
-- purpose: Verify hunger decreases by 0.3 when feeding (net: +0.005 - 0.3 = -0.295)
-- logic:
-  1. Call `resetBrainState()`
-  2. Set `BRAIN.drives.hunger = 0.5`
-  3. Set `BRAIN._isFeeding = true`
-  4. Call `BRAIN.updateDrives()`
-  5. Assert `assertClose(BRAIN.drives.hunger, 0.205, 0.0001, 'hunger decrease when feeding')` (0.5 + 0.005 - 0.3 = 0.205)
-
-**test_fear_spikes_on_touch**
-- purpose: Verify fear increases by 0.3 on touch, then decays by 0.85
-- logic:
-  1. Call `resetBrainState()`
-  2. Set `BRAIN.drives.fear = 0.0`
-  3. Set `BRAIN.stimulate.touch = true`
-  4. Call `BRAIN.updateDrives()`
-  5. Expected: fear = (0.0 + 0.3) * 0.85 = 0.255
-  6. Assert `assertClose(BRAIN.drives.fear, 0.255, 0.0001, 'fear spike on touch')`
-
-**test_fear_exponential_decay**
-- purpose: Verify fear decays by factor 0.85 each tick with no stimulus
-- logic:
-  1. Call `resetBrainState()`
-  2. Set `BRAIN.drives.fear = 1.0`
-  3. Set `BRAIN.stimulate.touch = false`
-  4. Set `BRAIN.stimulate.wind = false`
-  5. Set `BRAIN.stimulate.dangerOdor = false`
-  6. Call `BRAIN.updateDrives()`
-  7. Assert `assertClose(BRAIN.drives.fear, 0.85, 0.0001, 'fear decay')`
-
-**test_drives_clamped_to_zero**
-- purpose: Verify drives cannot go below 0
-- logic:
-  1. Call `resetBrainState()`
-  2. Set `BRAIN.drives.hunger = 0.0`
-  3. Set `BRAIN._isFeeding = true` (hunger will try to go to 0.0 + 0.005 - 0.3 = -0.295)
-  4. Call `BRAIN.updateDrives()`
-  5. Assert `assertEqual(BRAIN.drives.hunger, 0, 'hunger clamped at zero')`
-
-**test_drives_clamped_to_one**
-- purpose: Verify drives cannot exceed 1
-- logic:
-  1. Call `resetBrainState()`
-  2. Set `BRAIN.drives.hunger = 0.999`
-  3. Set `BRAIN._isFeeding = false`
-  4. Call `BRAIN.updateDrives()`
-  5. Assert `assertEqual(BRAIN.drives.hunger, 1, 'hunger clamped at one')` (0.999 + 0.005 = 1.004, clamped to 1)
-
-**test_fear_wind_contribution**
-- purpose: Verify wind above 0.5 strength adds fear
-- logic:
-  1. Call `resetBrainState()`
-  2. Set `BRAIN.drives.fear = 0.0`
-  3. Set `BRAIN.stimulate.wind = true`
-  4. Set `BRAIN.stimulate.windStrength = 0.8`
-  5. Set `BRAIN.stimulate.touch = false`
-  6. Set `BRAIN.stimulate.dangerOdor = false`
-  7. Call `BRAIN.updateDrives()`
-  8. Expected fear: (0.0 + 0.2 * 0.8) * 0.85 = 0.16 * 0.85 = 0.136
-  9. Assert `assertClose(BRAIN.drives.fear, 0.136, 0.0001, 'fear from wind')`
-
-**test_fear_no_wind_contribution_below_threshold**
-- purpose: Verify wind at 0.5 or below does not add fear
-- logic:
-  1. Call `resetBrainState()`
-  2. Set `BRAIN.drives.fear = 0.0`
-  3. Set `BRAIN.stimulate.wind = true`
-  4. Set `BRAIN.stimulate.windStrength = 0.5`
-  5. Set `BRAIN.stimulate.touch = false`
-  6. Set `BRAIN.stimulate.dangerOdor = false`
-  7. Call `BRAIN.updateDrives()`
-  8. Expected fear: 0.0 * 0.85 = 0.0 (wind at exactly 0.5 does not pass `> 0.5` check)
-  9. Assert `assertClose(BRAIN.drives.fear, 0.0, 0.0001, 'no fear from weak wind')`
-
-##### Angle Normalization Tests
-
-**test_normalizeAngle_zero**
-- purpose: Verify normalizeAngle(0) returns 0
-- logic:
-  1. Assert `assertClose(normalizeAngle(0), 0, 0.0001, 'normalizeAngle(0)')`
-
-**test_normalizeAngle_pi**
-- purpose: Verify normalizeAngle(PI) returns PI
-- logic:
-  1. Assert `assertClose(normalizeAngle(Math.PI), Math.PI, 0.0001, 'normalizeAngle(PI)')`
-
-**test_normalizeAngle_neg_pi**
-- purpose: Verify normalizeAngle(-PI) returns -PI
-- logic:
-  1. Assert `assertClose(normalizeAngle(-Math.PI), -Math.PI, 0.0001, 'normalizeAngle(-PI)')`
-
-**test_normalizeAngle_3pi**
-- purpose: Verify normalizeAngle(3*PI) returns PI (3PI % 2PI = PI)
-- logic:
-  1. Assert `assertClose(normalizeAngle(3 * Math.PI), Math.PI, 0.0001, 'normalizeAngle(3PI)')`
-
-**test_normalizeAngle_neg5pi**
-- purpose: Verify normalizeAngle(-5*PI) returns -PI (-5PI % 2PI = -PI)
-- logic:
-  1. Assert `assertClose(normalizeAngle(-5 * Math.PI), -Math.PI, 0.0001, 'normalizeAngle(-5PI)')`
-
-**test_normalizeAngle_large_positive**
-- purpose: Verify normalizeAngle(7) wraps correctly (7 - 2PI ≈ 0.717)
-- logic:
-  1. var result = normalizeAngle(7)
-  2. Assert `assertTrue(result >= -Math.PI && result <= Math.PI, 'normalizeAngle(7) in range')`
-  3. Assert `assertClose(result, 7 - 2 * Math.PI, 0.0001, 'normalizeAngle(7) value')`
-
-##### Behavior Threshold Tests
-
-**test_startle_entry**
-- purpose: Verify accumStartle above 30 with no cooldown returns 'startle'
-- logic:
-  1. Call `resetBrainState()`
-  2. Set `BRAIN.accumStartle = 35`
-  3. Set `behavior.cooldowns = {}` (no cooldowns)
-  4. Assert `assertEqual(evaluateBehaviorEntry(), 'startle', 'startle entry')`
-
-**test_startle_blocked_by_cooldown**
-- purpose: Verify startle is blocked when cooling down
-- logic:
-  1. Call `resetBrainState()`
-  2. Set `BRAIN.accumStartle = 35`
-  3. Set `behavior.cooldowns = { startle: Date.now() + 10000 }` (cooldown active)
-  4. Assert `assertTrue(evaluateBehaviorEntry() !== 'startle', 'startle blocked by cooldown')`
-
-**test_fly_entry**
-- purpose: Verify accumFlight above 15 with no cooldown returns 'fly'
-- logic:
-  1. Call `resetBrainState()`
-  2. Set `BRAIN.accumFlight = 20`
-  3. Set `BRAIN.accumStartle = 0` (below startle threshold)
-  4. Assert `assertEqual(evaluateBehaviorEntry(), 'fly', 'fly entry')`
-
-**test_feed_entry**
-- purpose: Verify accumFeed above 8 with nearby food returns 'feed'
-- logic:
-  1. Call `resetBrainState()`
-  2. Set `BRAIN.accumFeed = 10`
-  3. Set `BRAIN.accumStartle = 0`
-  4. Set `BRAIN.accumFlight = 0`
-  5. Set `food = [{ x: fly.x + 10, y: fly.y }]` (within 50px)
-  6. Assert `assertEqual(evaluateBehaviorEntry(), 'feed', 'feed entry')`
-
-**test_feed_blocked_without_food**
-- purpose: Verify feed is not entered without nearby food even with high accumFeed
-- logic:
-  1. Call `resetBrainState()`
-  2. Set `BRAIN.accumFeed = 10`
-  3. Set `BRAIN.accumStartle = 0`
-  4. Set `BRAIN.accumFlight = 0`
-  5. Set `food = []` (no food)
-  6. Assert `assertTrue(evaluateBehaviorEntry() !== 'feed', 'feed blocked without food')`
-
-**test_groom_entry**
-- purpose: Verify accumGroom above 8 returns 'groom'
-- logic:
-  1. Call `resetBrainState()`
-  2. Set `BRAIN.accumGroom = 10`
-  3. Set `BRAIN.accumStartle = 0`
-  4. Set `BRAIN.accumFlight = 0`
-  5. Set `BRAIN.accumFeed = 0`
-  6. Assert `assertEqual(evaluateBehaviorEntry(), 'groom', 'groom entry')`
-
-**test_rest_entry_high_fatigue**
-- purpose: Verify high fatigue (above 0.7) returns 'rest'
-- logic:
-  1. Call `resetBrainState()`
-  2. Set all accumulators to 0: `BRAIN.accumStartle = 0; BRAIN.accumFlight = 0; BRAIN.accumFeed = 0; BRAIN.accumGroom = 0; BRAIN.accumWalkLeft = 0; BRAIN.accumWalkRight = 0`
-  3. Set `BRAIN.stimulate.wind = false`
-  4. Set `BRAIN.drives.fatigue = 0.8`
-  5. Assert `assertEqual(evaluateBehaviorEntry(), 'rest', 'rest entry from fatigue')`
-
-**test_rest_lower_threshold_in_dark**
-- purpose: Verify rest threshold drops to 0.4 when lightLevel is 0
-- logic:
-  1. Call `resetBrainState()`
-  2. Set all accumulators to 0
-  3. Set `BRAIN.stimulate.wind = false`
-  4. Set `BRAIN.stimulate.lightLevel = 0`
-  5. Set `BRAIN.drives.fatigue = 0.5` (above 0.4 but below 0.7)
-  6. Assert `assertEqual(evaluateBehaviorEntry(), 'rest', 'rest entry in dark')`
-
-**test_brace_entry**
-- purpose: Verify brace state entry with weak wind
-- logic:
-  1. Call `resetBrainState()`
-  2. Set `BRAIN.accumStartle = 0; BRAIN.accumFlight = 0; BRAIN.accumFeed = 0; BRAIN.accumGroom = 0`
-  3. Set `BRAIN.stimulate.wind = true`
-  4. Set `BRAIN.stimulate.windStrength = 0.3`
-  5. Assert `assertEqual(evaluateBehaviorEntry(), 'brace', 'brace entry')`
-
-**test_idle_when_nothing_active**
-- purpose: Verify idle returned when no conditions met
-- logic:
-  1. Call `resetBrainState()`
-  2. Set all accumulators to 0
-  3. Set `BRAIN.stimulate.wind = false`
-  4. Set `BRAIN.drives.fatigue = 0.0`
-  5. Set `BRAIN.drives.curiosity = 0.0`
-  6. Assert `assertEqual(evaluateBehaviorEntry(), 'idle', 'idle when nothing active')`
-
-**test_priority_startle_over_feed**
-- purpose: Verify startle takes priority over feed when both conditions are met
-- logic:
-  1. Call `resetBrainState()`
-  2. Set `BRAIN.accumStartle = 35`
-  3. Set `BRAIN.accumFeed = 10`
-  4. Set `food = [{ x: fly.x + 10, y: fly.y }]`
-  5. Assert `assertEqual(evaluateBehaviorEntry(), 'startle', 'startle priority over feed')`
-
-#### Section 5: Test Runner
-
-```
-function runAllTests()
-```
-- purpose: Discover and run all test_* functions, render results to #summary and #results
-- logic:
-  1. Declare `var tests = []`
-  2. Iterate over all properties of `window` (using `for (var key in window)`). For each key that starts with `'test_'` and `typeof window[key] === 'function'`, push `{ name: key, fn: window[key] }` into `tests`
-  3. Sort `tests` alphabetically by `name` for deterministic output
-  4. Declare `var passed = 0, failed = 0, resultsHTML = ''`
-  5. For each test in `tests`:
-     a. Try: call `test.fn()`, increment `passed`, append `'<div class="test-result pass">' + test.name + '</div>'` to `resultsHTML`
-     b. Catch(e): increment `failed`, append `'<div class="test-result fail">' + test.name + ': ' + (e.message || e) + '</div>'` to `resultsHTML`
-  6. Set `document.getElementById('results').innerHTML = resultsHTML`
-  7. Compute `var total = passed + failed`
-  8. Set `document.getElementById('summary').innerHTML = '<span class="summary-pass">' + passed + ' passed</span> / <span class="summary-fail">' + failed + ' failed</span> / ' + total + ' total'`
+---
 
 ## Verification
-- build: no build step (vanilla JS, open HTML in browser)
-- lint: no lint configured
-- test: open `tests/run.html` in a browser; all tests should show as passed with 0 failed
-- smoke: the builder should verify the file exists and is valid HTML by running `cat tests/run.html | head -5` to confirm it starts with `<!DOCTYPE html>`. Then verify tests/tests.js defines all expected test functions by running `grep -c 'function test_' tests/tests.js` and confirming the count is at least 24. As a final check, if a headless browser is available, run: `cd /work && python3 -m http.server 8765 &` then `sleep 1 && curl -s http://localhost:8765/tests/run.html | grep -o '[0-9]* passed'` to confirm the test page loads (kill the server after).
+- build: No build step (vanilla JS project)
+- lint: No linter configured
+- test: `node tests/run-node.js`
+- smoke:
+  1. Run `node tests/run-node.js` and confirm:
+     - Output shows "X passed / 0 failed / X total" with X >= 40
+     - Exit code is 0: `echo $?` should print `0`
+  2. Inject a deliberate failure to verify the fix works:
+     - Temporarily add `function test_deliberate_fail() { throw new TestFailure('intentional'); }` to tests.js
+     - Run `node tests/run-node.js`
+     - Confirm output includes "FAIL test_deliberate_fail: intentional"
+     - Confirm exit code is 1: `echo $?` should print `1`
+     - Remove the temporary test function
+  3. Verify the browser path is unaffected:
+     - Open `tests/run.html` in a browser and confirm all tests pass with the green/red DOM display
 
 ## Constraints
-- Do NOT modify any existing files (js/main.js, js/connectome.js, js/constants.js, index.html, css/main.css)
-- Do NOT add any external dependencies or npm packages
-- Do NOT add a build step — both new files must work by simply opening tests/run.html in a browser
-- The tests/tests.js file must copy `normalizeAngle`, `evaluateBehaviorEntry`, `isCoolingDown`, `hasNearbyFood`, `BEHAVIOR_THRESHOLDS`, and the `behavior`/`food`/`fly` variable declarations verbatim from main.js — do NOT import main.js via a script tag (it crashes on load due to `document.getElementById('clearButton')` on line 9)
-- Use only the CSS custom properties listed above — no additional hex colors, no gradients, no glow effects
-- All assertion messages must be descriptive enough to identify which check failed without reading the code
-- Every test function name must start with `test_` so the runner discovers it
-- The `resetBrainState()` function must be called at the start of every test function to ensure test isolation
+- Do NOT modify js/constants.js (read-only weights)
+- Do NOT modify any files outside the listed set: js/fly-logic.js (create), js/main.js, js/connectome.js, index.html, tests/run.html, tests/tests.js, tests/run-node.js (create)
+- Do NOT add any npm packages, build tools, or module syntax (import/export/require) to the browser-facing files (fly-logic.js, main.js, connectome.js, tests.js)
+- Do NOT change the behavior of any existing functions — only move them (fly-logic.js extraction) or fix the test runner
+- The `nearestFood()` function stays in main.js (it is not duplicated in tests)
+- `BEHAVIOR_MIN_DURATION` and `BEHAVIOR_COOLDOWN` stay in main.js (not shared with tests)
+- Use tabs for indentation in all JS files (matching existing project style)
+- The only file that may use `require` is tests/run-node.js

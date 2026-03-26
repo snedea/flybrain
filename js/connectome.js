@@ -139,7 +139,7 @@ BRAIN.stimulate = {
 	dangerOdor: false,
 	wind: false,
 	windStrength: 0,       // 0-1
-	windDirection: 0,      // radians, direction wind is blowing FROM (math convention: 0=right, PI/2=up)
+	windDirection: 0,      // radians, wind travel direction (drag vector; 0=right, PI/2=up). Wind SOURCE = windDirection + PI.
 	lightLevel: 1,         // 0-1 (0=dark, 1=bright)
 	nociception: false,   // pain response (triggered by rapid repeated touch)
 	temperature: 0.5,      // 0-1 (0=cold, 1=hot), 0.5 = preferred

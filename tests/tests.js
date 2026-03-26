@@ -25,88 +25,14 @@ function assertClose(actual, expected, tolerance, msg) {
 }
 
 // ============================================================
-// Section 2: Copied Pure Functions from main.js
+// Section 2: Mutable Test State and Reset Helper
 // ============================================================
 
-// normalizeAngle -- copied from js/main.js lines 31-36
-function normalizeAngle(a) {
-	a = a % (2 * Math.PI);
-	if (a > Math.PI) a -= 2 * Math.PI;
-	if (a < -Math.PI) a += 2 * Math.PI;
-	return a;
-}
-
-// BEHAVIOR_THRESHOLDS -- copied from js/main.js lines 71-80
-var BEHAVIOR_THRESHOLDS = {
-	startle: 30,
-	fly: 15,
-	feed: 8,
-	groom: 8,
-	walk: 5,
-	restFatigue: 0.7,
-	exploreCuriosity: 0.4,
-	phototaxisLight: 0.5,
-};
-
-// Mutable test state
+// Mutable test state (these globals are used by the shared
+// functions in fly-logic.js: evaluateBehaviorEntry, isCoolingDown, hasNearbyFood)
 var behavior = { current: 'idle', enterTime: 0, cooldowns: {} };
 var food = [];
 var fly = { x: 400, y: 300 };
-
-// isCoolingDown -- copied from js/main.js lines 481-483
-function isCoolingDown(state, now) {
-	return behavior.cooldowns[state] !== undefined && now < behavior.cooldowns[state];
-}
-
-// hasNearbyFood -- copied from js/main.js lines 454-458
-function hasNearbyFood() {
-	for (var i = 0; i < food.length; i++) {
-		if (Math.hypot(fly.x - food[i].x, fly.y - food[i].y) <= 50) return true;
-	}
-	return false;
-}
-
-// evaluateBehaviorEntry -- copied from js/main.js lines 490-526
-function evaluateBehaviorEntry() {
-	var now = Date.now();
-	var totalWalk = BRAIN.accumWalkLeft + BRAIN.accumWalkRight;
-	if (BRAIN.accumStartle > BEHAVIOR_THRESHOLDS.startle && !isCoolingDown('startle', now)) {
-		return 'startle';
-	}
-	if (BRAIN.accumFlight > BEHAVIOR_THRESHOLDS.fly && !isCoolingDown('fly', now)) {
-		return 'fly';
-	}
-	if (BRAIN.accumFeed > BEHAVIOR_THRESHOLDS.feed && hasNearbyFood() && !isCoolingDown('feed', now)) {
-		return 'feed';
-	}
-	if (BRAIN.accumGroom > BEHAVIOR_THRESHOLDS.groom && !isCoolingDown('groom', now)) {
-		return 'groom';
-	}
-	if (BRAIN.stimulate.wind && BRAIN.stimulate.windStrength < 0.5 &&
-		BRAIN.accumStartle < BEHAVIOR_THRESHOLDS.startle && !isCoolingDown('brace', now)) {
-		return 'brace';
-	}
-	var restThreshold = BRAIN.stimulate.lightLevel === 0 ? 0.4 : BEHAVIOR_THRESHOLDS.restFatigue;
-	if (BRAIN.drives.fatigue > restThreshold) {
-		return 'rest';
-	}
-	if (BRAIN.stimulate.lightLevel > BEHAVIOR_THRESHOLDS.phototaxisLight &&
-		BRAIN.drives.curiosity > 0.2 && totalWalk > 3) {
-		return 'phototaxis';
-	}
-	if (totalWalk > BEHAVIOR_THRESHOLDS.walk &&
-		BRAIN.drives.curiosity > BEHAVIOR_THRESHOLDS.exploreCuriosity) {
-		return 'explore';
-	}
-	if (totalWalk > BEHAVIOR_THRESHOLDS.walk) {
-		return 'walk';
-	}
-	return 'idle';
-}
-
-// ============================================================
-// Section 3: Reset Helper
-// ============================================================
 
 function resetBrainState() {
 	BRAIN.setup();
@@ -150,7 +76,7 @@ function resetBrainState() {
 }
 
 // ============================================================
-// Section 4: Test Functions
+// Section 3: Test Functions
 // ============================================================
 
 // --- Connectome Signal Propagation Tests ---
@@ -426,22 +352,197 @@ function test_priority_startle_over_feed() {
 	assertEqual(evaluateBehaviorEntry(), 'startle', 'startle priority over feed');
 }
 
+// --- T5.2: Dark Settling Drive Modulation Tests ---
+
+function test_dark_fatigue_gain_doubled() {
+	resetBrainState();
+	BRAIN.stimulate.lightLevel = 0.2; // < 0.3 threshold
+	BRAIN._isMoving = true;
+	BRAIN.drives.fatigue = 0.0;
+	BRAIN.updateDrives();
+	assertClose(BRAIN.drives.fatigue, 0.006, 0.0001, 'fatigue gain doubled in dark (0.006)');
+}
+
+function test_bright_fatigue_gain_normal() {
+	resetBrainState();
+	BRAIN.stimulate.lightLevel = 0.5; // >= 0.3 threshold
+	BRAIN._isMoving = true;
+	BRAIN.drives.fatigue = 0.0;
+	BRAIN.updateDrives();
+	assertClose(BRAIN.drives.fatigue, 0.003, 0.0001, 'fatigue gain normal in bright (0.003)');
+}
+
+function test_dark_curiosity_range_reduced() {
+	resetBrainState();
+	BRAIN.stimulate.lightLevel = 0.2; // < 0.3 threshold
+	BRAIN.drives.curiosity = 0.5;
+	var origRandom = Math.random;
+	Math.random = function () { return 1.0; };
+	BRAIN.updateDrives();
+	Math.random = origRandom;
+	// (1.0 - 0.5) * 0.02 = 0.01, curiosity = 0.5 + 0.01 = 0.51
+	assertClose(BRAIN.drives.curiosity, 0.51, 0.001, 'dark curiosity range is 0.02');
+}
+
+function test_bright_curiosity_range_normal() {
+	resetBrainState();
+	BRAIN.stimulate.lightLevel = 0.5; // >= 0.3 threshold
+	BRAIN.drives.curiosity = 0.5;
+	var origRandom = Math.random;
+	Math.random = function () { return 1.0; };
+	BRAIN.updateDrives();
+	Math.random = origRandom;
+	// (1.0 - 0.5) * 0.06 = 0.03, curiosity = 0.5 + 0.03 = 0.53
+	assertClose(BRAIN.drives.curiosity, 0.53, 0.001, 'bright curiosity range is 0.06');
+}
+
+function test_tonic_injection_halved_in_dark() {
+	// lightLevel=0 → tonic=4; lightLevel=0.15 (below visual threshold 0.2) → tonic=8
+	// With zero drives and no stimuli, tonic is the ONLY signal into CX_FC.
+	// CX_FC value after one tick: tonic level (< fireThreshold 22, so no cascade).
+	resetBrainState();
+	BRAIN.drives.hunger = 0; BRAIN.drives.fear = 0; BRAIN.drives.fatigue = 0;
+	BRAIN.drives.curiosity = 0; BRAIN.drives.groom = 0;
+	BRAIN.stimulate.lightLevel = 0;
+	BRAIN._isMoving = false;
+	BRAIN.update();
+	var darkVal = BRAIN.postSynaptic['CX_FC'][BRAIN.thisState];
+
+	resetBrainState();
+	BRAIN.drives.hunger = 0; BRAIN.drives.fear = 0; BRAIN.drives.fatigue = 0;
+	BRAIN.drives.curiosity = 0; BRAIN.drives.groom = 0;
+	BRAIN.stimulate.lightLevel = 0.15; // not zero → tonic=8, but below 0.2 → no visual pathway
+	BRAIN._isMoving = false;
+	BRAIN.update();
+	var dimVal = BRAIN.postSynaptic['CX_FC'][BRAIN.thisState];
+
+	assertEqual(darkVal, 4, 'CX_FC tonic in complete dark should be 4');
+	assertEqual(dimVal, 8, 'CX_FC tonic in dim (non-zero light) should be 8');
+}
+
+// --- T5.3: Temperature Stimulus Routing Tests ---
+
+function test_temperature_warm_activates_pathway() {
+	resetBrainState();
+	BRAIN.stimulate.temperature = 0.75; // > 0.65 → THERMO_WARM fires
+	BRAIN.stimulate.lightLevel = 0.15; // below visual threshold
+	BRAIN.drives.hunger = 0; BRAIN.drives.fear = 0; BRAIN.drives.fatigue = 0;
+	BRAIN.drives.curiosity = 0; BRAIN.drives.groom = 0;
+	BRAIN._isMoving = false;
+	BRAIN.update();
+	// THERMO_WARM → LH_AV: weight 3, warmIntensity = (0.75-0.5)*2 = 0.5
+	// Math.round(3 * 0.5) = 2, so LH_AV should be 2 (no other source active)
+	assertTrue(BRAIN.postSynaptic['LH_AV'][BRAIN.thisState] > 0,
+		'warm temperature activates LH_AV via THERMO_WARM');
+}
+
+function test_temperature_cool_activates_pathway() {
+	resetBrainState();
+	BRAIN.stimulate.temperature = 0.25; // < 0.35 → THERMO_COOL fires
+	BRAIN.stimulate.lightLevel = 0.15;
+	BRAIN.drives.hunger = 0; BRAIN.drives.fear = 0; BRAIN.drives.fatigue = 0;
+	BRAIN.drives.curiosity = 0; BRAIN.drives.groom = 0;
+	BRAIN._isMoving = false;
+	BRAIN.update();
+	// THERMO_COOL → LH_APP: weight 2, coolIntensity = (0.5-0.25)*2 = 0.5
+	// Math.round(2 * 0.5) = 1, so LH_APP should be 1
+	assertTrue(BRAIN.postSynaptic['LH_APP'][BRAIN.thisState] > 0,
+		'cool temperature activates LH_APP via THERMO_COOL');
+}
+
+function test_temperature_neutral_no_thermo() {
+	resetBrainState();
+	BRAIN.stimulate.temperature = 0.5; // neutral: not > 0.65 and not < 0.35
+	BRAIN.stimulate.lightLevel = 0.15;
+	BRAIN.drives.hunger = 0; BRAIN.drives.fear = 0; BRAIN.drives.fatigue = 0;
+	BRAIN.drives.curiosity = 0; BRAIN.drives.groom = 0;
+	BRAIN._isMoving = false;
+	BRAIN.update();
+	// Neither THERMO_WARM nor THERMO_COOL should fire
+	assertEqual(BRAIN.postSynaptic['LH_AV'][BRAIN.thisState], 0,
+		'neutral temperature does not activate LH_AV');
+	assertEqual(BRAIN.postSynaptic['LH_APP'][BRAIN.thisState], 0,
+		'neutral temperature does not activate LH_APP');
+}
+
+// --- T5.3: Nociception Tests ---
+
+function test_nociception_auto_clears() {
+	resetBrainState();
+	BRAIN.stimulate.nociception = true;
+	BRAIN.update();
+	assertEqual(BRAIN.stimulate.nociception, false, 'nociception auto-clears after one tick');
+}
+
+function test_nociception_activates_startle_pathway() {
+	resetBrainState();
+	BRAIN.stimulate.nociception = true;
+	BRAIN.stimulate.lightLevel = 0.15;
+	BRAIN.drives.hunger = 0; BRAIN.drives.fear = 0; BRAIN.drives.fatigue = 0;
+	BRAIN.drives.curiosity = 0; BRAIN.drives.groom = 0;
+	BRAIN._isMoving = false;
+	BRAIN.update();
+	// NOCI → DN_STARTLE weight 10. After one tick, DN_STARTLE[thisState] = 10.
+	assertTrue(BRAIN.postSynaptic['DN_STARTLE'][BRAIN.thisState] > 0,
+		'nociception activates DN_STARTLE pathway');
+}
+
+// --- T5.1: Brace Entry Condition Tests ---
+
+function test_brace_blocked_by_strong_wind() {
+	resetBrainState();
+	BRAIN.accumStartle = 0;
+	BRAIN.accumFlight = 0;
+	BRAIN.accumFeed = 0;
+	BRAIN.accumGroom = 0;
+	BRAIN.stimulate.wind = true;
+	BRAIN.stimulate.windStrength = 0.7; // >= 0.5 threshold
+	assertTrue(evaluateBehaviorEntry() !== 'brace', 'brace blocked when windStrength >= 0.5');
+}
+
+function test_brace_blocked_by_no_wind() {
+	resetBrainState();
+	BRAIN.accumStartle = 0;
+	BRAIN.accumFlight = 0;
+	BRAIN.accumFeed = 0;
+	BRAIN.accumGroom = 0;
+	BRAIN.stimulate.wind = false;
+	BRAIN.stimulate.windStrength = 0.3;
+	assertTrue(evaluateBehaviorEntry() !== 'brace', 'brace blocked when wind is not active');
+}
+
+function test_brace_blocked_by_high_startle() {
+	resetBrainState();
+	BRAIN.accumStartle = 35; // > threshold 30
+	BRAIN.accumFlight = 0;
+	BRAIN.accumFeed = 0;
+	BRAIN.accumGroom = 0;
+	BRAIN.stimulate.wind = true;
+	BRAIN.stimulate.windStrength = 0.3;
+	var result = evaluateBehaviorEntry();
+	assertEqual(result, 'startle', 'high startle takes priority over brace');
+}
+
 // ============================================================
-// Section 5: Test Runner
+// Section 4: Test Runner
 // ============================================================
 
 function runAllTests() {
+	var scope = typeof globalThis !== 'undefined' ? globalThis :
+	            typeof window !== 'undefined' ? window :
+	            typeof global !== 'undefined' ? global : this;
 	var tests = [];
-	for (var key in window) {
-		if (key.indexOf('test_') === 0 && typeof window[key] === 'function') {
-			tests.push({ name: key, fn: window[key] });
+	for (var key in scope) {
+		if (key.indexOf('test_') === 0 && typeof scope[key] === 'function') {
+			tests.push({ name: key, fn: scope[key] });
 		}
 	}
 	tests.sort(function (a, b) {
 		return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0);
 	});
 
-	var passed = 0, failed = 0, resultsHTML = '';
+	var passed = 0, failed = 0, failures = [];
+	var resultsHTML = '';
 	for (var i = 0; i < tests.length; i++) {
 		var test = tests[i];
 		try {
@@ -450,10 +551,34 @@ function runAllTests() {
 			resultsHTML += '<div class="test-result pass">' + test.name + '</div>';
 		} catch (e) {
 			failed++;
-			resultsHTML += '<div class="test-result fail">' + test.name + ': ' + (e.message || e) + '</div>';
+			var msg = test.name + ': ' + (e.message || e);
+			failures.push(msg);
+			resultsHTML += '<div class="test-result fail">' + msg + '</div>';
 		}
 	}
-	document.getElementById('results').innerHTML = resultsHTML;
-	var total = passed + failed;
-	document.getElementById('summary').innerHTML = '<span class="summary-pass">' + passed + ' passed</span> / <span class="summary-fail">' + failed + ' failed</span> / ' + total + ' total';
+
+	// DOM output (browser path)
+	if (typeof document !== 'undefined') {
+		var resultsEl = document.getElementById('results');
+		if (resultsEl) resultsEl.innerHTML = resultsHTML;
+		var summaryEl = document.getElementById('summary');
+		if (summaryEl) {
+			var total = passed + failed;
+			summaryEl.innerHTML = '<span class="summary-pass">' + passed + ' passed</span> / <span class="summary-fail">' + failed + ' failed</span> / ' + total + ' total';
+		}
+	}
+
+	// CLI output (always log to console when available)
+	if (typeof console !== 'undefined') {
+		var total = passed + failed;
+		console.log(passed + ' passed / ' + failed + ' failed / ' + total + ' total');
+		for (var f = 0; f < failures.length; f++) {
+			console.log('FAIL ' + failures[f]);
+		}
+	}
+
+	// Node.js exit code (surface failures to CI/automation)
+	if (failed > 0 && typeof process !== 'undefined') {
+		process.exitCode = 1;
+	}
 }

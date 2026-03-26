@@ -27,14 +27,6 @@ var windResetTime = 0;
 var dragToolOrigin = null;
 var currentDtScale = 1;
 
-// Normalize angle to [-PI, PI] range
-function normalizeAngle(a) {
-	a = a % (2 * Math.PI);
-	if (a > Math.PI) a -= 2 * Math.PI;
-	if (a < -Math.PI) a += 2 * Math.PI;
-	return a;
-}
-
 // Visual feedback effects
 var ripples = [];
 var windArrowEnd = null;
@@ -65,18 +57,6 @@ var BEHAVIOR_COOLDOWN = {
 	groom: 3000,
 	feed: 1000,
 	brace: 1000,
-};
-
-// Accumulator thresholds for entering each state
-var BEHAVIOR_THRESHOLDS = {
-	startle: 30,
-	fly: 15,
-	feed: 8,
-	groom: 8,
-	walk: 5,
-	restFatigue: 0.7,
-	exploreCuriosity: 0.4,
-	phototaxisLight: 0.5,
 };
 
 // The behavior state object
@@ -449,16 +429,6 @@ function applyTouchTool(cx, cy) {
 }
 
 /**
- * Returns true if any food item is within 50px of the fly.
- */
-function hasNearbyFood() {
-	for (var i = 0; i < food.length; i++) {
-		if (Math.hypot(fly.x - food[i].x, fly.y - food[i].y) <= 50) return true;
-	}
-	return false;
-}
-
-/**
  * Returns the nearest food item and its distance, or null if no food exists.
  */
 function nearestFood() {
@@ -473,56 +443,6 @@ function nearestFood() {
 	}
 	if (!best) return null;
 	return { item: best, dist: bestDist };
-}
-
-/**
- * Returns true if the given state is in its cooldown period.
- */
-function isCoolingDown(state, now) {
-	return behavior.cooldowns[state] !== undefined && now < behavior.cooldowns[state];
-}
-
-/**
- * Evaluates accumulator outputs and drives to determine which behavior
- * state should be active. Returns the state name string.
- * Priority order (highest first): startle, fly, feed, groom, rest, phototaxis, explore, walk, idle.
- */
-function evaluateBehaviorEntry() {
-	var now = Date.now();
-	var totalWalk = BRAIN.accumWalkLeft + BRAIN.accumWalkRight;
-
-	if (BRAIN.accumStartle > BEHAVIOR_THRESHOLDS.startle && !isCoolingDown('startle', now)) {
-		return 'startle';
-	}
-	if (BRAIN.accumFlight > BEHAVIOR_THRESHOLDS.fly && !isCoolingDown('fly', now)) {
-		return 'fly';
-	}
-	if (BRAIN.accumFeed > BEHAVIOR_THRESHOLDS.feed && hasNearbyFood() && !isCoolingDown('feed', now)) {
-		return 'feed';
-	}
-	if (BRAIN.accumGroom > BEHAVIOR_THRESHOLDS.groom && !isCoolingDown('groom', now)) {
-		return 'groom';
-	}
-	if (BRAIN.stimulate.wind && BRAIN.stimulate.windStrength < 0.5 &&
-		BRAIN.accumStartle < BEHAVIOR_THRESHOLDS.startle && !isCoolingDown('brace', now)) {
-		return 'brace';
-	}
-	var restThreshold = BRAIN.stimulate.lightLevel === 0 ? 0.4 : BEHAVIOR_THRESHOLDS.restFatigue;
-	if (BRAIN.drives.fatigue > restThreshold) {
-		return 'rest';
-	}
-	if (BRAIN.stimulate.lightLevel > BEHAVIOR_THRESHOLDS.phototaxisLight &&
-		BRAIN.drives.curiosity > 0.2 && totalWalk > 3) {
-		return 'phototaxis';
-	}
-	if (totalWalk > BEHAVIOR_THRESHOLDS.walk &&
-		BRAIN.drives.curiosity > BEHAVIOR_THRESHOLDS.exploreCuriosity) {
-		return 'explore';
-	}
-	if (totalWalk > BEHAVIOR_THRESHOLDS.walk) {
-		return 'walk';
-	}
-	return 'idle';
 }
 
 /**
