@@ -2,23 +2,51 @@
 
 <head>
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>C. Elegans Sim</title>
+    <title>FlyBrain</title>
     <link rel="stylesheet" type="text/css" href="./css/main.css">
 </head>
 
 <body>
+    <div id="toolbar">
+        <div class="toolbar-left">
+            <button class="tool-btn active" data-tool="feed">Feed</button>
+            <button class="tool-btn" data-tool="touch">Touch</button>
+            <button class="tool-btn" data-tool="air">Air</button>
+            <button class="tool-btn" data-tool="light" id="lightBtn">Light: Bright</button>
+        </div>
+        <div class="toolbar-right">
+            <span class="toolbar-title">FlyBrain</span>
+            <img id="centerButton" src="./svg/center.svg" height="24" class="noselect toolbar-icon">
+            <img id="clearButton" src="./svg/clear.svg" height="24" class="noselect toolbar-icon">
+            <a href="https://github.com/snedea/homelab/tree/main/flybrain">
+                <img id="githubButton" src="./svg/github.svg" class="noselect">
+            </a>
+        </div>
+    </div>
     <canvas id='canvas'></canvas>
-    <div id='nodeHolder'></div>
-    <label id="toggleConnectome" class="switch">
-        <input id="connectomeCheckbox" type="checkbox" checked onclick="toggleConnectome()">
-        <span class="slider round"></span>
-    </label>
-    <a href="https://github.com/Fantop/worm-sim">
-        <img id="githubButton" src="./svg/github.svg" class="noselect">
-    </a>
-    <div id="buttons">
-        <img id="centerButton" src="./svg/center.svg" height="40px" class="noselect">
-        <img id="clearButton" src="./svg/clear.svg" height="40px" class="noselect">
+    <div id="bottom-panel">
+        <div id="connectome-panel">
+            <span class="connectome-label">Connectome</span>
+            <div id="nodeHolder"></div>
+        </div>
+        <div id="drive-meters">
+            <div class="drive-row">
+                <span class="drive-label">Hunger</span>
+                <div class="drive-bar-bg"><div class="drive-bar" id="driveHunger"></div></div>
+            </div>
+            <div class="drive-row">
+                <span class="drive-label">Fear</span>
+                <div class="drive-bar-bg"><div class="drive-bar" id="driveFear"></div></div>
+            </div>
+            <div class="drive-row">
+                <span class="drive-label">Fatigue</span>
+                <div class="drive-bar-bg"><div class="drive-bar" id="driveFatigue"></div></div>
+            </div>
+            <div class="drive-row">
+                <span class="drive-label">Curiosity</span>
+                <div class="drive-bar-bg"><div class="drive-bar" id="driveCuriosity"></div></div>
+            </div>
+        </div>
     </div>
     <script type="text/javascript" src="./js/constants.js"></script>
     <script type="text/javascript" src="./js/connectome.js"></script>

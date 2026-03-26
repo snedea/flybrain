@@ -1,3 +1,24 @@
+:root {
+    --bg: #1a1a2e;
+    --surface: #16213e;
+    --surface-hover: #1a2744;
+    --surface-alpha: rgba(22, 33, 62, 0.92);
+    --border: #2a3a5c;
+    --text: #e8e8e8;
+    --text-muted: #8892a4;
+    --accent: #E3734B;
+    --accent-hover: #f0855f;
+    --accent-subtle: rgba(227, 115, 75, 0.15);
+    --success: #4ade80;
+    --warning: #fbbf24;
+    --error: #f87171;
+    --radius: 8px;
+    --neuron-sensory: #3b82f6;
+    --neuron-central: #8b5cf6;
+    --neuron-drives: #f59e0b;
+    --neuron-motor: #ef4444;
+}
+
 html,
 body {
     margin: 0;
@@ -8,108 +29,34 @@ body {
 canvas {
     display: block;
     background-color: #222;
+    transition: background-color 0.5s ease;
 }
 
 .brainNode {
     border-radius: 50%;
     display: inline-block;
-    height: 3vmin;
-    width: 3vmin;
-    text-align: center;
-    transition: opacity .5s;
-    /* trigger hardware acceleration */
-    -webkit-transform: translate3d(0, 0, 0);
-    -webkit-transform: translateZ(0);
-    -webkit-transform-style: preserve-3d;
-    will-change: transform;
-    -webkit-backface-visibility: hidden;
+    height: 6px;
+    width: 6px;
+    margin: 1px;
+    transition: opacity .3s;
 }
 
 #nodeHolder {
-    position: absolute;
-    top: 0;
-    transition: opacity .5s;
-    line-height: 0;
-}
-
-.switch {
-    position: relative;
-    display: inline-block;
-    width: 60px;
-    height: 34px;
-}
-
-.switch input {
-    display: none;
-}
-
-.slider {
-    position: absolute;
-    cursor: pointer;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: #ccc;
-    -webkit-transition: .4s;
-    transition: .4s;
-}
-
-.slider:before {
-    position: absolute;
-    content: "";
-    height: 26px;
-    width: 26px;
-    left: 4px;
-    bottom: 4px;
-    background-color: white;
-    -webkit-transition: .4s;
-    transition: .4s;
-}
-
-input:checked+.slider {
-    background-color: #55FF55;
-}
-
-input:focus+.slider {
-    box-shadow: 0 0 1px #55FF55;
-}
-
-input:checked+.slider:before {
-    -webkit-transform: translateX(26px);
-    -ms-transform: translateX(26px);
-    transform: translateX(26px);
-}
-
-.slider.round {
-    border-radius: 34px;
-}
-
-.slider.round:before {
-    border-radius: 50%;
-}
-
-#toggleConnectome {
-    position: absolute;
-    bottom: 10px;
-    left: 10px;
-    z-index: 10;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1px;
+    align-content: flex-start;
 }
 
 #githubButton {
-    position: absolute;
-    display: inline-block;
-    height: 30px;
-    bottom: 10px;
-    right: 10px;
+    height: 20px;
+    opacity: 0.6;
+    transition: opacity 0.2s ease;
+    vertical-align: middle;
 }
 
-#buttons {
-    position: absolute;
-    display: inline-block;
-    bottom: 0px;
-    left: calc(50% - 40px);
-    cursor: pointer;
+#githubButton:hover {
+    opacity: 1;
 }
 
 .noselect {
@@ -119,4 +66,158 @@ input:checked+.slider:before {
     -moz-user-select: none;
     -ms-user-select: none;
     user-select: none;
+}
+
+/* --- Toolbar --- */
+#toolbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 44px;
+    background: var(--surface-alpha);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 1rem;
+    z-index: 20;
+    font-family: system-ui, -apple-system, sans-serif;
+}
+
+.toolbar-left {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.toolbar-right {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+}
+
+.toolbar-title {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    font-weight: 500;
+    letter-spacing: 0.03em;
+}
+
+.toolbar-icon {
+    cursor: pointer;
+    opacity: 0.6;
+    transition: opacity 0.2s ease;
+    vertical-align: middle;
+}
+
+.toolbar-icon:hover {
+    opacity: 1;
+}
+
+.tool-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 0.25rem 0.75rem;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-family: system-ui, -apple-system, sans-serif;
+    transition: border-color 0.2s ease, background 0.2s ease;
+    white-space: nowrap;
+}
+
+.tool-btn:hover {
+    border-color: var(--accent);
+}
+
+.tool-btn.active {
+    border-color: var(--accent);
+    background: var(--accent-subtle);
+    color: var(--accent);
+}
+
+/* --- Bottom Panel --- */
+#bottom-panel {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 90px;
+    background: var(--surface-alpha);
+    border-top: 1px solid var(--border);
+    display: flex;
+    z-index: 20;
+    padding: 0.5rem 1rem;
+    gap: 1rem;
+    font-family: system-ui, -apple-system, sans-serif;
+}
+
+#connectome-panel {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.connectome-label {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+#drive-meters {
+    width: 180px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.4rem;
+}
+
+.drive-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.drive-label {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    width: 52px;
+    flex-shrink: 0;
+    text-align: right;
+}
+
+.drive-bar-bg {
+    flex: 1;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.drive-bar {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.4s ease;
+    width: 0%;
+}
+
+#driveHunger {
+    background: var(--warning);
+}
+
+#driveFear {
+    background: var(--error);
+}
+
+#driveFatigue {
+    background: var(--text-muted);
+}
+
+#driveCuriosity {
+    background: var(--success);
 }
