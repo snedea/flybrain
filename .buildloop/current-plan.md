@@ -1,168 +1,128 @@
-# Plan: D6.1
+# Plan: D7.1
 
 ## Dependencies
-- list: []
-- commands: []
+- list: none
+- commands: none
 
 ## File Operations (in execution order)
 
 ### 1. MODIFY js/main.js
 - operation: MODIFY
-- reason: Fix three frame-rate-dependent idle animation timer frequencies, replace window.onresize with addEventListener, and fix mid-drag tool-switch bugs in mousemove/drawWindArrow
+- reason: Store the brain tick interval ID, add visibilitychange handler to pause/resume the brain tick when the tab is backgrounded/foregrounded, and clear stale stimuli and snapshot drives on resume to prevent runaway accumulation
 
-#### Change A: Add three new interval fields to the anim object
+#### Change 1: Store brain tick interval ID in a variable
+- anchor: `setInterval(updateBrain, 500);` (line 226)
+- Replace the bare `setInterval` call with an assignment to a new variable `brainTickId`
 
-- anchor: `wingMicroTimer: 0,`
-
-Add three new fields to the `anim` object immediately after `wingMicroTimer: 0,` and before the line `// Behavior animation state (T2.1)`:
-
+Before:
 ```js
-	// Pre-rolled next intervals (frame-rate-independent timer frequency)
-	antennaNextInterval: 0.8 + Math.random() * 1.2,
-	legJitterNextInterval: 1.5 + Math.random() * 2.0,
-	wingMicroNextInterval: 2.0 + Math.random() * 3.0,
+BRAIN.randExcite();
+setInterval(updateBrain, 500);
 ```
 
-These fields store the next random wait duration so it is not re-rolled every frame.
-
-#### Change B: Fix antenna twitch timer in drawAntennae
-
-- anchor: `if (t - anim.antennaTimer > 0.8 + Math.random() * 1.2) {`
-
-Replace line 1064:
+After:
 ```js
-	if (t - anim.antennaTimer > 0.8 + Math.random() * 1.2) {
-```
-with:
-```js
-	if (t - anim.antennaTimer > anim.antennaNextInterval) {
+BRAIN.randExcite();
+var brainTickId = setInterval(updateBrain, 500);
 ```
 
-Then immediately after the existing line `anim.antennaTimer = t;` (line 1065), add:
-```js
-		anim.antennaNextInterval = 0.8 + Math.random() * 1.2;
-```
+#### Change 2: Add visibilitychange handler immediately after the brainTickId assignment (after line 226, before `// --- Canvas setup ---` comment at line 228)
 
-So the full block becomes:
-```js
-	if (t - anim.antennaTimer > anim.antennaNextInterval) {
-		anim.antennaTimer = t;
-		anim.antennaNextInterval = 0.8 + Math.random() * 1.2;
-		anim.antennaTargetL = (Math.random() - 0.5) * 0.4;
-		anim.antennaTargetR = (Math.random() - 0.5) * 0.4;
-	}
-```
+Insert the following block between `var brainTickId = setInterval(updateBrain, 500);` and `// --- Canvas setup ---`:
 
-#### Change C: Fix leg jitter timer in drawLegs
-
-- anchor: `if (t - anim.legJitterTimer > 1.5 + Math.random() * 2.0) {`
-
-Replace line 1140:
 ```js
-	if (t - anim.legJitterTimer > 1.5 + Math.random() * 2.0) {
-```
-with:
-```js
-	if (t - anim.legJitterTimer > anim.legJitterNextInterval) {
-```
+// --- Tab visibility handling ---
+// When the tab is backgrounded, browsers throttle setInterval to ~1/s but
+// pause requestAnimationFrame entirely. This means the brain tick keeps
+// running (accumulating drives, processing stale stimuli) while update()
+// never runs to clear stimulus timers or reset food flags. On resume,
+// drives are maxed out causing a jarring behavioral cascade.
+// Fix: pause the brain tick when hidden, resume when visible. On resume,
+// clear all stale stimuli and snapshot drives to prevent drift.
+var driveSnapshotOnHide = null;
 
-Then immediately after the existing line `anim.legJitterTimer = t;` (line 1141), add:
-```js
-		anim.legJitterNextInterval = 1.5 + Math.random() * 2.0;
-```
+document.addEventListener('visibilitychange', function () {
+	if (document.hidden) {
+		// Tab is being hidden: stop the brain tick entirely
+		clearInterval(brainTickId);
+		brainTickId = null;
 
-So the full block becomes:
-```js
-	if (t - anim.legJitterTimer > anim.legJitterNextInterval) {
-		anim.legJitterTimer = t;
-		anim.legJitterNextInterval = 1.5 + Math.random() * 2.0;
-		for (var j = 0; j < 6; j++) {
-			anim.legJitterTarget[j] = (Math.random() - 0.5) * 0.15;
+		// Snapshot current drive values so we can restore them on resume
+		driveSnapshotOnHide = {
+			hunger: BRAIN.drives.hunger,
+			fear: BRAIN.drives.fear,
+			fatigue: BRAIN.drives.fatigue,
+			curiosity: BRAIN.drives.curiosity,
+			groom: BRAIN.drives.groom,
+		};
+	} else {
+		// Tab is becoming visible again: clear all stale stimuli
+		BRAIN.stimulate.touch = false;
+		BRAIN.stimulate.touchLocation = null;
+		BRAIN.stimulate.wind = false;
+		BRAIN.stimulate.windStrength = 0;
+		BRAIN.stimulate.foodNearby = false;
+		BRAIN.stimulate.foodContact = false;
+		touchResetTime = 0;
+		windResetTime = 0;
+
+		// Restore drive snapshot to undo any drift from throttled ticks
+		// that may have fired between the hide event and clearInterval
+		if (driveSnapshotOnHide) {
+			BRAIN.drives.hunger = driveSnapshotOnHide.hunger;
+			BRAIN.drives.fear = driveSnapshotOnHide.fear;
+			BRAIN.drives.fatigue = driveSnapshotOnHide.fatigue;
+			BRAIN.drives.curiosity = driveSnapshotOnHide.curiosity;
+			BRAIN.drives.groom = driveSnapshotOnHide.groom;
+			driveSnapshotOnHide = null;
 		}
+
+		// Reset lastTime so the RAF loop does not compute a huge dt on resume
+		lastTime = -1;
+
+		// Restart the brain tick
+		brainTickId = setInterval(updateBrain, 500);
 	}
+});
 ```
 
-#### Change D: Fix wing micro-movement timer in drawLegs
+#### Detailed logic for the visibilitychange handler:
 
-- anchor: `if (t - anim.wingMicroTimer > 2.0 + Math.random() * 3.0) {`
+**On hide (document.hidden === true):**
+1. Call `clearInterval(brainTickId)` to stop the brain tick completely
+2. Set `brainTickId = null` (defensive, not strictly needed)
+3. Snapshot all 5 drive values (`hunger`, `fear`, `fatigue`, `curiosity`, `groom`) from `BRAIN.drives` into `driveSnapshotOnHide` object
 
-Replace line 1151:
-```js
-	if (t - anim.wingMicroTimer > 2.0 + Math.random() * 3.0) {
-```
-with:
-```js
-	if (t - anim.wingMicroTimer > anim.wingMicroNextInterval) {
-```
+**On show (document.hidden === false):**
+1. Clear stale stimuli: set `BRAIN.stimulate.touch = false`, `BRAIN.stimulate.touchLocation = null`, `BRAIN.stimulate.wind = false`, `BRAIN.stimulate.windStrength = 0`, `BRAIN.stimulate.foodNearby = false`, `BRAIN.stimulate.foodContact = false`
+2. Reset timer variables: set `touchResetTime = 0`, `windResetTime = 0`
+3. Restore drive snapshot: copy all 5 values from `driveSnapshotOnHide` back to `BRAIN.drives`, then set `driveSnapshotOnHide = null`
+4. Reset RAF timing: set `lastTime = -1` (this causes the RAF loop at line 1467 to skip the first frame and reinitialize timing, matching the existing startup pattern)
+5. Restart brain tick: `brainTickId = setInterval(updateBrain, 500)`
 
-Then immediately after the existing line `anim.wingMicroTimer = t;` (line 1152), add:
-```js
-		anim.wingMicroNextInterval = 2.0 + Math.random() * 3.0;
-```
+#### Variable placement note:
+- `brainTickId` is declared with `var` at line 226 (replacing the bare setInterval call), so it is function-scoped (or global-scoped since this is top-level)
+- `driveSnapshotOnHide` is declared with `var` right before the event listener
+- `lastTime` is already declared at line 1465 as `var lastTime = -1` -- since this is top-level `var`, it is accessible from the visibilitychange handler (same global scope)
+- `touchResetTime` is already declared at line 25
+- `windResetTime` is already declared at line 26
 
-So the full block becomes:
-```js
-	if (t - anim.wingMicroTimer > anim.wingMicroNextInterval) {
-		anim.wingMicroTimer = t;
-		anim.wingMicroNextInterval = 2.0 + Math.random() * 3.0;
-		anim.wingMicroTarget = (Math.random() - 0.5) * 2;
-	}
-```
+#### No other changes to js/main.js
 
-#### Change E: Replace window.onresize with addEventListener
-
-- anchor: `window.onresize = resize;`
-
-Replace:
-```js
-	window.onresize = resize;
-```
-with:
-```js
-	window.addEventListener('resize', resize);
-```
-
-This is inside the self-invoking `(function resize() { ... })();` block at the bottom of the file (~line 1454). Only the assignment changes; the rest of the resize function is unchanged.
-
-#### Change F: Fix handleCanvasMousemove to check dragToolOrigin instead of activeTool
-
-- anchor: `if (!isDragging || activeTool !== 'air') return;`
-
-Replace line 285:
-```js
-	if (!isDragging || activeTool !== 'air') return;
-```
-with:
-```js
-	if (!isDragging || dragToolOrigin !== 'air') return;
-```
-
-Rationale: `dragToolOrigin` is set at drag start and is stable throughout the drag. If the user switches tools mid-drag via the toolbar, `activeTool` changes but `dragToolOrigin` still reflects the original tool. This ensures wind strength and arrow endpoint continue updating for the duration of the air-tool drag.
-
-#### Change G: Fix drawWindArrow to check dragToolOrigin instead of activeTool
-
-- anchor: `if (!isDragging || activeTool !== 'air' || !windArrowEnd) return;`
-
-Replace line 710:
-```js
-	if (!isDragging || activeTool !== 'air' || !windArrowEnd) return;
-```
-with:
-```js
-	if (!isDragging || dragToolOrigin !== 'air' || !windArrowEnd) return;
-```
-
-Rationale: Same as Change F. The wind arrow should remain visible throughout an air-tool drag even if the user clicks a different tool button mid-drag.
+No changes to update(), draw(), updateBrain(), or any other function. The fix is entirely additive: one line change (store interval ID) and one new event listener block.
 
 ## Verification
-- build: "No build step -- open index.html directly in a browser"
-- lint: "no lint configured"
-- test: "no existing tests"
-- smoke: "Open js/main.js and verify: (1) anim object has three new fields antennaNextInterval, legJitterNextInterval, wingMicroNextInterval, (2) the three timer checks in drawAntennae and drawLegs compare against the new fields instead of inline Math.random() expressions, (3) each timer body re-rolls the corresponding NextInterval field, (4) window.onresize is replaced with addEventListener, (5) handleCanvasMousemove line 285 checks dragToolOrigin not activeTool, (6) drawWindArrow line 710 checks dragToolOrigin not activeTool"
+- build: no build step (vanilla JS, open index.html directly)
+- lint: no linter configured
+- test: no existing tests
+- smoke: Open the simulation in a browser. Let the fly settle for a few seconds. Place food near the fly. Switch to another browser tab for 30 seconds. Switch back. Verify: (1) the fly is NOT in a panicked startle/fly/groom cascade, (2) drive meters are at roughly the same levels as when you left, (3) the simulation resumes smoothly without a visible jump or freeze. Also test: trigger a touch or wind event, immediately switch tabs, wait 5 seconds, switch back -- verify the touch/wind stimulus is cleared and drives are normal.
 
 ## Constraints
-- Do NOT modify any file other than js/main.js
-- Do NOT change the timer threshold constants (0.8, 1.2, 1.5, 2.0, 3.0) -- keep the same minimum and range values
-- Do NOT change the lerp interpolation lines (the `Math.pow` exponential interpolation) -- those were already fixed by D3.2/D4.1
-- Do NOT modify handleCanvasMouseup -- its dragToolOrigin-based cleanup from D4.1 is correct
-- Do NOT modify SPEC.md, CLAUDE.md, or TASKS.md
+- Do NOT modify js/connectome.js -- all changes are in js/main.js only
+- Do NOT modify the updateBrain() function itself
+- Do NOT modify the update() function
+- Do NOT modify the RAF loop (loop function at line 1466)
+- Do NOT add any new dependencies or files
+- Do NOT change the brain tick interval from 500ms
+- Do NOT modify SPEC.md, TASKS.md, or CLAUDE.md
+- The `var brainTickId` must replace the existing `setInterval(updateBrain, 500);` line, not be added as a separate line (to avoid calling setInterval twice)

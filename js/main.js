@@ -223,7 +223,61 @@ function updateBrain() {
 }
 
 BRAIN.randExcite();
-setInterval(updateBrain, 500);
+var brainTickId = setInterval(updateBrain, 500);
+
+// --- Tab visibility handling ---
+// When the tab is backgrounded, browsers throttle setInterval to ~1/s but
+// pause requestAnimationFrame entirely. This means the brain tick keeps
+// running (accumulating drives, processing stale stimuli) while update()
+// never runs to clear stimulus timers or reset food flags. On resume,
+// drives are maxed out causing a jarring behavioral cascade.
+// Fix: pause the brain tick when hidden, resume when visible. On resume,
+// clear all stale stimuli and snapshot drives to prevent drift.
+var driveSnapshotOnHide = null;
+
+document.addEventListener('visibilitychange', function () {
+	if (document.hidden) {
+		// Tab is being hidden: stop the brain tick entirely
+		clearInterval(brainTickId);
+		brainTickId = null;
+
+		// Snapshot current drive values so we can restore them on resume
+		driveSnapshotOnHide = {
+			hunger: BRAIN.drives.hunger,
+			fear: BRAIN.drives.fear,
+			fatigue: BRAIN.drives.fatigue,
+			curiosity: BRAIN.drives.curiosity,
+			groom: BRAIN.drives.groom,
+		};
+	} else {
+		// Tab is becoming visible again: clear all stale stimuli
+		BRAIN.stimulate.touch = false;
+		BRAIN.stimulate.touchLocation = null;
+		BRAIN.stimulate.wind = false;
+		BRAIN.stimulate.windStrength = 0;
+		BRAIN.stimulate.foodNearby = false;
+		BRAIN.stimulate.foodContact = false;
+		touchResetTime = 0;
+		windResetTime = 0;
+
+		// Restore drive snapshot to undo any drift from throttled ticks
+		// that may have fired between the hide event and clearInterval
+		if (driveSnapshotOnHide) {
+			BRAIN.drives.hunger = driveSnapshotOnHide.hunger;
+			BRAIN.drives.fear = driveSnapshotOnHide.fear;
+			BRAIN.drives.fatigue = driveSnapshotOnHide.fatigue;
+			BRAIN.drives.curiosity = driveSnapshotOnHide.curiosity;
+			BRAIN.drives.groom = driveSnapshotOnHide.groom;
+			driveSnapshotOnHide = null;
+		}
+
+		// Reset lastTime so the RAF loop does not compute a huge dt on resume
+		lastTime = -1;
+
+		// Restart the brain tick
+		brainTickId = setInterval(updateBrain, 500);
+	}
+});
 
 // --- Canvas setup ---
 var canvas = document.getElementById('canvas');
