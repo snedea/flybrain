@@ -80,12 +80,12 @@ var BEHAVIOR_THRESHOLDS = {
 // The behavior state object
 var behavior = {
 	current: 'idle',
-	previous: 'idle',
 	enterTime: Date.now(),
 	cooldowns: {},
 	startlePhase: 'none',
 	startleFreezeEnd: 0,
 	groomLocation: null,
+	burstDir: 0,
 };
 
 // --- Tool state ---
@@ -290,6 +290,7 @@ document.addEventListener('visibilitychange', function () {
 		behavior.startlePhase = 'none';
 		behavior.enterTime = Date.now();
 		behavior.cooldowns = {};
+		behavior.burstDir = 0;
 		speed = 0;
 		speedChangeInterval = 0;
 
@@ -513,7 +514,6 @@ function updateBehaviorState() {
 		if (BEHAVIOR_COOLDOWN[behavior.current]) {
 			behavior.cooldowns[behavior.current] = now + BEHAVIOR_COOLDOWN[behavior.current];
 		}
-		behavior.previous = behavior.current;
 		// Reset feeding timers when exiting feed state to prevent stale feedStart leak
 		if (behavior.current === 'feed') {
 			for (var fi = 0; fi < food.length; fi++) {
@@ -618,8 +618,8 @@ function computeMovementForBehavior() {
 			targetSpeed = 0;
 			speedChangeInterval = -speed * 0.5;
 		} else {
-			// burst direction: reverse facing + jitter
-			targetDir = facingDir + Math.PI + (Math.random() - 0.5) * 0.5;
+			// burst: use the pre-computed escape direction from applyBehaviorMovement freeze-to-burst transition
+			targetDir = behavior.burstDir;
 			targetSpeed = 0.5;
 			speedChangeInterval = (targetSpeed - speed) / 30;
 		}
@@ -659,7 +659,9 @@ function applyBehaviorMovement(dtScale) {
 			if (now >= behavior.startleFreezeEnd) {
 				behavior.startlePhase = 'burst';
 				speed = 3.0;
-				targetDir = facingDir + Math.PI + (Math.random() - 0.5) * 0.5;
+				behavior.burstDir = normalizeAngle(facingDir + Math.PI + (Math.random() - 0.5) * 0.5);
+				targetDir = behavior.burstDir;
+				facingDir = behavior.burstDir;
 				targetSpeed = 0.5;
 				speedChangeInterval = (targetSpeed - speed) / 30;
 			}
@@ -1387,11 +1389,20 @@ function update(dt) {
 	}
 
 	// Exponential interpolation toward targetDir using shortest-arc angle difference.
-	// Retention factor 0.9 matches proboscisExtend (line 691); at dtScale=1 (60fps),
-	// facingDir closes 10% of the remaining gap per frame -- fast enough to track
-	// quick heading changes but cannot overshoot because it never exceeds the gap.
+	// Behavior-dependent retention: fast (0.3) for escape states where near-instant
+	// turning is needed at high speed, slow (0.9) for calm states where smooth
+	// gentle turns look natural. At dtScale=1 (60fps): 0.3 closes 70% of the gap
+	// per frame (~3 frames to 97%), 0.9 closes 10% per frame (~22 frames to 90%).
+	var turnRetention;
+	if (behavior.current === 'startle' && behavior.startlePhase === 'burst') {
+		turnRetention = 0.3;
+	} else if (behavior.current === 'fly') {
+		turnRetention = 0.4;
+	} else {
+		turnRetention = 0.9;
+	}
 	var angleDiffTurn = normalizeAngle(targetDir - facingDir);
-	facingDir += angleDiffTurn * (1 - Math.pow(0.9, dtScale));
+	facingDir += angleDiffTurn * (1 - Math.pow(turnRetention, dtScale));
 
 	// Normalize angles to [-PI, PI] to prevent unbounded growth
 	facingDir = normalizeAngle(facingDir);
