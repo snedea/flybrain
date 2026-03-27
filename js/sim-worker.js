@@ -18,6 +18,11 @@ var DEFAULT_LEAK_RATE = 0.95;
 var DEFAULT_THRESHOLD = 1.0;
 var DEFAULT_REFRACTORY_PERIOD = 3;
 var WEIGHT_SCALE = 0.15;
+var TARGET_TICK_RATE = 20;
+var MIN_TICK_RATE = 10;
+var ADJUST_THRESHOLD_MS = 40;
+var COOLDOWN_TICKS = 20;
+var STATS_INTERVAL = 20;
 
 /* ---------- module-level state ---------- */
 var N = 0;
@@ -37,6 +42,17 @@ var running = false;
 var sustainedIndices = null;
 var sustainedIntensities = null;
 var tickCount = 0;
+var targetTickRate = TARGET_TICK_RATE;
+var tickTimeSum = 0;
+var tickTimeSamples = 0;
+var activeNeuronCount = 0;
+
+/* neuropil-gated simulation structures (built by buildGroupStructures) */
+var numGroups = 0;
+var groupOffset = null;
+var sortedByGroup = null;
+var groupActive = null;
+var groupCooldown = null;
 
 /* ---------- decompressGzip ---------- */
 
