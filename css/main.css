@@ -306,7 +306,7 @@ canvas {
 
 #drive-meters {
     flex-shrink: 0;
-    width: 160px;
+    width: 120px;
     display: flex;
     flex-direction: column;
     gap: 0.15rem;
@@ -325,7 +325,7 @@ canvas {
 .drive-label {
     font-size: 0.7rem;
     color: var(--text-muted);
-    width: 52px;
+    width: 42px;
     flex-shrink: 0;
     text-align: right;
 }

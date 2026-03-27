@@ -482,7 +482,7 @@ BRAIN.motorcontrol = function () {
 	// Startle is derived from DN_STARTLE neuron state (not a motor neuron per se,
 	// but we track its activation level for behavior selection)
 	if (BRAIN.postSynaptic['DN_STARTLE']) {
-		BRAIN.accumStartle = BRAIN.postSynaptic['DN_STARTLE'][BRAIN.thisState];
+		BRAIN.accumStartle = BRAIN.postSynaptic['DN_STARTLE'][BRAIN.nextState];
 	}
 
 	// Floor all accumulators at 0 (negative motor output has no physical meaning)

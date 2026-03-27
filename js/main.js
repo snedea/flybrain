@@ -568,12 +568,14 @@ document.addEventListener('visibilitychange', function () {
 		dragToolOrigin = null;
 		windArrowEnd = null;
 
-		// Reset food feeding timestamps to prevent instant food consumption on resume
+		// Pause food feeding timers on resume, preserve eaten progress
 		for (var fi = 0; fi < food.length; fi++) {
 			if (food[fi].feedStart !== 0) {
+				var ate = Date.now() - food[fi].feedStart;
+				food[fi].eaten = Math.min(1, (food[fi].eaten || 0) + ate / food[fi].feedDuration);
 				food[fi].feedStart = 0;
-				food[fi].radius = 10;
 			}
+			food[fi].radius = 10 * (1 - (food[fi].eaten || 0) * 0.9);
 		}
 
 		// Restore drive snapshot to undo any drift from throttled ticks
@@ -647,7 +649,7 @@ function handleCanvasMousedown(event) {
 		var foodMinY = 44;
 		var foodMaxY = window.innerHeight;
 		cy = Math.max(foodMinY, Math.min(foodMaxY, cy));
-		food.push({ x: cx, y: cy, radius: 10, feedStart: 0, feedDuration: 0 });
+		food.push({ x: cx, y: cy, radius: 10, feedStart: 0, feedDuration: 0, eaten: 0 });
 	} else if (activeTool === 'touch') {
 		applyTouchTool(cx, cy);
 		ripples.push({ x: cx, y: cy, startTime: Date.now() });
@@ -783,12 +785,13 @@ function updateBehaviorState() {
 		if (BEHAVIOR_COOLDOWN[behavior.current]) {
 			behavior.cooldowns[behavior.current] = now + BEHAVIOR_COOLDOWN[behavior.current];
 		}
-		// Reset feeding timers when exiting feed state to prevent stale feedStart leak
+		// Pause feeding timer when exiting feed state but keep eaten progress
 		if (behavior.current === 'feed') {
 			for (var fi = 0; fi < food.length; fi++) {
 				if (food[fi].feedStart !== 0) {
+					var ate = Date.now() - food[fi].feedStart;
+					food[fi].eaten = Math.min(1, (food[fi].eaten || 0) + ate / food[fi].feedDuration);
 					food[fi].feedStart = 0;
-					food[fi].radius = 10;
 				}
 			}
 		}
@@ -849,15 +852,14 @@ function computeMovementForBehavior() {
 		if (state === 'explore') {
 			targetDir += (Math.random() - 0.5) * 0.3;
 		}
-		// Food-seeking: bias targetDir toward nearest food when hungry and food detected
+		// Food-seeking: steer toward nearest food when hungry and food detected
 		if (BRAIN.stimulate.foodNearby && BRAIN.drives.hunger > 0.3) {
 			var nf = nearestFood();
 			if (nf) {
 				var foodAngle = Math.atan2(-(nf.item.y - fly.y), nf.item.x - fly.x);
-				var seekStrength = Math.min(1, BRAIN.drives.hunger) * 0.6;
-				var angleDiffToFood = foodAngle - targetDir;
-				angleDiffToFood = normalizeAngle(angleDiffToFood);
-				targetDir += angleDiffToFood * seekStrength;
+				var seekStrength = Math.min(1, BRAIN.drives.hunger);
+				var angleDiffToFood = normalizeAngle(foodAngle - facingDir);
+				targetDir = facingDir + angleDiffToFood * seekStrength;
 				if (targetSpeed < 0.3) targetSpeed = 0.3;
 				speedChangeInterval = (targetSpeed - speed) / (scalingFactor * 1.5);
 			}
@@ -898,7 +900,7 @@ function computeMovementForBehavior() {
 		if (nf && nf.dist > 20) {
 			var foodAngle = Math.atan2(-(nf.item.y - fly.y), nf.item.x - fly.x);
 			targetDir = foodAngle;
-			targetSpeed = 0.15;
+			targetSpeed = 0.25;
 			speedChangeInterval = (targetSpeed - speed) / 30;
 		} else {
 			targetSpeed = 0;
@@ -1753,29 +1755,36 @@ function update(dt) {
 					// Gradual feeding: start timer on first contact, shrink food, remove when done
 					if (food[i].feedStart === 0) {
 						food[i].feedStart = Date.now();
-						food[i].feedDuration = 2000 + Math.random() * 3000;
+						if (!food[i].feedDuration) food[i].feedDuration = 2000 + Math.random() * 3000;
 					}
 					var elapsed = Date.now() - food[i].feedStart;
-					var progress = Math.min(1, elapsed / food[i].feedDuration);
+					var progress = Math.min(1, (food[i].eaten || 0) + elapsed / food[i].feedDuration);
 					food[i].radius = 10 * (1 - progress * 0.9);
 					if (progress >= 1) {
 						food.splice(i, 1);
 						i--;
 					}
+				} else {
+					// Not feeding but in contact: keep showing eaten progress
+					food[i].radius = 10 * (1 - (food[i].eaten || 0) * 0.9);
 				}
 			} else {
-				// Not in contact range: reset feeding progress if fly walked away
+				// Not in contact range: pause feeding timer, keep eaten progress
 				if (food[i].feedStart !== 0) {
+					var ate = Date.now() - food[i].feedStart;
+					food[i].eaten = Math.min(1, (food[i].eaten || 0) + ate / food[i].feedDuration);
 					food[i].feedStart = 0;
-					food[i].radius = 10;
 				}
+				food[i].radius = 10 * (1 - (food[i].eaten || 0) * 0.9);
 			}
 		} else {
-			// Out of range: reset feeding progress
+			// Out of range: pause feeding timer, keep eaten progress
 			if (food[i].feedStart !== 0) {
+				var ate = Date.now() - food[i].feedStart;
+				food[i].eaten = Math.min(1, (food[i].eaten || 0) + ate / food[i].feedDuration);
 				food[i].feedStart = 0;
-				food[i].radius = 10;
 			}
+			food[i].radius = 10 * (1 - (food[i].eaten || 0) * 0.9);
 		}
 	}
 

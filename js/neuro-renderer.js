@@ -14,6 +14,8 @@
 		[0.937, 0.267, 0.267]   // region_type 3 = motor:   #ef4444
 	];
 	var POINT_SIZE = 1.0;
+	var MIN_SECTION_W = 60;        // minimum canvas-pixel width for tiny sections
+	var MAX_SMALL_PS = 12;         // cap point size for tiny sections
 	var SECTION_GAP = 16;
 	var PAD = 2;
 	var PICK_RADIUS_SQ = 16;
@@ -28,6 +30,7 @@
 	var posBuffer = null;
 	var colorBuffer = null;
 	var brightnessBuffer = null;
+	var pointSizeBuffer = null;
 	var brightnessData = null;     // Float32Array(neuronCount)
 	var neuronCount = 0;
 	var cols = 0;                  // columns per row in the grid layout
@@ -40,6 +43,7 @@
 	var _onMouseMove = null;
 	var _onMouseLeave = null;
 	var _resizeObserver = null;
+	var displayScale = 1;          // CSS width / canvas pixel width for fill-stretching
 
 	function init() {
 		if (!BRAIN.workerNeuronCount) return false;
@@ -122,6 +126,7 @@
 			if (posBuffer) gl.deleteBuffer(posBuffer);
 			if (colorBuffer) gl.deleteBuffer(colorBuffer);
 			if (brightnessBuffer) gl.deleteBuffer(brightnessBuffer);
+			if (pointSizeBuffer) gl.deleteBuffer(pointSizeBuffer);
 			if (program) gl.deleteProgram(program);
 		}
 		var wrap = document.getElementById('neuro-renderer-wrap');
@@ -138,7 +143,9 @@
 		posBuffer = null;
 		colorBuffer = null;
 		brightnessBuffer = null;
+		pointSizeBuffer = null;
 		labelContainer = null;
+		displayScale = 1;
 	}
 
 	function isActive() {
@@ -151,6 +158,7 @@
 			'in vec2 a_position;',
 			'in vec3 a_color;',
 			'in float a_brightness;',
+			'in float a_pointSize;',
 			'uniform vec2 u_resolution;',
 			'out vec3 v_color;',
 			'out float v_brightness;',
@@ -158,7 +166,7 @@
 			'    vec2 clipPos = (a_position / u_resolution) * 2.0 - 1.0;',
 			'    clipPos.y = -clipPos.y;',
 			'    gl_Position = vec4(clipPos, 0.0, 1.0);',
-			'    gl_PointSize = 1.0;',
+			'    gl_PointSize = a_pointSize;',
 			'    v_color = a_color;',
 			'    v_brightness = a_brightness;',
 			'}'
@@ -207,6 +215,7 @@
 		program.a_position = gl.getAttribLocation(program, 'a_position');
 		program.a_color = gl.getAttribLocation(program, 'a_color');
 		program.a_brightness = gl.getAttribLocation(program, 'a_brightness');
+		program.a_pointSize = gl.getAttribLocation(program, 'a_pointSize');
 		program.u_resolution = gl.getUniformLocation(program, 'u_resolution');
 	}
 
@@ -233,63 +242,101 @@
 		neuronPositions = new Float32Array(neuronCount * 2);
 		var posData = new Float32Array(neuronCount * 2);
 		var colorData = new Float32Array(neuronCount * 3);
+		var pointSizeData = new Float32Array(neuronCount);
 		var cursorX = 0;
 		sectionBounds = [];
 
 		for (var r = 0; r < 4; r++) {
 			var neurons = regionNeurons[r];
 			if (neurons.length === 0) {
-				sectionBounds.push({x0: cursorX, x1: cursorX, y0: 0, y1: H, region: r, neuronIndices: []});
+				sectionBounds.push({x0: cursorX, x1: cursorX, y0: 0, y1: H, region: r, neuronIndices: [], pointSize: POINT_SIZE, localRows: rowsAvail});
 				continue;
 			}
+
+			// For tiny sections, enlarge point size so they fill MIN_SECTION_W
+			var naturalW = Math.ceil(neurons.length / rowsAvail) * POINT_SIZE;
+			var localPS = POINT_SIZE;
+			var localRows = rowsAvail;
+			if (naturalW < MIN_SECTION_W && neurons.length > 0) {
+				localPS = Math.min(MAX_SMALL_PS, Math.sqrt(MIN_SECTION_W * usableH / neurons.length));
+				localPS = Math.max(POINT_SIZE, localPS);
+				localRows = Math.max(1, Math.floor(usableH / localPS));
+			}
+
 			var sectionX0 = cursorX;
-			var colsNeeded = Math.ceil(neurons.length / rowsAvail);
-			var sectionW = colsNeeded * POINT_SIZE;
+			var colsNeeded = Math.ceil(neurons.length / localRows);
+			var sectionW = colsNeeded * localPS;
 
 			for (var j = 0; j < neurons.length; j++) {
 				var nIdx = neurons[j];
-				var col = Math.floor(j / rowsAvail);
-				var row = j % rowsAvail;
-				var px = cursorX + col * POINT_SIZE + POINT_SIZE * 0.5;
-				var py = SECTION_GAP + row * POINT_SIZE + POINT_SIZE * 0.5;
+				var col = Math.floor(j / localRows);
+				var row = j % localRows;
+				var px = cursorX + col * localPS + localPS * 0.5;
+				var py = SECTION_GAP + row * localPS + localPS * 0.5;
 				posData[nIdx * 2] = px;
 				posData[nIdx * 2 + 1] = py;
 				neuronPositions[nIdx * 2] = px;
 				neuronPositions[nIdx * 2 + 1] = py;
+				pointSizeData[nIdx] = localPS;
 				var rgb = REGION_COLORS[r];
 				colorData[nIdx * 3] = rgb[0];
 				colorData[nIdx * 3 + 1] = rgb[1];
 				colorData[nIdx * 3 + 2] = rgb[2];
 			}
 			cursorX += sectionW + SECTION_GAP;
-			sectionBounds.push({x0: sectionX0, x1: cursorX - SECTION_GAP, y0: 0, y1: H, region: r, neuronIndices: neurons});
+			sectionBounds.push({x0: sectionX0, x1: cursorX - SECTION_GAP, y0: 0, y1: H, region: r, neuronIndices: neurons, pointSize: localPS, localRows: localRows});
 		}
 
 		canvas.width = Math.ceil(cursorX);
 		canvas.height = H;
 		gl.viewport(0, 0, canvas.width, canvas.height);
 
+		// Scale canvas CSS to always fill container width (stretch or shrink)
+		canvas.style.width = W + 'px';
+		displayScale = W / canvas.width;
+
+		if (posBuffer) gl.deleteBuffer(posBuffer);
 		posBuffer = gl.createBuffer();
 		gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
 		gl.bufferData(gl.ARRAY_BUFFER, posData, gl.STATIC_DRAW);
 
+		if (colorBuffer) gl.deleteBuffer(colorBuffer);
 		colorBuffer = gl.createBuffer();
 		gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
 		gl.bufferData(gl.ARRAY_BUFFER, colorData, gl.STATIC_DRAW);
 
 		brightnessData = new Float32Array(neuronCount);
+		if (brightnessBuffer) gl.deleteBuffer(brightnessBuffer);
 		brightnessBuffer = gl.createBuffer();
 		gl.bindBuffer(gl.ARRAY_BUFFER, brightnessBuffer);
 		gl.bufferData(gl.ARRAY_BUFFER, brightnessData, gl.DYNAMIC_DRAW);
+
+		if (pointSizeBuffer) gl.deleteBuffer(pointSizeBuffer);
+		pointSizeBuffer = gl.createBuffer();
+		gl.bindBuffer(gl.ARRAY_BUFFER, pointSizeBuffer);
+		gl.bufferData(gl.ARRAY_BUFFER, pointSizeData, gl.STATIC_DRAW);
 	}
 
 	function buildLabels() {
 		labelContainer.innerHTML = '';
+		// Collect visible sections
+		var visible = [];
 		for (var r = 0; r < 4; r++) {
-			if (sectionBounds[r].neuronIndices.length === 0) continue;
+			if (sectionBounds[r].neuronIndices.length > 0) visible.push(r);
+		}
+		for (var vi = 0; vi < visible.length; vi++) {
+			var r = visible[vi];
 			var div = document.createElement('div');
-			div.style.cssText = 'position:absolute;left:' + sectionBounds[r].x0 + 'px;top:0;font-size:0.55rem;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;padding:0.1rem 0.25rem;border-radius:3px;font-family:system-ui,-apple-system,sans-serif;color:' + LABEL_COLORS[r] + ';background:' + LABEL_BGS[r] + ';white-space:nowrap;';
+			var leftPx = sectionBounds[r].x0 * displayScale;
+			// Cap label width to space before next section so labels never overlap
+			var maxWCss = '';
+			if (vi < visible.length - 1) {
+				var nextLeft = sectionBounds[visible[vi + 1]].x0 * displayScale;
+				maxWCss = 'max-width:' + Math.max(20, nextLeft - leftPx - 4) + 'px;overflow:hidden;text-overflow:ellipsis;';
+			}
+			div.style.cssText = 'position:absolute;left:' + leftPx + 'px;top:0;box-sizing:border-box;white-space:nowrap;' + maxWCss + 'font-size:0.55rem;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;padding:0.1rem 0.25rem;border-radius:3px;font-family:system-ui,-apple-system,sans-serif;color:' + LABEL_COLORS[r] + ';background:' + LABEL_BGS[r] + ';';
 			div.textContent = SECTION_NAMES[r] + ' (' + sectionBounds[r].neuronIndices.length.toLocaleString() + ')';
+			div.title = SECTION_NAMES[r] + ' (' + sectionBounds[r].neuronIndices.length.toLocaleString() + ')';
 			labelContainer.appendChild(div);
 		}
 	}
@@ -300,10 +347,14 @@
 		if (!wrap) return;
 		var rect = wrap.getBoundingClientRect();
 		var newH = Math.floor(rect.height) || 140;
-		if (newH === canvas.height) return;
+		var newW = Math.floor(rect.width) || 800;
+		// Rebuild on height OR width change
+		var oldDisplayW = Math.round(canvas.width * displayScale);
+		if (newH === canvas.height && Math.abs(newW - oldDisplayW) < 2) return;
 		if (posBuffer) gl.deleteBuffer(posBuffer);
 		if (colorBuffer) gl.deleteBuffer(colorBuffer);
 		if (brightnessBuffer) gl.deleteBuffer(brightnessBuffer);
+		if (pointSizeBuffer) gl.deleteBuffer(pointSizeBuffer);
 		buildLayout();
 		buildLabels();
 	}
@@ -350,6 +401,10 @@
 		gl.enableVertexAttribArray(program.a_brightness);
 		gl.vertexAttribPointer(program.a_brightness, 1, gl.FLOAT, false, 0, 0);
 
+		gl.bindBuffer(gl.ARRAY_BUFFER, pointSizeBuffer);
+		gl.enableVertexAttribArray(program.a_pointSize);
+		gl.vertexAttribPointer(program.a_pointSize, 1, gl.FLOAT, false, 0, 0);
+
 		gl.drawArrays(gl.POINTS, 0, neuronCount);
 
 		animFrameId = requestAnimationFrame(renderLoop);
@@ -358,8 +413,9 @@
 	function onMouseMove(e) {
 		var rect = canvas.getBoundingClientRect();
 		var scrollLeft = canvas.parentElement.scrollLeft;
-		var canvasX = (e.clientX - rect.left) + scrollLeft;
-		var canvasY = e.clientY - rect.top;
+		// Convert CSS coords to canvas pixel coords (canvas is CSS-stretched to fill container)
+		var canvasX = ((e.clientX - rect.left) + scrollLeft) * (canvas.width / rect.width);
+		var canvasY = (e.clientY - rect.top) * (canvas.height / rect.height);
 
 		var bounds = null;
 		for (var r = 0; r < 4; r++) {
@@ -373,22 +429,22 @@
 			return;
 		}
 
-		// In horizontal layout, neurons are arranged in columns (col = j / rowsAvail, row = j % rowsAvail)
+		// In horizontal layout, neurons are arranged in columns (col = j / localRows, row = j % localRows)
 		var neurons = bounds.neuronIndices;
-		var usableH = canvas.height - SECTION_GAP;
-		var rowsAvail = Math.max(1, Math.floor(usableH / POINT_SIZE));
+		var localPS = bounds.pointSize;
+		var localRows = bounds.localRows;
 
 		// Use raw position matching since the grid is column-major
-		var bestDist = PICK_RADIUS_SQ;
+		var bestDist = Math.max(PICK_RADIUS_SQ, localPS * localPS);
 		var bestIdx = -1;
-		var approxCol = Math.floor((canvasX - bounds.x0) / POINT_SIZE);
-		var approxRow = Math.floor((canvasY - SECTION_GAP) / POINT_SIZE);
+		var approxCol = Math.floor((canvasX - bounds.x0) / localPS);
+		var approxRow = Math.floor((canvasY - SECTION_GAP) / localPS);
 		for (var dc = -1; dc <= 1; dc++) {
 			for (var dr = -1; dr <= 1; dr++) {
 				var c = approxCol + dc;
 				var r2 = approxRow + dr;
-				if (c < 0 || r2 < 0 || r2 >= rowsAvail) continue;
-				var j = c * rowsAvail + r2;
+				if (c < 0 || r2 < 0 || r2 >= localRows) continue;
+				var j = c * localRows + r2;
 				if (j < 0 || j >= neurons.length) continue;
 				var nIdx = neurons[j];
 				var dx = neuronPositions[nIdx * 2] - canvasX;

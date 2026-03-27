@@ -61,7 +61,9 @@ function evaluateBehaviorEntry() {
 	if (BRAIN.accumFlight > BEHAVIOR_THRESHOLDS.fly && !isCoolingDown('fly', now)) {
 		return 'fly';
 	}
-	if (BRAIN.accumFeed > BEHAVIOR_THRESHOLDS.feed && hasNearbyFood() && !isCoolingDown('feed', now)) {
+	var feedReady = BRAIN.accumFeed > BEHAVIOR_THRESHOLDS.feed ||
+		(BRAIN.drives.hunger > 0.7 && BRAIN.stimulate.foodNearby);
+	if (feedReady && hasNearbyFood() && !isCoolingDown('feed', now)) {
 		return 'feed';
 	}
 	if (BRAIN.accumGroom > BEHAVIOR_THRESHOLDS.groom && !isCoolingDown('groom', now)) {

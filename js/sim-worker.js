@@ -53,6 +53,7 @@ var targetTickRate = TARGET_TICK_RATE;
 var tickTimeSum = 0;
 var tickTimeSamples = 0;
 var activeNeuronCount = 0;
+var cumulativeFiredCount = 0;
 
 /* neuropil-gated simulation structures (built by buildGroupStructures) */
 var numGroups = 0;
@@ -358,9 +359,11 @@ function tick() {
 	var elapsed = performance.now() - t0;
 	tickTimeSum += elapsed;
 	tickTimeSamples++;
+	cumulativeFiredCount += firedNeuronCount;
 
 	if (tickTimeSamples >= STATS_INTERVAL) {
 		var avgMs = tickTimeSum / tickTimeSamples;
+		var avgFired = Math.round(cumulativeFiredCount / tickTimeSamples);
 		var activeGroups = 0;
 		for (var g = 0; g < numGroups; g++) {
 			if (groupActive[g]) activeGroups++;
@@ -368,7 +371,7 @@ function tick() {
 		self.postMessage({
 			type: 'stats',
 			avgTickMs: avgMs,
-			firedNeurons: firedNeuronCount,
+			firedNeurons: avgFired,
 			activeNeurons: activeNeuronCount,
 			totalNeurons: N,
 			activeGroups: activeGroups,
@@ -377,6 +380,7 @@ function tick() {
 		});
 		tickTimeSum = 0;
 		tickTimeSamples = 0;
+		cumulativeFiredCount = 0;
 	}
 
 	/* schedule next tick at target rate */
@@ -469,6 +473,7 @@ self.onmessage = function (e) {
 		}
 		tickTimeSum = 0;
 		tickTimeSamples = 0;
+		cumulativeFiredCount = 0;
 		activeNeuronCount = 0;
 		break;
 
