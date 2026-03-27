@@ -44,4 +44,4 @@ Data source: FlyWire Codex GCS bucket (public, no auth). Files in data/:
 
 ### T7.7: Performance Tuning
 
-- [ ] T7.7: Profile and optimize. If 20 ticks/sec at 139K neurons is not achievable: (1) implement neuropil-gated simulation -- only tick neurons in neuropil regions that have active sensory input, lazy-activate regions when stimulation arrives, (2) use SIMD-friendly memory layout (struct-of-arrays), (3) reduce tick rate to 10/sec with interpolation in the renderer. Test on Chrome, Firefox, Safari. Verify fly behavior qualitatively matches the 59-group version. Document performance characteristics in SPEC.md. [SPI-!]
+- [x] T7.7: Profile and optimize. If 20 ticks/sec at 139K neurons is not achievable: (1) implement neuropil-gated simulation -- only tick neurons in neuropil regions that have active sensory input, lazy-activate regions when stimulation arrives, (2) use SIMD-friendly memory layout (struct-of-arrays), (3) reduce tick rate to 10/sec with interpolation in the renderer. Test on Chrome, Firefox, Safari. Verify fly behavior qualitatively matches the 59-group version. Document performance characteristics in SPEC.md. [SPI-]

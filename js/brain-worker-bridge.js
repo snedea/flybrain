@@ -180,6 +180,16 @@
 			BRAIN.latestFireState = e.data.fireState;
 			break;
 
+		case 'stats':
+			/* Display performance info in the connectome subtitle */
+			var statsSubtitle = document.getElementById('connectomeSubtitle');
+			if (statsSubtitle && !statsSubtitle.classList.contains('loading')) {
+				var pct = Math.round(e.data.activeNeurons / e.data.totalNeurons * 100);
+				statsSubtitle.textContent = neuronCount.toLocaleString() + ' neurons (' +
+					pct + '% active, ' + e.data.avgTickMs.toFixed(1) + 'ms/tick) \u2014 FlyWire FAFB v783';
+			}
+			break;
+
 		case 'error':
 			console.warn('Worker error: ' + e.data.message);
 			if (workerReady) {

@@ -17,6 +17,7 @@
 	var SECTION_GAP = 24;
 	var PAD = 4;
 	var PICK_RADIUS_SQ = 16;
+	var BRIGHTNESS_DECAY = 0.82;   // per-frame decay for interpolation at 10Hz tick rate
 	var SECTION_NAMES = ['Sensory', 'Central', 'Drives', 'Motor'];
 	var LABEL_COLORS = ['#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444'];
 	var LABEL_BGS = ['rgba(59,130,246,0.1)', 'rgba(139,92,246,0.1)', 'rgba(245,158,11,0.1)', 'rgba(239,68,68,0.1)'];
@@ -271,14 +272,21 @@
 	function renderLoop() {
 		if (!active) return;
 
+		/* Interpolated brightness: fired neurons snap to 1.0, others decay
+		 * smoothly toward 0. At 10Hz ticks and ~60fps rendering, decay over
+		 * ~6 frames provides a visible but short trail between ticks. */
 		var fire = BRAIN.latestFireState;
 		if (fire && fire.length >= neuronCount) {
 			for (var i = 0; i < neuronCount; i++) {
-				brightnessData[i] = fire[i] ? 1.0 : 0.0;
+				if (fire[i]) {
+					brightnessData[i] = 1.0;
+				} else {
+					brightnessData[i] *= BRIGHTNESS_DECAY;
+				}
 			}
 		} else {
 			for (var i = 0; i < neuronCount; i++) {
-				brightnessData[i] = 0.0;
+				brightnessData[i] *= BRIGHTNESS_DECAY;
 			}
 		}
 

@@ -1,6 +1,6 @@
 {
   "task_id": "T7.7",
   "task_desc": "Profile and optimize. If 20 ticks/sec at 139K neurons is not achievable: (1) implement neuropil-gated simulation -- only tick neurons in neuropil regions that have active sensory input, lazy-activate regions when stimulation arrives, (2) use SIMD-friendly memory layout (struct-of-arrays), (3) reduce tick rate to 10/sec with interpolation in the renderer. Test on Chrome, Firefox, Safari. Verify fly behavior qualitatively matches the 59-group version. Document performance characteristics in SPEC.md.",
-  "completed_stage": "planner",
-  "timestamp": "2026-03-27T00:26:59.330180+00:00"
+  "completed_stage": "builder",
+  "timestamp": "2026-03-27T00:47:05.342304+00:00"
 }
