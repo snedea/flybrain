@@ -84,6 +84,7 @@
 	var groupIdToName = [];      // e.g. [0: 'VIS_R1R6', ...]
 	var pendingGroupSpikes = null; // Float32Array[groupCount] accumulated since last brain tick
 	var pendingWorkerTicks = 0;
+	var pendingDriveFrames = 0;  // brain ticks since last updateDrives (for batched catch-up)
 
 	/* ---- initialization ---- */
 
@@ -358,19 +359,33 @@
 	/* ---- worker-driven BRAIN.update replacement ---- */
 
 	function workerUpdate() {
-		// 1. Update drives (same logic as legacy, runs on main thread)
-		BRAIN.updateDrives();
+		pendingDriveFrames = Math.min(pendingDriveFrames + 1, 20);
 
-		// 2. Build and send sustained stimulation state to worker
-		sendStimulation();
+		// One-shot stimuli (e.g. NOCI pain) are sent immediately via the worker
+		// 'stimulate' message for direct V injection, not gated on worker ticks.
+		// This prevents overwrite by subsequent setStimulusState replacements.
+		sendOneShotStimuli();
 
-		// 3. Aggregate worker spikes into BRAIN.postSynaptic
+		// Only run the full pipeline when new worker tick data is available.
+		// updateDrives and sendStimulation are throttled to match motor pipeline
+		// frequency, preventing drive decay from attenuating transient signals
+		// (e.g. fear spikes) before the motor pipeline processes them.
 		if (latestFireState || pendingWorkerTicks > 0) {
+			// Batch-run drive updates for all elapsed frames since last pipeline run.
+			// Calling updateDrives N times preserves per-frame accumulation/decay
+			// rates (e.g. fear *= 0.85 runs N times giving 0.85^N total decay).
+			for (var i = 0; i < pendingDriveFrames; i++) {
+				BRAIN.updateDrives();
+			}
+			pendingDriveFrames = 0;
+
+			// Send sustained stimulation state to worker
+			sendStimulation();
+
+			// Aggregate worker spikes into BRAIN.postSynaptic
 			aggregateFireState();
 
-			// 3.25. Virtual group bypass: groups with 0 real neurons
-			// (DRIVE_FEAR, DRIVE_CURIOSITY, DRIVE_GROOM) get their value
-			// directly from main-thread drives, scaled to match fire state range.
+			// Virtual group bypass: groups with 0 real neurons
 			var vd = BRAIN.drives;
 			if (BRAIN.postSynaptic['DRIVE_FEAR'])
 				BRAIN.postSynaptic['DRIVE_FEAR'][BRAIN.nextState] = vd.fear * FIRE_STATE_SCALE;
@@ -379,16 +394,13 @@
 			if (BRAIN.postSynaptic['DRIVE_GROOM'])
 				BRAIN.postSynaptic['DRIVE_GROOM'][BRAIN.nextState] = vd.groom * FIRE_STATE_SCALE;
 
-			// 3.5. Synthesize VNC motor outputs from descending neuron activity.
-			// FlyWire FAFB is brain-only; leg/wing motor neurons are in the VNC.
-			// The brain's output to the VNC is via descending neurons (GNG_DESC).
-			// We map their activity + context to motor group postSynaptic values.
+			// Synthesize VNC motor outputs from descending neuron activity
 			synthesizeMotorOutputs();
 
-			// 4. Motor control (reads postSynaptic[nextState], sets accumulators)
+			// Motor control
 			BRAIN.motorcontrol();
 
-			// 5. State swap (same as BRAIN.runconnectome lines 413-421)
+			// State swap
 			for (var ps in BRAIN.postSynaptic) {
 				BRAIN.postSynaptic[ps][BRAIN.thisState] =
 					BRAIN.postSynaptic[ps][BRAIN.nextState];
@@ -400,6 +412,15 @@
 	}
 
 	/* ---- translate BRAIN.stimulate + BRAIN.drives to worker stimulation ---- */
+
+	function collectOneShotSegments() {
+		var segs = [];
+		if (BRAIN.stimulate.nociception) {
+			segs.push({name: 'NOCI', intensity: STIM_INTENSITY * 5});
+			BRAIN.stimulate.nociception = false;
+		}
+		return segs;
+	}
 
 	function collectStimulationSegments() {
 		var segs = [];
@@ -456,10 +477,6 @@
 			var coolIntensity = (0.5 - BRAIN.stimulate.temperature) * 2;
 			segs.push({name: 'THERMO_COOL', intensity: STIM_INTENSITY * coolIntensity});
 		}
-		if (BRAIN.stimulate.nociception) {
-			segs.push({name: 'NOCI', intensity: STIM_INTENSITY * 5});
-			BRAIN.stimulate.nociception = false;
-		}
 		if (BRAIN._isMoving) {
 			segs.push({name: 'MECH_CHORD', intensity: STIM_INTENSITY});
 		}
@@ -474,6 +491,22 @@
 		segs.push({name: 'CX_PFN', intensity: tonicIntensity});
 
 		return segs;
+	}
+
+	function sendOneShotStimuli() {
+		var segs = collectOneShotSegments();
+		if (!worker || segs.length === 0) return;
+		for (var s = 0; s < segs.length; s++) {
+			var gid = groupNameToId[segs[s].name];
+			if (gid === undefined) continue;
+			var idx = groupIndices[gid];
+			if (!idx || idx.length === 0) continue;
+			var intensities = new Float32Array(idx.length);
+			for (var k = 0; k < idx.length; k++) {
+				intensities[k] = segs[s].intensity;
+			}
+			worker.postMessage({type: 'stimulate', indices: idx, intensities: intensities});
+		}
 	}
 
 	function sendStimulation() {
@@ -561,6 +594,7 @@
 		if (pendingGroupSpikes) pendingGroupSpikes.fill(0);
 		pendingWorkerTicks = 0;
 		BRAIN.latestFireState = null;
+		pendingDriveFrames = 0;
 	}
 
 	function startWorker() {
@@ -568,6 +602,7 @@
 		worker.postMessage({type: 'reset'});
 		if (pendingGroupSpikes) pendingGroupSpikes.fill(0);
 		pendingWorkerTicks = 0;
+		pendingDriveFrames = 0;
 		worker.postMessage({type: 'start'});
 	}
 
@@ -582,6 +617,7 @@
 			aggregateFireState: aggregateFireState,
 			buildGroupIndices: buildGroupIndices,
 			collectStimulationSegments: collectStimulationSegments,
+			collectOneShotSegments: collectOneShotSegments,
 			workerUpdate: workerUpdate,
 			FIRE_STATE_SCALE: FIRE_STATE_SCALE,
 			MOTOR_SCALE: MOTOR_SCALE,
@@ -598,6 +634,7 @@
 				}
 				pendingGroupSpikes = new Float32Array(gc);
 				pendingWorkerTicks = 0;
+				pendingDriveFrames = 0;
 			},
 			_setFireState: function (fireState, spikes, ticks) {
 				latestFireState = fireState;

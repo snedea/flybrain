@@ -1,110 +1,255 @@
-# Plan: D65.1
+# Plan: D67.1
 
 ## Dependencies
-- list: []
-- commands: []
+- list: none
+- commands: none
 
 ## File Operations (in execution order)
 
 ### 1. MODIFY js/brain-worker-bridge.js
 - operation: MODIFY
-- reason: Clear the closure-local `latestFireState` at the end of `aggregateFireState()` so it is not re-consumed on subsequent animation frames before the next worker tick
-- anchor: line 549-550, the block:
-  ```js
-  	if (pendingGroupSpikes) pendingGroupSpikes.fill(0);
-  	pendingWorkerTicks = 0;
-  ```
+- reason: Fix nociception stimulus overwrite (send NOCI as one-shot `stimulate` message instead of sustained `setStimulusState`) and fix drive-motor timing mismatch (throttle updateDrives to only run when motor pipeline runs, with batched catch-up for missed frames)
 
-#### Functions
-- function: `aggregateFireState()` (line 518)
-  - change: Add `latestFireState = null;` immediately after line 550 (`pendingWorkerTicks = 0;`), still inside the function body, before the closing `}`
-  - exact new code at end of function (lines 549-551 become):
-    ```js
-    	if (pendingGroupSpikes) pendingGroupSpikes.fill(0);
-    	pendingWorkerTicks = 0;
-    	latestFireState = null;
-    ```
-  - rationale: After `aggregateFireState()` consumes the fire state via either the primary path (pendingGroupSpikes) or the fallback path (latestFireState iteration), the closure-local variable must be nulled. This prevents the `workerUpdate()` guard at line 368 (`if (latestFireState || pendingWorkerTicks > 0)`) from passing on subsequent frames before the next worker tick. `BRAIN.latestFireState` (set at line 184 in the 'tick' message handler) is a separate property on the BRAIN object — it is NOT affected by this change. `neuro-renderer.js:317` reads `BRAIN.latestFireState`, not the closure-local `latestFireState`, so rendering continues to work correctly.
+#### Change A: Add pendingDriveFrames state variable
+- anchor: `var pendingWorkerTicks = 0;` (line 86)
+- After this line, add a new variable declaration:
+```js
+	var pendingDriveFrames = 0;  // brain ticks since last updateDrives (for batched catch-up)
+```
 
-#### What NOT to change
-- Do NOT modify `BRAIN.latestFireState` anywhere. It is a separate reference used by `neuro-renderer.js` for rendering brightness.
-- Do NOT modify the worker message handler at line 183 (`latestFireState = e.data.fireState;`). That assignment is correct — it sets the value when a new tick arrives.
-- Do NOT modify the `stopWorker()` function at line 559 (`latestFireState = null;`). That is correct — it clears state on pause.
-- Do NOT modify the `_setFireState` test helper at line 601-604.
-- Do NOT modify the `workerUpdate()` guard condition at line 368. The guard is correct; the bug is that `latestFireState` was never cleared after consumption.
+#### Change B: Add collectOneShotSegments function
+- anchor: `function collectStimulationSegments() {` (line 404)
+- Insert the following NEW function BEFORE `collectStimulationSegments`:
+```js
+	function collectOneShotSegments() {
+		var segs = [];
+		if (BRAIN.stimulate.nociception) {
+			segs.push({name: 'NOCI', intensity: STIM_INTENSITY * 5});
+			BRAIN.stimulate.nociception = false;
+		}
+		return segs;
+	}
+```
+
+#### Change C: Remove NOCI block from collectStimulationSegments
+- anchor: lines 459-462, the block:
+```js
+		if (BRAIN.stimulate.nociception) {
+			segs.push({name: 'NOCI', intensity: STIM_INTENSITY * 5});
+			BRAIN.stimulate.nociception = false;
+		}
+```
+- Delete these 4 lines entirely. Do not replace them with anything.
+
+#### Change D: Add sendOneShotStimuli function
+- anchor: `function sendStimulation() {` (line 479)
+- Insert the following NEW function BEFORE `sendStimulation`:
+```js
+	function sendOneShotStimuli() {
+		var segs = collectOneShotSegments();
+		if (!worker || segs.length === 0) return;
+		for (var s = 0; s < segs.length; s++) {
+			var gid = groupNameToId[segs[s].name];
+			if (gid === undefined) continue;
+			var idx = groupIndices[gid];
+			if (!idx || idx.length === 0) continue;
+			var intensities = new Float32Array(idx.length);
+			for (var k = 0; k < idx.length; k++) {
+				intensities[k] = segs[s].intensity;
+			}
+			worker.postMessage({type: 'stimulate', indices: idx, intensities: intensities});
+		}
+	}
+```
+
+#### Change E: Restructure workerUpdate function
+- anchor: the entire `function workerUpdate()` body (lines 360-400)
+- Replace the function body (everything between the opening `{` and closing `}` of workerUpdate) with:
+```js
+		pendingDriveFrames = Math.min(pendingDriveFrames + 1, 20);
+
+		// One-shot stimuli (e.g. NOCI pain) are sent immediately via the worker
+		// 'stimulate' message for direct V injection, not gated on worker ticks.
+		// This prevents overwrite by subsequent setStimulusState replacements.
+		sendOneShotStimuli();
+
+		// Only run the full pipeline when new worker tick data is available.
+		// updateDrives and sendStimulation are throttled to match motor pipeline
+		// frequency, preventing drive decay from attenuating transient signals
+		// (e.g. fear spikes) before the motor pipeline processes them.
+		if (latestFireState || pendingWorkerTicks > 0) {
+			// Batch-run drive updates for all elapsed frames since last pipeline run.
+			// Calling updateDrives N times preserves per-frame accumulation/decay
+			// rates (e.g. fear *= 0.85 runs N times giving 0.85^N total decay).
+			for (var i = 0; i < pendingDriveFrames; i++) {
+				BRAIN.updateDrives();
+			}
+			pendingDriveFrames = 0;
+
+			// Send sustained stimulation state to worker
+			sendStimulation();
+
+			// Aggregate worker spikes into BRAIN.postSynaptic
+			aggregateFireState();
+
+			// Virtual group bypass: groups with 0 real neurons
+			var vd = BRAIN.drives;
+			if (BRAIN.postSynaptic['DRIVE_FEAR'])
+				BRAIN.postSynaptic['DRIVE_FEAR'][BRAIN.nextState] = vd.fear * FIRE_STATE_SCALE;
+			if (BRAIN.postSynaptic['DRIVE_CURIOSITY'])
+				BRAIN.postSynaptic['DRIVE_CURIOSITY'][BRAIN.nextState] = vd.curiosity * FIRE_STATE_SCALE;
+			if (BRAIN.postSynaptic['DRIVE_GROOM'])
+				BRAIN.postSynaptic['DRIVE_GROOM'][BRAIN.nextState] = vd.groom * FIRE_STATE_SCALE;
+
+			// Synthesize VNC motor outputs from descending neuron activity
+			synthesizeMotorOutputs();
+
+			// Motor control
+			BRAIN.motorcontrol();
+
+			// State swap
+			for (var ps in BRAIN.postSynaptic) {
+				BRAIN.postSynaptic[ps][BRAIN.thisState] =
+					BRAIN.postSynaptic[ps][BRAIN.nextState];
+			}
+			var temp = BRAIN.thisState;
+			BRAIN.thisState = BRAIN.nextState;
+			BRAIN.nextState = temp;
+		}
+```
+
+#### Change F: Reset pendingDriveFrames in stopWorker
+- anchor: `BRAIN.latestFireState = null;` inside `function stopWorker()` (last line of stopWorker body, line 563)
+- After `BRAIN.latestFireState = null;`, add:
+```js
+		pendingDriveFrames = 0;
+```
+
+#### Change G: Reset pendingDriveFrames in startWorker
+- anchor: `pendingWorkerTicks = 0;` inside `function startWorker()` (line 570)
+- After `pendingWorkerTicks = 0;`, add:
+```js
+		pendingDriveFrames = 0;
+```
+
+#### Change H: Add collectOneShotSegments to BRAIN._bridge test exports
+- anchor: `collectStimulationSegments: collectStimulationSegments,` (line 584)
+- After this line, add:
+```js
+			collectOneShotSegments: collectOneShotSegments,
+```
+
+#### Change I: Reset pendingDriveFrames in _setGroupState
+- anchor: `pendingWorkerTicks = 0;` inside `_setGroupState` function (line 600)
+- After `pendingWorkerTicks = 0;`, add:
+```js
+				pendingDriveFrames = 0;
+```
 
 ### 2. MODIFY tests/tests.js
 - operation: MODIFY
-- reason: Add a regression test that verifies `latestFireState` is consumed (nulled) after `aggregateFireState()` runs, so a second call without new worker data takes the no-op path
-- anchor: The end of `test_bridge_aggregateFireState_decay` function, just before `// --- synthesizeMotorOutputs tests ---` (line 707)
+- reason: Update NOCI test to use collectOneShotSegments (since NOCI is no longer in sustained segments), add test verifying NOCI is absent from sustained segments, add test verifying drive throttling behavior
 
-#### Functions
-- Insert the following new test function between line 705 (end of `test_bridge_aggregateFireState_decay`) and line 707 (`// --- synthesizeMotorOutputs tests ---`):
-
+#### Change A: Update test_bridge_stim_noci_intensity_and_clear
+- anchor: `var test_bridge_stim_noci_intensity_and_clear = function () {` (line 1066)
+- Replace the entire function (lines 1066-1088) with:
 ```js
-var test_bridge_aggregateFireState_clears_stale = function () {
+var test_bridge_stim_noci_intensity_and_clear = function () {
 	resetBrainState();
-	// Setup: 2 groups, 10 neurons each
-	var names = ['TEST_ST0', 'TEST_ST1'];
-	for (var g = 0; g < 2; g++) {
-		BRAIN.postSynaptic[names[g]] = [0, 0];
+	BRAIN.stimulate.nociception = true;
+
+	var segs = BRAIN._bridge.collectOneShotSegments();
+
+	// Find NOCI segment
+	var nociSeg = null;
+	for (var i = 0; i < segs.length; i++) {
+		if (segs[i].name === 'NOCI') { nociSeg = segs[i]; break; }
 	}
-	var assignments = new Uint16Array(20);
-	for (var i = 0; i < 10; i++) assignments[i] = 0;
-	for (var i = 10; i < 20; i++) assignments[i] = 1;
-	BRAIN._bridge._setGroupState(2, 20, assignments, [10, 10], names);
-
-	// First call: fire all neurons in group 0 via latestFireState fallback
-	var fire = new Uint8Array(20);
-	for (var i = 0; i < 10; i++) fire[i] = 1;
-	BRAIN._bridge._setFireState(fire, null, 0);
-
-	BRAIN._bridge.aggregateFireState();
-
-	var FSS = BRAIN._bridge.FIRE_STATE_SCALE;
-	assertClose(BRAIN.postSynaptic['TEST_ST0'][BRAIN.nextState], FSS, 0.01,
-		'first call: group 0 fully active');
-
-	// Second call: no new worker tick, latestFireState should have been cleared
-	// so aggregateFireState should be a no-op (no new data to consume).
-	// Copy current activation to thisState to simulate state swap
-	BRAIN.postSynaptic['TEST_ST0'][BRAIN.thisState] =
-		BRAIN.postSynaptic['TEST_ST0'][BRAIN.nextState];
-	BRAIN.postSynaptic['TEST_ST0'][BRAIN.nextState] = 0;
-	BRAIN.postSynaptic['TEST_ST1'][BRAIN.thisState] =
-		BRAIN.postSynaptic['TEST_ST1'][BRAIN.nextState];
-	BRAIN.postSynaptic['TEST_ST1'][BRAIN.nextState] = 0;
-
-	BRAIN._bridge.aggregateFireState();
-
-	// With latestFireState cleared, the fallback branch should NOT run.
-	// Both pendingGroupSpikes and pendingWorkerTicks are 0, and latestFireState is null,
-	// so groupFires stays all-zero. The only contribution is decay: prevActivation * 0.75.
-	// Group 0: max(0, 100 * 0.75) = 75 (decay only, not 100 again from stale snapshot)
-	assertClose(BRAIN.postSynaptic['TEST_ST0'][BRAIN.nextState], FSS * 0.75, 0.01,
-		'second call without new tick: decays instead of re-reading stale fire state');
-	// Group 1: max(0, 0 * 0.75) = 0
-	assertEqual(BRAIN.postSynaptic['TEST_ST1'][BRAIN.nextState], 0,
-		'second call: inactive group stays zero');
+	assertTrue(nociSeg !== null, 'nociception maps to NOCI one-shot segment');
+	var SI = BRAIN._bridge.STIM_INTENSITY;
+	assertClose(nociSeg.intensity, SI * 5, 0.001, 'NOCI intensity is 5x STIM_INTENSITY');
+	assertEqual(BRAIN.stimulate.nociception, false, 'nociception auto-clears after collection');
 };
 ```
 
-- The test is named `test_bridge_aggregateFireState_clears_stale` which follows the existing naming convention and will be auto-discovered by `runAllTests()` (line 543-545 pattern: global scope functions starting with `test_`).
-- The test must be placed inside the `if (typeof BRAIN !== 'undefined' && BRAIN._bridge) {` guard block (line 598) and before the closing `}` at the end of that block.
+#### Change B: Add test_bridge_stim_noci_not_in_sustained
+- anchor: the closing `};` of `test_bridge_stim_noci_intensity_and_clear` (after the replacement above)
+- Insert the following new test AFTER `test_bridge_stim_noci_intensity_and_clear`:
+```js
+
+var test_bridge_stim_noci_not_in_sustained = function () {
+	resetBrainState();
+	BRAIN.stimulate.nociception = true;
+	BRAIN.stimulate.touch = false;
+	BRAIN.drives.hunger = 0; BRAIN.drives.fear = 0; BRAIN.drives.fatigue = 0;
+	BRAIN.drives.curiosity = 0; BRAIN.drives.groom = 0;
+	BRAIN.stimulate.lightLevel = 0;
+	BRAIN.stimulate.wind = false;
+	BRAIN.stimulate.temperature = 0.5;
+	BRAIN._isMoving = false;
+
+	var segs = BRAIN._bridge.collectStimulationSegments();
+
+	for (var i = 0; i < segs.length; i++) {
+		assertTrue(segs[i].name !== 'NOCI',
+			'NOCI must not appear in sustained segments (found at index ' + i + ')');
+	}
+	// nociception flag should NOT be cleared by collectStimulationSegments
+	// (it is only cleared by collectOneShotSegments)
+	assertTrue(BRAIN.stimulate.nociception === true,
+		'collectStimulationSegments does not clear nociception flag');
+};
+```
+
+#### Change C: Add test_bridge_workerUpdate_drives_throttled
+- anchor: `} // end bridge tests guard` (line 1145)
+- Insert the following new test BEFORE the closing `}`:
+```js
+
+var test_bridge_workerUpdate_drives_throttled = function () {
+	resetBrainState();
+	withMockedRandom(0.5, function () {
+		BRAIN._bridge._setGroupState(1, 0, new Uint16Array(0), [0], ['DRIVE_FEAR']);
+		// No fire state — guard will be false
+		BRAIN.drives.fear = 0.5;
+		BRAIN.stimulate.touch = false;
+		BRAIN.stimulate.wind = false;
+		BRAIN.stimulate.dangerOdor = false;
+		BRAIN._isFeeding = false;
+		BRAIN._isMoving = false;
+		BRAIN._isGrooming = false;
+
+		// Call workerUpdate with guard false (no latestFireState, no pendingWorkerTicks)
+		BRAIN._bridge.workerUpdate();
+
+		// Drives should NOT have been updated (guard was false)
+		assertClose(BRAIN.drives.fear, 0.5, 0.001,
+			'drives not updated when no worker ticks pending');
+
+		// Now simulate a worker tick arriving
+		BRAIN._bridge._setFireState(new Uint8Array(0), null, 0);
+
+		// Call workerUpdate again — guard true, should batch-update drives for 2 frames
+		BRAIN._bridge.workerUpdate();
+	});
+
+	// updateDrives called twice (1 pending + 1 current): fear = 0.5 * 0.85^2
+	assertClose(BRAIN.drives.fear, 0.5 * 0.85 * 0.85, 0.01,
+		'drives batch-updated for accumulated frames when guard becomes true');
+};
+```
 
 ## Verification
-- build: No build step (vanilla JS project, no bundler)
-- lint: No linter configured
+- build: no build step (vanilla JS, no bundler)
+- lint: no linter configured
 - test: `node tests/run-node.js`
-- smoke: After running tests, verify the new test `test_bridge_aggregateFireState_clears_stale` passes. The key assertion is that the second call to `aggregateFireState()` produces `75` (decay from 100) for group 0, NOT `100` (which would indicate the stale fire state was re-consumed).
+- smoke: Open the app in a browser. Click the touch tool and click on the fly. Observe that (1) the fly shows a startle/flight response (NOCI reaching DN_STARTLE via the one-shot stimulate message), and (2) the startle response is not weaker than expected (drives and motor pipeline are synchronized). Check the browser console for no errors.
 
 ## Constraints
-- Do NOT modify `BRAIN.latestFireState` (the property on the BRAIN object) — only the closure-local `latestFireState` variable inside the IIFE
-- Do NOT modify any file other than `js/brain-worker-bridge.js` and `tests/tests.js`
-- Do NOT add any new dependencies or files
-- Do NOT modify the `workerUpdate()` function — the guard logic is correct; only the missing cleanup in `aggregateFireState()` needs fixing
-- Do NOT modify `js/neuro-renderer.js` — it reads `BRAIN.latestFireState` which is unaffected
-- Do NOT modify the worker message handler (the `case 'tick':` block around line 182-192)
-- Do NOT modify `stopWorker()` or `startWorker()` functions
-- Do NOT modify `SPEC.md`, `CLAUDE.md`, or `TASKS.md`
-- The single line addition (`latestFireState = null;`) is the complete fix — do not add additional logic, guards, or flags
+- Do NOT modify js/sim-worker.js — the existing `stimulate` message handler is already correct
+- Do NOT modify js/connectome.js — BRAIN.updateDrives remains unchanged; rate compensation is handled by batched calling in workerUpdate
+- Do NOT modify js/main.js — the setInterval(updateBrain, 500) tick rate stays the same
+- Do NOT modify SPEC.md, TASKS.md, or any files in .buildloop/ other than current-plan.md
+- Do NOT add new files — all changes are in existing files
+- Do NOT add npm dependencies or a build step
+- The cap on pendingDriveFrames (20) must be a literal in the Math.min call, not a named constant — keep it minimal per project conventions (ES5 IIFE, no unnecessary abstraction)

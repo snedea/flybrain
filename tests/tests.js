@@ -1066,6 +1066,23 @@ var test_bridge_stim_temperature_thresholds = function () {
 var test_bridge_stim_noci_intensity_and_clear = function () {
 	resetBrainState();
 	BRAIN.stimulate.nociception = true;
+
+	var segs = BRAIN._bridge.collectOneShotSegments();
+
+	// Find NOCI segment
+	var nociSeg = null;
+	for (var i = 0; i < segs.length; i++) {
+		if (segs[i].name === 'NOCI') { nociSeg = segs[i]; break; }
+	}
+	assertTrue(nociSeg !== null, 'nociception maps to NOCI one-shot segment');
+	var SI = BRAIN._bridge.STIM_INTENSITY;
+	assertClose(nociSeg.intensity, SI * 5, 0.001, 'NOCI intensity is 5x STIM_INTENSITY');
+	assertEqual(BRAIN.stimulate.nociception, false, 'nociception auto-clears after collection');
+};
+
+var test_bridge_stim_noci_not_in_sustained = function () {
+	resetBrainState();
+	BRAIN.stimulate.nociception = true;
 	BRAIN.stimulate.touch = false;
 	BRAIN.drives.hunger = 0; BRAIN.drives.fear = 0; BRAIN.drives.fatigue = 0;
 	BRAIN.drives.curiosity = 0; BRAIN.drives.groom = 0;
@@ -1076,15 +1093,14 @@ var test_bridge_stim_noci_intensity_and_clear = function () {
 
 	var segs = BRAIN._bridge.collectStimulationSegments();
 
-	// Find NOCI segment
-	var nociSeg = null;
 	for (var i = 0; i < segs.length; i++) {
-		if (segs[i].name === 'NOCI') { nociSeg = segs[i]; break; }
+		assertTrue(segs[i].name !== 'NOCI',
+			'NOCI must not appear in sustained segments (found at index ' + i + ')');
 	}
-	assertTrue(nociSeg !== null, 'nociception maps to NOCI');
-	var SI = BRAIN._bridge.STIM_INTENSITY;
-	assertClose(nociSeg.intensity, SI * 5, 0.001, 'NOCI intensity is 5x STIM_INTENSITY');
-	assertEqual(BRAIN.stimulate.nociception, false, 'nociception auto-clears after collection');
+	// nociception flag should NOT be cleared by collectStimulationSegments
+	// (it is only cleared by collectOneShotSegments)
+	assertTrue(BRAIN.stimulate.nociception === true,
+		'collectStimulationSegments does not clear nociception flag');
 };
 
 var test_bridge_stim_tonic_background = function () {
@@ -1140,6 +1156,38 @@ var test_bridge_buildGroupIndices = function () {
 	// Group 2: neuron 3
 	assertEqual(gi[2].length, 1, 'group 2 has 1 neuron');
 	assertEqual(gi[2][0], 3, 'group 2 index is 3');
+};
+
+var test_bridge_workerUpdate_drives_throttled = function () {
+	resetBrainState();
+	withMockedRandom(0.5, function () {
+		BRAIN._bridge._setGroupState(1, 0, new Uint16Array(0), [0], ['DRIVE_FEAR']);
+		// No fire state — guard will be false
+		BRAIN.drives.fear = 0.5;
+		BRAIN.stimulate.touch = false;
+		BRAIN.stimulate.wind = false;
+		BRAIN.stimulate.dangerOdor = false;
+		BRAIN._isFeeding = false;
+		BRAIN._isMoving = false;
+		BRAIN._isGrooming = false;
+
+		// Call workerUpdate with guard false (no latestFireState, no pendingWorkerTicks)
+		BRAIN._bridge.workerUpdate();
+
+		// Drives should NOT have been updated (guard was false)
+		assertClose(BRAIN.drives.fear, 0.5, 0.001,
+			'drives not updated when no worker ticks pending');
+
+		// Now simulate a worker tick arriving
+		BRAIN._bridge._setFireState(new Uint8Array(0), null, 0);
+
+		// Call workerUpdate again — guard true, should batch-update drives for 2 frames
+		BRAIN._bridge.workerUpdate();
+	});
+
+	// updateDrives called twice (1 pending + 1 current): fear = 0.5 * 0.85^2
+	assertClose(BRAIN.drives.fear, 0.5 * 0.85 * 0.85, 0.01,
+		'drives batch-updated for accumulated frames when guard becomes true');
 };
 
 } // end bridge tests guard

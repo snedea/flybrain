@@ -1,21 +1,28 @@
-# Build Claims -- D65.1
+# Build Claims -- D67.1
 
 ## Files Changed
-- MODIFY js/brain-worker-bridge.js -- Added `latestFireState = null;` at end of aggregateFireState() after pendingWorkerTicks reset (line 551) to clear stale fire state after consumption
-- MODIFY tests/tests.js -- Added test_bridge_aggregateFireState_clears_stale regression test verifying latestFireState is consumed and cleared after aggregateFireState() runs
+- MODIFY js/brain-worker-bridge.js -- Fix nociception stimulus overwrite (one-shot via worker 'stimulate' message) and drive-motor timing mismatch (throttle updateDrives to worker tick rate with batched catch-up)
+- MODIFY tests/tests.js -- Update NOCI test to use collectOneShotSegments, add test verifying NOCI absent from sustained segments, add drive throttling test
 
 ## Verification Results
-- Build: PASS (no build step — vanilla JS project)
-- Tests: PASS (`node tests/run-node.js` — 67 passed / 0 failed / 67 total)
+- Build: PASS (no build step — vanilla JS)
+- Tests: PASS (`node tests/run-node.js` — 69 passed / 0 failed / 69 total)
 - Lint: SKIPPED (no linter configured)
 
 ## Claims
-- [ ] In js/brain-worker-bridge.js, `latestFireState = null;` is added at line 551 inside aggregateFireState(), immediately after `pendingWorkerTicks = 0;` and before the function's closing brace
-- [ ] The closure-local `latestFireState` variable is nulled, NOT `BRAIN.latestFireState` (which remains unaffected for neuro-renderer.js)
-- [ ] No other functions were modified: stopWorker(), startWorker(), workerUpdate(), and the worker message handler are all unchanged
-- [ ] The new test test_bridge_aggregateFireState_clears_stale verifies that a second call to aggregateFireState() without a new worker tick produces decay (FSS * 0.75) rather than re-reading the stale fire state (FSS)
-- [ ] All 67 tests pass including the new regression test
+- [ ] NOCI stimulus is now collected via `collectOneShotSegments()` (new function) instead of `collectStimulationSegments()`, preventing overwrite by subsequent `setStimulusState` bulk replacements
+- [ ] `sendOneShotStimuli()` sends NOCI segments via worker `{type: 'stimulate'}` message for immediate V[idx] += intensity injection, bypassing the sustained state replacement pipeline
+- [ ] `sendOneShotStimuli()` runs every animation frame (not gated on worker ticks), ensuring NOCI is delivered promptly regardless of worker tick timing
+- [ ] `updateDrives()` is now throttled to only run when the motor pipeline guard `(latestFireState || pendingWorkerTicks > 0)` is true, preventing drive decay between worker ticks
+- [ ] `pendingDriveFrames` counter accumulates elapsed frames and batch-runs `updateDrives()` N times when the guard becomes true, preserving per-frame decay rates (e.g. fear *= 0.85^N)
+- [ ] `pendingDriveFrames` is capped at 20 via `Math.min(pendingDriveFrames + 1, 20)` to prevent runaway accumulation
+- [ ] `pendingDriveFrames` is reset to 0 in `stopWorker()`, `startWorker()`, and `_setGroupState()`
+- [ ] `collectOneShotSegments` is exported via `BRAIN._bridge` for test access
+- [ ] Test `test_bridge_stim_noci_intensity_and_clear` updated to use `collectOneShotSegments()` instead of `collectStimulationSegments()`
+- [ ] New test `test_bridge_stim_noci_not_in_sustained` verifies NOCI does not appear in sustained segments and nociception flag is not cleared by `collectStimulationSegments()`
+- [ ] New test `test_bridge_workerUpdate_drives_throttled` verifies drives are not updated when guard is false, and are batch-updated for accumulated frames when guard becomes true
 
 ## Gaps and Assumptions
-- The test uses the fallback path (latestFireState iteration) not the primary path (pendingGroupSpikes) since _setFireState with null groupSpikes and 0 pendingWorkerTicks triggers the fallback
-- No browser/integration testing was performed — only Node.js unit tests via run-node.js
+- Smoke test (browser interaction with touch tool) not performed — requires browser environment
+- sim-worker.js was not modified per plan constraints; the existing `stimulate` message handler at line 435 is assumed correct for one-shot V injection
+- Drive decay rate (0.85) is assumed to be the current value in BRAIN.updateDrives(); batched calling preserves whatever rate is actually used
