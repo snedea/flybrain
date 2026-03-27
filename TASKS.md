@@ -192,3 +192,135 @@ No new tasks discovered.
 ## Discovery Round 28
 
 - [x] D28.1: Fix Math.random mock leak in tests causing cascading false failures. 9 test functions (2 pre-existing: test_dark_curiosity_range_reduced, test_bright_curiosity_range_normal; 7 new from D24.1: test_bridge_synthesize_walk_tonic, test_bridge_synthesize_flight_fear, test_bridge_synthesize_groom, test_bridge_synthesize_feed, test_bridge_virtual_bypass_fear, test_bridge_virtual_bypass_curiosity, test_bridge_virtual_bypass_groom) mock Math.random with a bare var origRandom = Math.random; Math.random = mock; ... Math.random = origRandom; pattern. If any of these tests throws before the restore line, the mock (always returning 0.5) leaks into ALL subsequent tests. This corrupts any test that depends on Math.random -- BRAIN.updateDrives() uses it for curiosity random walk (connectome.js:203), BRAIN.randExcite() uses it (connectome.js:228), and synthesizeMotorOutputs() uses it for walk jitter (brain-worker-bridge.js:323). A single bridge test failure would cause cascading false failures with misleading error messages, making the root cause hard to identify. Fix: wrap each mock/restore pair in try/finally so Math.random is always restored even on test failure. Consider adding a helper function like withMockedRandom(value, fn) to tests.js Section 1 to DRY the pattern and prevent future instances of the same bug. No try/finally is used anywhere in the current test file (confirmed via grep). Files: tests/tests.js (9 test functions across Section 3 and Section 5) [-PI-]
+
+## Discovery Round 29
+
+No new tasks discovered.
+
+## Discovery Round 30
+
+No new tasks discovered.
+
+## Discovery Round 31
+
+No new tasks discovered.
+
+## Discovery Round 32
+
+No new tasks discovered.
+
+## Discovery Round 33
+
+No new tasks discovered.
+
+## Discovery Round 34
+
+No new tasks discovered.
+
+## Discovery Round 35
+
+No new tasks discovered.
+
+## Discovery Round 36
+
+No new tasks discovered.
+
+## Discovery Round 37
+
+No new tasks discovered.
+
+## Discovery Round 38
+
+No new tasks discovered.
+
+## Discovery Round 39
+
+No new tasks discovered.
+
+## Discovery Round 40
+
+No new tasks discovered.
+
+## Discovery Round 41
+
+No new tasks discovered.
+
+## Discovery Round 42
+
+No new tasks discovered.
+
+## Discovery Round 43
+
+No new tasks discovered.
+
+## Discovery Round 44
+
+No new tasks discovered.
+
+## Discovery Round 45
+
+No new tasks discovered.
+
+## Discovery Round 46
+
+No new tasks discovered.
+
+## Discovery Round 48
+
+No new tasks discovered.
+
+## Discovery Round 50
+
+No new tasks discovered.
+
+## Discovery Round 51
+
+No new tasks discovered.
+
+## Discovery Round 52
+
+No new tasks discovered.
+
+## Discovery Round 53
+
+No new tasks discovered.
+
+## Discovery Round 55
+
+No new tasks discovered.
+
+## Discovery Round 56
+
+No new tasks discovered.
+
+## Discovery Round 58
+
+No new tasks discovered.
+
+## Discovery Round 59
+
+No new tasks discovered.
+
+## Discovery Round 60
+
+No new tasks discovered.
+
+## Discovery Round 61
+
+No new tasks discovered.
+
+## Discovery Round 62
+
+No new tasks discovered.
+
+## Discovery Round 63
+
+No new tasks discovered.
+
+## Discovery Round 64
+
+No new tasks discovered.
+
+## Discovery Round 65
+
+- [ ] D65.1: Fix stale latestFireState in aggregateFireState() causing redundant 139K-neuron iteration and full motor pipeline execution on every animation frame between worker ticks. In brain-worker-bridge.js, workerUpdate() guards the aggregation/motor/swap block with `if (latestFireState || pendingWorkerTicks > 0)`. After the primary path (pendingGroupSpikes) runs and clears pendingGroupSpikes/pendingWorkerTicks, latestFireState remains non-null because aggregateFireState() never clears it. On subsequent frames before the next worker tick (~2-3 frames at 60fps/20Hz), the guard passes via the stale latestFireState, triggering the fallback path which iterates all 139K neurons from the old Uint8Array snapshot, then runs the full pipeline (virtual bypass, synthesizeMotorOutputs, motorcontrol, state swap). Effects: (a) ~5.6M wasted neuron iterations/sec (139K neurons * ~40 stale frames/sec), (b) the 0.75 prevActivation decay in aggregateFireState is bypassed between ticks because the stale snapshot re-injects the same windowActivation each frame via Math.max(windowActivation, prevActivation * 0.75), and (c) synthesizeMotorOutputs runs with fresh Math.random jitter on each stale frame causing micro-oscillations in walk left/right balance. Fix: set latestFireState = null at the end of aggregateFireState() after the fallback branch consumes it (BRAIN.latestFireState used by neuro-renderer.js is a separate reference and remains unaffected). Files: js/brain-worker-bridge.js (aggregateFireState around line 549, workerUpdate guard at line 368)
