@@ -1,6 +1,6 @@
 {
-  "task_id": "T7.5",
-  "task_desc": "Replace the DOM-based dot clusters in the left sidebar with a WebGL2 canvas (js/neuro-renderer.js) that renders 139K neurons as instanced points. Each neuron is a 1-2px point colored by region type (sensory blue, central purple, drives amber, motor red), brightness driven by fire state from the Uint8Array. Layout: neurons arranged within their region section in a grid pattern, with section labels (Sensory, Central, Drives, Motor) as HTML overlays positioned above the canvas regions. Single draw call using ANGLE_instanced_arrays. Update at display refresh rate, reading from the latest fire state buffer. Keep the tooltip on hover (raycast from mouse position to nearest neuron, show group name + description).",
+  "task_id": "T7.6",
+  "task_desc": "Load connectome.bin.gz at startup with a progress indicator in the left sidebar (\"Loading connectome... 4.2/6.1 MB\"). Parse in the Web Worker (receives ArrayBuffer, builds CSR, posts ready message). Show the existing 59-group dots while loading, then swap to the WebGL canvas when the worker is ready. Add a scale indicator to the header: \"139,255 neurons / 2,713,004 connections -- FlyWire FAFB v783\". Add a toggle (keyboard shortcut or button) to switch between full connectome and 59-group view.",
   "completed_stage": "builder",
-  "timestamp": "2026-03-26T23:56:25.338766+00:00"
+  "timestamp": "2026-03-27T00:04:12.614947+00:00"
 }

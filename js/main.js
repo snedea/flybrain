@@ -429,16 +429,27 @@ var connectomeToggleBtn = document.getElementById('connectomeToggleBtn');
 var nodeHolder = document.getElementById('nodeHolder');
 
 connectomeToggleBtn.addEventListener('click', function () {
-	if (typeof NeuroRenderer !== 'undefined' && NeuroRenderer.isActive()) {
-		NeuroRenderer.destroy();
-		nodeHolder.classList.remove('hidden');
-		connectomeToggleBtn.textContent = 'Hide';
-	} else if (nodeHolder.classList.contains('hidden')) {
-		nodeHolder.classList.remove('hidden');
-		connectomeToggleBtn.textContent = 'Hide';
+	if (BRAIN.workerReady && typeof NeuroRenderer !== 'undefined') {
+		if (NeuroRenderer.isActive()) {
+			NeuroRenderer.destroy();
+			connectomeToggleBtn.textContent = '139K View';
+		} else {
+			if (NeuroRenderer.init()) {
+				connectomeToggleBtn.textContent = '59 Groups';
+			}
+		}
 	} else {
-		nodeHolder.classList.add('hidden');
-		connectomeToggleBtn.textContent = 'Show';
+		if (typeof NeuroRenderer !== 'undefined' && NeuroRenderer.isActive()) {
+			NeuroRenderer.destroy();
+			nodeHolder.classList.remove('hidden');
+			connectomeToggleBtn.textContent = 'Hide';
+		} else if (nodeHolder.classList.contains('hidden')) {
+			nodeHolder.classList.remove('hidden');
+			connectomeToggleBtn.textContent = 'Hide';
+		} else {
+			nodeHolder.classList.add('hidden');
+			connectomeToggleBtn.textContent = 'Show';
+		}
 	}
 });
 
@@ -494,10 +505,20 @@ BRAIN.randExcite();
 var _neuroRendererInitTimer = setInterval(function () {
 	if (BRAIN.workerReady && typeof NeuroRenderer !== 'undefined') {
 		clearInterval(_neuroRendererInitTimer);
-		NeuroRenderer.init();
+		if (NeuroRenderer.init()) {
+			connectomeToggleBtn.textContent = '59 Groups';
+		}
 	}
 }, 200);
 setTimeout(function () { clearInterval(_neuroRendererInitTimer); }, 30000);
+
+// Keyboard shortcut: 'v' toggles connectome view
+document.addEventListener('keydown', function (e) {
+	if (e.key === 'v' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+		if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+		connectomeToggleBtn.click();
+	}
+});
 
 var brainTickId = setInterval(updateBrain, 500);
 

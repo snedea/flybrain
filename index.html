@@ -20,6 +20,7 @@
         </div>
         <div class="toolbar-right">
             <span class="toolbar-title">FlyBrain</span>
+            <span id="scaleIndicator" class="scale-indicator" style="display:none;"></span>
             <img id="centerButton" src="./svg/center.svg" height="24" class="noselect toolbar-icon">
             <img id="clearButton" src="./svg/clear.svg" height="24" class="noselect toolbar-icon">
             <a href="https://github.com/snedea/homelab/tree/main/flybrain">
@@ -42,9 +43,9 @@
         <div id="connectome-panel">
             <div class="connectome-header">
                 <span class="connectome-label">Connectome</span>
-                <button class="connectome-toggle-btn" id="connectomeToggleBtn">Hide</button>
+                <button class="connectome-toggle-btn" id="connectomeToggleBtn" title="Toggle view (V)">Hide</button>
             </div>
-            <div class="connectome-subtitle">59 neuron groups modeling ~130K real neurons (FlyWire 2024)</div>
+            <div class="connectome-subtitle" id="connectomeSubtitle">59 neuron groups modeling ~130K real neurons (FlyWire 2024)</div>
             <div id="nodeHolder" class="connectome-grid"></div>
             <div id="neuronTooltip" class="neuron-tooltip"></div>
         </div>

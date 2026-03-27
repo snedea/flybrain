@@ -40,7 +40,7 @@ Data source: FlyWire Codex GCS bucket (public, no auth). Files in data/:
 
 ### T7.6: Loading and Fallback
 
-- [ ] T7.6: Load connectome.bin.gz at startup with a progress indicator in the left sidebar ("Loading connectome... 4.2/6.1 MB"). Parse in the Web Worker (receives ArrayBuffer, builds CSR, posts ready message). Show the existing 59-group dots while loading, then swap to the WebGL canvas when the worker is ready. Add a scale indicator to the header: "139,255 neurons / 2,713,004 connections -- FlyWire FAFB v783". Add a toggle (keyboard shortcut or button) to switch between full connectome and 59-group view.
+- [x] T7.6: Load connectome.bin.gz at startup with a progress indicator in the left sidebar ("Loading connectome... 4.2/6.1 MB"). Parse in the Web Worker (receives ArrayBuffer, builds CSR, posts ready message). Show the existing 59-group dots while loading, then swap to the WebGL canvas when the worker is ready. Add a scale indicator to the header: "139,255 neurons / 2,713,004 connections -- FlyWire FAFB v783". Add a toggle (keyboard shortcut or button) to switch between full connectome and 59-group view. [-PI-]
 
 ### T7.7: Performance Tuning
 

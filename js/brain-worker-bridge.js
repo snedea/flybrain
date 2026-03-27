@@ -24,6 +24,47 @@
 	// Motor neuron values of ~5-30 are needed to exceed behavior thresholds.
 	var FIRE_STATE_SCALE = 100;
 
+	/* ---- binary fetch with progress ---- */
+
+	function fetchBinaryWithProgress(url, onProgress) {
+		return new Promise(function (resolve, reject) {
+			var xhr = new XMLHttpRequest();
+			xhr.open('GET', url, true);
+			xhr.responseType = 'arraybuffer';
+			xhr.onprogress = function (e) {
+				if (e.lengthComputable) {
+					onProgress(e.loaded, e.total);
+				} else {
+					onProgress(e.loaded, 0);
+				}
+			};
+			xhr.onload = function () {
+				if (xhr.status >= 200 && xhr.status < 300) {
+					resolve(xhr.response);
+				} else {
+					reject(new Error('HTTP ' + xhr.status + ' fetching ' + url));
+				}
+			};
+			xhr.onerror = function () {
+				reject(new Error('Network error fetching ' + url));
+			};
+			xhr.send();
+		});
+	}
+
+	function updateLoadingProgress(loaded, total) {
+		var subtitle = document.getElementById('connectomeSubtitle');
+		if (!subtitle) return;
+		var loadedMB = (loaded / (1024 * 1024)).toFixed(1);
+		if (total > 0) {
+			var totalMB = (total / (1024 * 1024)).toFixed(1);
+			subtitle.textContent = 'Loading connectome... ' + loadedMB + ' / ' + totalMB + ' MB';
+		} else {
+			subtitle.textContent = 'Loading connectome... ' + loadedMB + ' MB';
+		}
+		subtitle.classList.add('loading');
+	}
+
 	/* ---- saved legacy reference ---- */
 
 	var legacyUpdate = BRAIN.update;
@@ -47,6 +88,11 @@
 	function initBridge() {
 		var metaUrl = 'data/neuron_meta.json';
 		var binUrl = 'data/connectome.bin.gz';
+		var subtitle = document.getElementById('connectomeSubtitle');
+		if (subtitle) {
+			subtitle.textContent = 'Loading connectome...';
+			subtitle.classList.add('loading');
+		}
 
 		fetch(metaUrl)
 			.then(function (res) {
@@ -61,13 +107,12 @@
 					groupNameToId[g.name] = g.id;
 					groupIdToName[g.id] = g.name;
 				}
-				return fetch(binUrl);
-			})
-			.then(function (res) {
-				if (!res.ok) throw new Error('HTTP ' + res.status + ' fetching ' + binUrl);
-				return res.arrayBuffer();
+				return fetchBinaryWithProgress(binUrl, updateLoadingProgress);
 			})
 			.then(function (buffer) {
+				if (subtitle) {
+					subtitle.textContent = 'Parsing connectome...';
+				}
 				worker = new Worker('js/sim-worker.js');
 				worker.onmessage = handleWorkerMessage;
 				worker.onerror = handleWorkerError;
@@ -76,6 +121,10 @@
 			.catch(function (err) {
 				console.warn('connectome.bin.gz load failed, using 59-group BRAIN.update():', err);
 				BRAIN.update = legacyUpdate;
+				if (subtitle) {
+					subtitle.textContent = '59 neuron groups \u2014 FlyWire approximation (fallback)';
+					subtitle.classList.remove('loading');
+				}
 			});
 	}
 
@@ -97,6 +146,7 @@
 			BRAIN.workerGroupIdArr = groupIdArr;
 			BRAIN.workerGroupIdToName = groupIdToName;
 			BRAIN.workerGroupSizes = groupSizes;
+			BRAIN.workerEdgeCount = e.data.edgeCount;
 
 			// Reset postSynaptic to avoid stale legacy values
 			for (var ps in BRAIN.postSynaptic) {
@@ -109,6 +159,20 @@
 			worker.postMessage({type: 'start'});
 			console.log('Connectome worker ready: ' + neuronCount + ' neurons, ' +
 				e.data.edgeCount + ' edges');
+			// Update subtitle with actual counts
+			var subtitle = document.getElementById('connectomeSubtitle');
+			if (subtitle) {
+				subtitle.textContent = neuronCount.toLocaleString() + ' neurons / ' +
+					e.data.edgeCount.toLocaleString() + ' connections \u2014 FlyWire FAFB v783';
+				subtitle.classList.remove('loading');
+			}
+			// Update header scale indicator
+			var scaleEl = document.getElementById('scaleIndicator');
+			if (scaleEl) {
+				scaleEl.textContent = neuronCount.toLocaleString() + ' neurons / ' +
+					e.data.edgeCount.toLocaleString() + ' connections \u2014 FlyWire FAFB v783';
+				scaleEl.style.display = '';
+			}
 			break;
 
 		case 'tick':
@@ -133,6 +197,11 @@
 		workerReady = false;
 		BRAIN.workerReady = false;
 		BRAIN.update = legacyUpdate;
+		var subtitle = document.getElementById('connectomeSubtitle');
+		if (subtitle) {
+			subtitle.textContent = '59 neuron groups \u2014 FlyWire approximation (fallback)';
+			subtitle.classList.remove('loading');
+		}
 	}
 
 	/* ---- build group-to-neuron-indices lookup ---- */
