@@ -1,67 +1,89 @@
-# Scout Report: T7.1
+# Scout Report: D24.1
 
 ## Key Facts (read this first)
 
-- **Tech stack**: Vanilla JS frontend (no build step). Project has Node 22 and yarn but **no Python installed** in this environment — the builder must install it (`apt-get install python3 python3-pip` or use a shebang with `#!/usr/bin/env python3` plus docs on prerequisites).
-- **No `data/` directory exists** — the 4 CSV source files are not present. Script must either download them from the FlyWire GCS bucket or document clearly that the user must place them there. The TASKS.md description implies they should be at `data/connections.csv.gz`, `data/neurons.csv.gz`, `data/classification.csv.gz`, `data/coordinates.csv.gz`.
-- **No `scripts/` directory exists** — builder must create it.
-- **59 existing neuron groups** are defined in `js/connectome.js` (via `BRAIN.neuronRegions`) and `js/constants.js` (via `weights` object). These are the exact group names the output must use. Enumerated below in Architecture Notes.
-- **Output binary format is strictly specified**: header (uint32 neuron_count, uint32 edge_count) + edges (uint32 pre, uint32 post, float32 weight) + per-neuron metadata (uint8 region_type, uint16 group_id). Gzipped target ~6–7 MB.
+- **Tech stack**: Vanilla ES5 JavaScript, no bundler, no npm. Tests run via Node.js `vm.runInThisContext` (simulates `<script>` tag loading into a shared global scope). No build step.
+- **Critical constraint**: `brain-worker-bridge.js` is an immediately-invoked IIFE (`(function(){ ... })()`). All four target functions (`synthesizeMotorOutputs`, `aggregateFireState`, `buildGroupIndices`, `sendStimulation`) are in closure scope — completely inaccessible from outside. `initBridge()` runs at the bottom of the IIFE and immediately calls DOM/fetch/Worker APIs that don't exist in Node.
+- **D23.1–D23.4 prerequisite is NOT met**: Many groups are still empty (DRIVE_FEAR=0, DRIVE_GROOM=0, DRIVE_CURIOSITY=0, NOCI=0, MB_MBON_AV=0, LH_AV=0, DN_STARTLE=0, all MN_LEG/WING=0). neuron_meta.json confirms 31 of 63 groups have 0 neurons. If tests are written now and D23 later changes the logic, tests will need updating.
+- **DN_STARTLE state mismatch confirmed**: `synthesizeMotorOutputs` writes DN_STARTLE to `BRAIN.postSynaptic['DN_STARTLE'][BRAIN.nextState]` (via `addPS`), but `motorcontrol()` reads it from `[BRAIN.thisState]` (connectome.js:485). Tests covering DN_STARTLE must account for this bug (or verify the fix if D23.2 is done first).
+- **sendStimulation is NOT purely testable**: It uses closure `worker` (Web Worker object) and `groupIndices` (populated from binary data). Testing it requires either a mock worker or restructuring it to be IO-free.
 
 ## Relevant Files
 
-- `js/constants.js` — Defines all 59 group names (the `weights` object keys). Builder must replicate this exact set for group_id assignment.
-- `js/connectome.js` — Defines `BRAIN.neuronRegions` with 4 buckets: `sensory` (17 groups), `central` (20 groups), `drives` (5 groups), `motor` (17 groups). Region type uint8 encoding must match downstream consumers (T7.3–T7.5).
-- `TASKS.md` — Contains the full spec for T7.1 (lines 21–23) and T7.2 (lines 25–27); T7.2's mapping logic is required as part of T7.1 as well.
-- `SPEC.md` — High-level project context; not needed for implementation.
-- `index.html` — Frontend entry point; shows where output files will be consumed (no direct changes needed for T7.1).
+| File | Role |
+|------|------|
+| `js/brain-worker-bridge.js` | Primary target — IIFE to refactor; contains all 4 functions to expose |
+| `tests/tests.js` | Existing 45 tests (all legacy 59-group path); new tests go here |
+| `tests/run-node.js` | Node test runner — loads files via `vm.runInThisContext`; must be updated to load the refactored bridge module |
+| `js/connectome.js` | Defines BRAIN object, `BRAIN.motorcontrol()`, `BRAIN.setup()`, `BRAIN.postSynaptic`, state indices; DN_STARTLE bug at line 485 |
+| `js/constants.js` | 59-group weights — needed by `BRAIN.setup()` for postSynaptic initialization in tests |
+| `js/fly-logic.js` | `BEHAVIOR_THRESHOLDS`, `evaluateBehaviorEntry()` — needed for context on motor threshold values |
+| `data/neuron_meta.json` | Runtime group metadata (63 groups); test scaffolding must replicate its structure in memory |
 
 ## Architecture Notes
 
-### Existing 59 neuron groups (from `BRAIN.neuronRegions` in connectome.js)
+### IIFE closure state dependencies
 
-- **sensory** (region_type=0, 17 groups): VIS_R1R6, VIS_R7R8, VIS_ME, VIS_LO, VIS_LC, VIS_LPTC, OLF_ORN_FOOD, OLF_ORN_DANGER, OLF_LN, OLF_PN, MECH_BRISTLE, MECH_JO, MECH_CHORD, ANTENNAL_MECH, THERMO_WARM, THERMO_COOL, NOCI
-- **central** (region_type=1, 20 groups): MB_KC, MB_APL, MB_MBON_APP, MB_MBON_AV, MB_DAN_REW, MB_DAN_PUN, LH_APP, LH_AV, CX_EPG, CX_PFN, CX_FC, CX_HDELTA, SEZ_FEED, SEZ_GROOM, SEZ_WATER, GUS_GRN_SWEET, GUS_GRN_BITTER, GUS_GRN_WATER, GNG_DESC, CLOCK_DN
-- **drives** (region_type=2, 5 groups): DRIVE_HUNGER, DRIVE_FEAR, DRIVE_FATIGUE, DRIVE_CURIOSITY, DRIVE_GROOM
-- **motor** (region_type=3, 17 groups): DN_WALK, DN_FLIGHT, DN_TURN, DN_BACKUP, DN_STARTLE, VNC_CPG, MN_LEG_L1, MN_LEG_R1, MN_LEG_L2, MN_LEG_R2, MN_LEG_L3, MN_LEG_R3, MN_WING_L, MN_WING_R, MN_PROBOSCIS, MN_HEAD, MN_ABDOMEN
+Functions depend on these IIFE-local vars:
+- `aggregateFireState()`: reads `pendingGroupSpikes`, `pendingWorkerTicks`, `latestFireState`, `neuronCount`, `groupCount`, `groupIdArr`, `groupSizes`, `groupIdToName`; writes back to `pendingGroupSpikes`/`pendingWorkerTicks`; also reads `BRAIN.postSynaptic`/`BRAIN.nextState`/`BRAIN.thisState`
+- `synthesizeMotorOutputs()`: reads only `BRAIN.postSynaptic` (via `readPS`/`addPS`) and `BRAIN.nextState`. Only local dep is `MOTOR_SCALE = 0.6` constant. **Most testable function.**
+- `buildGroupIndices()`: reads `groupCount`, `neuronCount`, `groupIdArr`; writes `groupIndices`
+- `sendStimulation()`: reads `groupNameToId`, `groupIndices`, `BRAIN.drives`, `BRAIN.stimulate`, `BRAIN._isMoving`; calls `worker.postMessage()` — requires Web Worker mock
 
-Total = 59 named groups. group_id 0–58 in fixed order; each region also needs a generic fallback group for unmapped neurons, bringing the JSON group list to 63 (59 + 4 generic fallbacks).
+### Test runner mechanism
 
-### CSV schema (from TASKS.md)
-- `connections.csv.gz`: `pre_root_id, post_root_id, neuropil, syn_count, nt_type` — 3.87M rows, 48MB compressed
-- `neurons.csv.gz`: `root_id, group, nt_type` — 139,255 rows, 1.6MB compressed
-- `classification.csv.gz`: `root_id, flow, super_class, class, sub_class, side` — 0.9MB compressed
-- `coordinates.csv.gz`: `root_id, position, supervoxel_id` — 5.1MB compressed (NOT needed for T7.1 output)
+`run-node.js` uses `vm.runInThisContext(code)` — all `var`-declared identifiers become globals. The IIFE in brain-worker-bridge.js will execute immediately upon load, calling `initBridge()` → `fetch()` + `new Worker()` which will crash in Node.
 
-### Weight derivation
-- `weight = syn_count × sign(nt_type)` where sign is +1 for excitatory (ACh, Glu, DA, OA, 5HT) and -1 for inhibitory (GABA). Store as float32.
-- Aggregate across neuropils: sum syn_count for same (pre_root_id, post_root_id) pairs before remapping.
+### BRAIN.postSynaptic initialization
 
-### Classification → group mapping strategy
-- `flow == 'sensory'` → region=sensory; `flow == 'motor'` → region=motor; `flow == 'intrinsic'` → region=central (drives are a subset)
-- `class` field drives specific group: `visual` → VIS_*, `olfactory` → OLF_*, `gustatory` → GUS_*, `mechanosensory` → MECH_*, `thermosensory` → THERMO_*, `kenyon_cell` → MB_KC, `mushroom_body_output` → MB_MBON_APP/AV (needs sub_class), `dopaminergic` → MB_DAN_REW/PUN, `central_complex` → CX_*, `lateral_horn` → LH_*, `descending` → DN_* or MN_*, etc.
-- Unmapped neurons: use generic group `GENERIC_SENSORY`, `GENERIC_CENTRAL`, `GENERIC_DRIVES`, `GENERIC_MOTOR` (group_ids 59–62).
+`BRAIN.setup()` in connectome.js initializes `BRAIN.postSynaptic` from the `weights` object (from constants.js). The worker bridge groups (e.g., `MN_LEG_L1`, `DRIVE_FEAR`, etc.) are already present as entries in `weights`, so `BRAIN.setup()` creates the `[0,0]` arrays for them. Tests can call `resetBrainState()` → `BRAIN.setup()` as usual.
 
-### Binary layout math
-- Header: 8 bytes
-- Edges: ~2.7M × 12 bytes = ~32.4 MB uncompressed → compresses well to ~6–7 MB gzipped
-- Metadata: 139,255 × 3 bytes = ~418 KB uncompressed
-- Total uncompressed: ~33 MB → gzip target 6–7 MB is achievable
+### virtual groups bypass (per D23.1 spec)
+
+For DRIVE_FEAR/CURIOSITY/GROOM (0 neurons), `workerUpdate()` is supposed to write `BRAIN.drives.fear` → `BRAIN.postSynaptic['DRIVE_FEAR'][nextState]` etc. This logic may or may not be present depending on D23.1 completion. Currently NOT present in the code.
 
 ## Suggested Approach
 
-1. **Script structure**: `scripts/build_connectome.py` with clear sections: (a) load CSVs, (b) build root_id→index remapping, (c) classify neurons → region + group, (d) aggregate edges, (e) write binary, (f) write JSON.
-2. **Use pandas**: Only stdlib dependency is `struct`, `gzip`, `json`. Pandas is highly recommended for the 48MB CSV but must be installed. Add a `requirements.txt` or inline `pip install` check.
-3. **Download logic**: Add an optional `--download` flag or a `download_data.sh` helper to fetch from the GCS bucket (`gs://flywire-data/` or similar). Alternatively, check `data/` exists and error clearly if files are missing.
-4. **Group ID ordering**: Assign group_ids 0–58 in the exact order they appear in `BRAIN.neuronRegions` (sensory first, then central, drives, motor), then 59–62 for generics. Document this ordering in neuron_meta.json so T7.3/T7.4 can decode it.
-5. **neuron_meta.json schema**: `{ "groups": [{"id": 0, "name": "VIS_R1R6", "region": "sensory", "neuron_count": N}, ...], "neuron_count": 139255, "edge_count": N }`.
+**Recommended: `BRAIN._bridge` test-only namespace guarded by a flag** (avoid creating a new file)
+
+1. Add a guard at the top of the IIFE: `if (typeof BRAIN === 'undefined') return;` and check `BRAIN._testMode` before calling `initBridge()`. When `BRAIN._testMode = true`, the IIFE should expose functions but NOT call `initBridge()`.
+
+2. Expose the functions + required mutable state as `BRAIN._bridge`:
+   ```js
+   BRAIN._bridge = {
+     // The pure functions
+     synthesizeMotorOutputs: synthesizeMotorOutputs,
+     aggregateFireState: aggregateFireState,
+     buildGroupIndices: buildGroupIndices,
+     sendStimulationDryRun: function(captureAddGroup) { ... }, // testable version
+     // Mutable state setters for test setup
+     _setGroupState: function(gc, gs, gIdArr, nCount, gIdToName) { ... },
+     _setFireState: function(fs, spikes, ticks) { ... },
+     FIRE_STATE_SCALE: FIRE_STATE_SCALE,
+     MOTOR_SCALE: MOTOR_SCALE,
+   };
+   ```
+
+3. In `run-node.js`: set `global.BRAIN = {}; BRAIN._testMode = true;` before loading the bridge. Or set it after loading connectome.js but before loading the bridge.
+
+4. **Test strategy for each function**:
+   - `aggregateFireState`: call `BRAIN._bridge._setGroupState(...)` to inject synthetic group data, then set `BRAIN._bridge._setFireState(syntheticUint8Array, null, 0)`, call `BRAIN._bridge.aggregateFireState()`, check `BRAIN.postSynaptic[name][BRAIN.nextState]`
+   - `synthesizeMotorOutputs`: set `BRAIN.postSynaptic[name][BRAIN.nextState]` directly via `resetBrainState()` + manual assignment, call `BRAIN._bridge.synthesizeMotorOutputs()`, check motor group postSynaptic values and then call `BRAIN.motorcontrol()` to check accumulators
+   - `virtual group bypass`: patch `workerUpdate` to be callable, verify drives flow into postSynaptic
+   - `sendStimulation mapping`: test a dry-run version that collects the `addGroup(name, intensity)` calls rather than posting to a worker
 
 ## Risks and Constraints (read this last)
 
-- **Python not available**: Debian bookworm has `python3` in apt but it is not installed. Builder must add install instructions. The script itself cannot be tested in this environment without installing Python.
-- **Data files absent**: The 4 CSV files in `data/` don't exist yet. Builder should include a download script or clear instructions. GCS bucket URL not explicitly stated in TASKS.md — builder should use `https://storage.googleapis.com/flywire-data/` or the Codex API. The public FlyWire Codex download URL pattern should be verified.
-- **Memory pressure**: 48MB compressed connections = likely 200–400MB in memory as a pandas DataFrame. On a low-RAM environment this may OOM. Builder may want to use chunked reading or dask for large files.
-- **nt_type sign mapping**: The actual nt_type string values in the FlyWire dataset (`ACh`, `GABA`, `Glu`, `DA`, `OA`, `5HT`, `unknown`) are not confirmed from the code — builder must verify against actual CSV header or FlyWire docs. Unknown nt_type should default to excitatory (+1) with a warning.
-- **Duplicate edges after aggregation**: After summing syn_count across neuropils, the resulting edge list should be unique (pre_index, post_index) pairs — verify with a groupby + sum before writing.
-- **T7.2 overlap**: T7.2 is a separate task but T7.1's spec says "maps each neuron to one of the existing 59 behavioral groups" — T7.1 must include the full mapping logic. T7.2 appears to be a refinement/documentation task, not a blocker.
-- **coordinates.csv not needed for T7.1**: The spatial positions are only needed for T7.5 (WebGL layout). Builder should skip loading this file to save time/memory.
+1. **D23.1–D23.4 not complete**: Tests involving real group activations (aggregateFireState with actual empty groups, virtual group bypass) will test the current broken state unless D23 is done first. The task description says this is a prerequisite — the planner must decide whether to stub/skip these tests or implement them against the current (broken) state and update after D23.
+
+2. **synthesizeMotorOutputs early exit at line 312**: `if (total < 0.5) return;` — any test that doesn't inject sufficient `GNG_DESC`+`VNC_CPG` will get an early return and see zero motor output. Test cases must inject non-trivial values for these or test the early exit path explicitly.
+
+3. **sendStimulation cannot be tested as-is**: It calls `worker.postMessage()` directly. Only a dry-run wrapper or a spy/capture approach will work. The planner should consider whether to add a `_testAddGroupHook` callback or refactor the segment-collection loop into a separate function.
+
+4. **Math.random in synthesizeMotorOutputs**: The jitter `(Math.random() - 0.5) * 0.04` on walkL/walkR makes exact equality assertions fragile. Tests must use `assertClose` with tolerance ≥ 0.04 or mock `Math.random`.
+
+5. **DN_STARTLE off-by-one state bug**: `addPS('DN_STARTLE', ...)` writes to `nextState`, but `motorcontrol()` reads `[thisState]`. Tests verifying DN_STARTLE must call the state swap manually after `synthesizeMotorOutputs()` before calling `motorcontrol()`, or test `BRAIN.postSynaptic['DN_STARTLE'][BRAIN.nextState]` directly without going through motorcontrol. This bug should be fixed in D23.2 first.
+
+6. **IIFE runs immediately on load**: The Node test runner calls `vm.runInThisContext(code)` which executes the IIFE instantly. Without a `_testMode` guard, `initBridge()` will throw `ReferenceError: fetch is not defined`. The refactor MUST prevent `initBridge()` from running in test context.
+
+7. **No package.json / no test framework**: Tests use a hand-rolled assertion library. The 15-20 new tests must follow the exact same pattern as existing tests (plain functions named `test_*`, use `assertEqual`/`assertClose`/`assertTrue`).

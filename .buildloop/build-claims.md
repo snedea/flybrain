@@ -1,25 +1,34 @@
-# Build Claims -- D22.2
+# Build Claims -- D24.1
 
 ## Files Changed
-- [MODIFY] js/neuro-renderer.js -- Added GPU resource cleanup in destroy(), added handleResize() function, attached ResizeObserver in init()
+- [MODIFY] js/brain-worker-bridge.js -- Added collectStimulationSegments() pure function extracting mapping logic from sendStimulation(); refactored sendStimulation() to use it; added virtual group bypass block (DRIVE_FEAR, DRIVE_CURIOSITY, DRIVE_GROOM) before synthesizeMotorOutputs in workerUpdate(); replaced initBridge() call with BRAIN._testMode guard that exposes BRAIN._bridge namespace with internal functions and test helpers
+- [MODIFY] tests/run-node.js -- Rewrote to use phased loading: base modules first, then sets BRAIN._testMode = true, then loads brain-worker-bridge.js (which skips initBridge and exposes _bridge), fly-logic.js, and tests.js
+- [MODIFY] tests/tests.js -- Appended Section 5 with 19 new test functions guarded by `if (BRAIN._bridge)` check
 
 ## Verification Results
-- Build: PASS (no build step; vanilla JS loaded via script tags)
-- Tests: SKIPPED (no test suite configured)
-- Lint: SKIPPED (no linter configured)
-- Syntax: PASS (`node -c js/neuro-renderer.js`)
+- Build: PASS (no build step -- vanilla JS, no bundler)
+- Tests: PASS (`node tests/run-node.js` -- 66 passed / 0 failed / 66 total)
+- Lint: SKIPPED (no lint configured)
 
 ## Claims
-- [ ] Claim 1: `destroy()` now calls `gl.deleteBuffer(posBuffer)`, `gl.deleteBuffer(colorBuffer)`, `gl.deleteBuffer(brightnessBuffer)`, and `gl.deleteProgram(program)` BEFORE nulling the `gl` reference (lines 121-126), preventing GPU resource leaks on view toggle.
-- [ ] Claim 2: `destroy()` disconnects the `_resizeObserver` (lines 117-120) before DOM teardown, preventing callbacks on a destroyed renderer.
-- [ ] Claim 3: A new `_resizeObserver` module-level variable is declared at line 42, initialized to `null`.
-- [ ] Claim 4: `init()` creates a `ResizeObserver` on the `wrap` element (lines 100-101) that calls `handleResize()` when the container size changes.
-- [ ] Claim 5: `handleResize()` (lines 286-298) guards against inactive state, checks if width actually changed, deletes old GPU buffers before rebuilding layout, and calls `buildLayout()` + `buildLabels()` to recompute positions and labels.
-- [ ] Claim 6: The public API of `window.NeuroRenderer` is unchanged: `{ init, destroy, isActive }` (line 414).
-- [ ] Claim 7: `handleResize()` is private to the IIFE -- not exposed on the public API.
-- [ ] Claim 8: No other files were modified.
+- [ ] collectStimulationSegments() reproduces exact same mapping logic as original sendStimulation() (same conditionals, same intensity calculations, same ordering) but returns named segments array instead of posting to worker
+- [ ] sendStimulation() now delegates to collectStimulationSegments() for mapping, then translates named segments to indexed segments using closure state; guarded with `if (!worker) return`
+- [ ] Virtual group bypass in workerUpdate() writes BRAIN.drives.{fear,curiosity,groom} * FIRE_STATE_SCALE to BRAIN.postSynaptic[groupName][nextState] for groups with 0 real neurons, inserted before synthesizeMotorOutputs()
+- [ ] BRAIN._testMode guard: when truthy, IIFE exposes BRAIN._bridge namespace with synthesizeMotorOutputs, aggregateFireState, buildGroupIndices, collectStimulationSegments, workerUpdate, constants (FIRE_STATE_SCALE, MOTOR_SCALE, STIM_INTENSITY), and test helpers (_setGroupState, _setFireState, _getGroupIndices); when falsy, calls initBridge() as before
+- [ ] 4 aggregateFireState tests: basic fire counting, pending spike accumulation, empty/virtual group handling, decay from previous activation
+- [ ] 6 synthesizeMotorOutputs tests: walk tonic output range, flight intent with high fear, groom activation, early exit with zero input, DN_STARTLE write, feed intent
+- [ ] 3 virtual group bypass tests: fear, curiosity, groom drives written to postSynaptic via workerUpdate()
+- [ ] 5 sendStimulation mapping tests: touch->MECH_BRISTLE (single and double), foodNearby->OLF_ORN_FOOD, light->VIS_R1R6+VIS_R7R8, temperature thresholds->THERMO_WARM/COOL
+- [ ] 1 nociception test: NOCI intensity is 5x STIM_INTENSITY and auto-clears
+- [ ] 1 tonic background test: CX_FC/CX_EPG/CX_PFN always present with 0.03 intensity in dark
+- [ ] 1 buildGroupIndices test: verifies neuron-to-group index mapping
+- [ ] All 47 existing tests continue to pass unchanged
+- [ ] No non-test-mode behavior changes: when BRAIN._testMode is falsy, the IIFE calls initBridge() exactly as before
+- [ ] ES5 compatible: var declarations only, no let/const/arrow functions
+- [ ] No new files created, no npm dependencies added
 
 ## Gaps and Assumptions
-- Smoke testing (toggle 5+ times, resize window) must be done in a browser -- cannot be verified in CI/node.
-- ResizeObserver is well-supported in modern browsers but not available in Node.js or very old browsers (IE11). This is acceptable since WebGL2 already requires a modern browser.
-- The `handleResize()` function deletes old buffers before `buildLayout()` creates new ones; if `buildLayout()` throws, the buffers will be null. This matches the existing error handling strategy (no try/catch anywhere in the renderer).
+- Plan predicted 45 existing tests but actual count is 47; total is 66 (47+19) not 64 as predicted
+- Virtual bypass tests depend on BRAIN.updateDrives() internal decay/accumulation logic; test assertions use tolerance of 0.5 to accommodate drive update calculations
+- Math.random mock in tests is restored after each test but not wrapped in try/finally (matches existing test style per plan constraint)
+- Non-test-mode (browser) path not verified in this run (would require DOM/Worker/fetch environment)

@@ -368,6 +368,17 @@
 		if (latestFireState || pendingWorkerTicks > 0) {
 			aggregateFireState();
 
+			// 3.25. Virtual group bypass: groups with 0 real neurons
+			// (DRIVE_FEAR, DRIVE_CURIOSITY, DRIVE_GROOM) get their value
+			// directly from main-thread drives, scaled to match fire state range.
+			var vd = BRAIN.drives;
+			if (BRAIN.postSynaptic['DRIVE_FEAR'])
+				BRAIN.postSynaptic['DRIVE_FEAR'][BRAIN.nextState] = vd.fear * FIRE_STATE_SCALE;
+			if (BRAIN.postSynaptic['DRIVE_CURIOSITY'])
+				BRAIN.postSynaptic['DRIVE_CURIOSITY'][BRAIN.nextState] = vd.curiosity * FIRE_STATE_SCALE;
+			if (BRAIN.postSynaptic['DRIVE_GROOM'])
+				BRAIN.postSynaptic['DRIVE_GROOM'][BRAIN.nextState] = vd.groom * FIRE_STATE_SCALE;
+
 			// 3.5. Synthesize VNC motor outputs from descending neuron activity.
 			// FlyWire FAFB is brain-only; leg/wing motor neurons are in the VNC.
 			// The brain's output to the VNC is via descending neurons (GNG_DESC).
@@ -390,91 +401,98 @@
 
 	/* ---- translate BRAIN.stimulate + BRAIN.drives to worker stimulation ---- */
 
-	function sendStimulation() {
-		// Collect all stimulation segments, then build one batched message
-		var totalLen = 0;
-		var segments = []; // {indices: Uint32Array, intensity: number}
-
-		function addGroup(groupName, intensity) {
-			var gid = groupNameToId[groupName];
-			if (gid === undefined) return;
-			var idx = groupIndices[gid];
-			if (!idx || idx.length === 0) return;
-			segments.push({indices: idx, intensity: intensity});
-			totalLen += idx.length;
-		}
-
+	function collectStimulationSegments() {
+		var segs = [];
 		var d = BRAIN.drives;
 
-		// --- Drive stimulation ---
+		// Drive stimulation
 		if (d.hunger > 0.2) {
 			var pulses = d.hunger > 0.6 ? 3 : (d.hunger > 0.4 ? 2 : 1);
-			addGroup('DRIVE_HUNGER', STIM_INTENSITY * d.hunger * pulses);
+			segs.push({name: 'DRIVE_HUNGER', intensity: STIM_INTENSITY * d.hunger * pulses});
 		}
 		if (d.fear > 0.05) {
 			var pulses = d.fear > 0.5 ? 3 : (d.fear > 0.2 ? 2 : 1);
-			addGroup('DRIVE_FEAR', STIM_INTENSITY * d.fear * pulses);
+			segs.push({name: 'DRIVE_FEAR', intensity: STIM_INTENSITY * d.fear * pulses});
 		}
 		if (d.fatigue > 0.3) {
-			addGroup('DRIVE_FATIGUE', STIM_INTENSITY * d.fatigue);
+			segs.push({name: 'DRIVE_FATIGUE', intensity: STIM_INTENSITY * d.fatigue});
 		}
 		if (d.curiosity > 0.2) {
 			var pulses = d.curiosity > 0.5 ? 2 : 1;
-			addGroup('DRIVE_CURIOSITY', STIM_INTENSITY * d.curiosity * pulses);
+			segs.push({name: 'DRIVE_CURIOSITY', intensity: STIM_INTENSITY * d.curiosity * pulses});
 		}
 		if (d.groom > 0.3) {
-			addGroup('DRIVE_GROOM', STIM_INTENSITY * d.groom);
+			segs.push({name: 'DRIVE_GROOM', intensity: STIM_INTENSITY * d.groom});
 		}
 
-		// --- Sensory stimulation ---
+		// Sensory stimulation
 		if (BRAIN.stimulate.touch) {
-			addGroup('MECH_BRISTLE', STIM_INTENSITY);
+			segs.push({name: 'MECH_BRISTLE', intensity: STIM_INTENSITY});
 			if (BRAIN.stimulate.touchLocation === 'head' ||
 				BRAIN.stimulate.touchLocation === 'thorax') {
-				addGroup('MECH_BRISTLE', STIM_INTENSITY); // double dose
+				segs.push({name: 'MECH_BRISTLE', intensity: STIM_INTENSITY});
 			}
 		}
 		if (BRAIN.stimulate.foodNearby) {
-			addGroup('OLF_ORN_FOOD', STIM_INTENSITY);
+			segs.push({name: 'OLF_ORN_FOOD', intensity: STIM_INTENSITY});
 		}
 		if (BRAIN.stimulate.foodContact) {
-			addGroup('GUS_GRN_SWEET', STIM_INTENSITY);
+			segs.push({name: 'GUS_GRN_SWEET', intensity: STIM_INTENSITY});
 		}
 		if (BRAIN.stimulate.dangerOdor) {
-			addGroup('OLF_ORN_DANGER', STIM_INTENSITY);
+			segs.push({name: 'OLF_ORN_DANGER', intensity: STIM_INTENSITY});
 		}
 		if (BRAIN.stimulate.wind) {
-			addGroup('MECH_JO', STIM_INTENSITY * BRAIN.stimulate.windStrength);
+			segs.push({name: 'MECH_JO', intensity: STIM_INTENSITY * BRAIN.stimulate.windStrength});
 		}
 		if (BRAIN.stimulate.lightLevel > 0.2) {
-			addGroup('VIS_R1R6', STIM_INTENSITY * BRAIN.stimulate.lightLevel);
-			addGroup('VIS_R7R8', STIM_INTENSITY * BRAIN.stimulate.lightLevel * 0.7);
+			segs.push({name: 'VIS_R1R6', intensity: STIM_INTENSITY * BRAIN.stimulate.lightLevel});
+			segs.push({name: 'VIS_R7R8', intensity: STIM_INTENSITY * BRAIN.stimulate.lightLevel * 0.7});
 		}
 		if (BRAIN.stimulate.temperature > 0.65) {
 			var warmIntensity = (BRAIN.stimulate.temperature - 0.5) * 2;
-			addGroup('THERMO_WARM', STIM_INTENSITY * warmIntensity);
+			segs.push({name: 'THERMO_WARM', intensity: STIM_INTENSITY * warmIntensity});
 		} else if (BRAIN.stimulate.temperature < 0.35) {
 			var coolIntensity = (0.5 - BRAIN.stimulate.temperature) * 2;
-			addGroup('THERMO_COOL', STIM_INTENSITY * coolIntensity);
+			segs.push({name: 'THERMO_COOL', intensity: STIM_INTENSITY * coolIntensity});
 		}
 		if (BRAIN.stimulate.nociception) {
-			addGroup('NOCI', STIM_INTENSITY * 5); // strong burst: fires within 2-3 worker ticks
-			BRAIN.stimulate.nociception = false; // single-tick, auto-clear
+			segs.push({name: 'NOCI', intensity: STIM_INTENSITY * 5});
+			BRAIN.stimulate.nociception = false;
 		}
 		if (BRAIN._isMoving) {
-			addGroup('MECH_CHORD', STIM_INTENSITY);
+			segs.push({name: 'MECH_CHORD', intensity: STIM_INTENSITY});
 		}
 		if (BRAIN.stimulate.lightLevel > 0.1 && BRAIN._isMoving) {
-			addGroup('VIS_LPTC', STIM_INTENSITY * 0.3);
+			segs.push({name: 'VIS_LPTC', intensity: STIM_INTENSITY * 0.3});
 		}
 
-		// --- Tonic background activity ---
+		// Tonic background activity
 		var tonicIntensity = BRAIN.stimulate.lightLevel === 0 ? 0.03 : 0.08;
-		addGroup('CX_FC', tonicIntensity);
-		addGroup('CX_EPG', tonicIntensity);
-		addGroup('CX_PFN', tonicIntensity);
+		segs.push({name: 'CX_FC', intensity: tonicIntensity});
+		segs.push({name: 'CX_EPG', intensity: tonicIntensity});
+		segs.push({name: 'CX_PFN', intensity: tonicIntensity});
 
-		// --- Build batched message ---
+		return segs;
+	}
+
+	function sendStimulation() {
+		if (!worker) return;
+
+		var segs = collectStimulationSegments();
+
+		// Translate named segments to indexed segments using closure state
+		var totalLen = 0;
+		var indexedSegs = [];
+		for (var i = 0; i < segs.length; i++) {
+			var gid = groupNameToId[segs[i].name];
+			if (gid === undefined) continue;
+			var idx = groupIndices[gid];
+			if (!idx || idx.length === 0) continue;
+			indexedSegs.push({indices: idx, intensity: segs[i].intensity});
+			totalLen += idx.length;
+		}
+
 		if (totalLen === 0) {
 			worker.postMessage({type: 'setStimulusState', indices: null, intensities: null});
 			return;
@@ -483,8 +501,8 @@
 		var allIndices = new Uint32Array(totalLen);
 		var allIntensities = new Float32Array(totalLen);
 		var offset = 0;
-		for (var s = 0; s < segments.length; s++) {
-			var seg = segments[s];
+		for (var s = 0; s < indexedSegs.length; s++) {
+			var seg = indexedSegs[s];
 			allIndices.set(seg.indices, offset);
 			for (var k = 0; k < seg.indices.length; k++) {
 				allIntensities[offset + k] = seg.intensity;
@@ -555,8 +573,42 @@
 	BRAIN.stopWorker = stopWorker;
 	BRAIN.startWorker = startWorker;
 
-	/* ---- start ---- */
+	/* ---- start / test mode ---- */
 
-	initBridge();
+	if (BRAIN._testMode) {
+		BRAIN._bridge = {
+			synthesizeMotorOutputs: synthesizeMotorOutputs,
+			aggregateFireState: aggregateFireState,
+			buildGroupIndices: buildGroupIndices,
+			collectStimulationSegments: collectStimulationSegments,
+			workerUpdate: workerUpdate,
+			FIRE_STATE_SCALE: FIRE_STATE_SCALE,
+			MOTOR_SCALE: MOTOR_SCALE,
+			STIM_INTENSITY: STIM_INTENSITY,
+			_setGroupState: function (gc, nc, gIdArr, gSizes, gIdToNameArr) {
+				groupCount = gc;
+				neuronCount = nc;
+				groupIdArr = gIdArr;
+				groupSizes = gSizes;
+				groupIdToName = gIdToNameArr;
+				groupNameToId = {};
+				for (var i = 0; i < gIdToNameArr.length; i++) {
+					if (gIdToNameArr[i]) groupNameToId[gIdToNameArr[i]] = i;
+				}
+				pendingGroupSpikes = new Float32Array(gc);
+				pendingWorkerTicks = 0;
+			},
+			_setFireState: function (fireState, spikes, ticks) {
+				latestFireState = fireState;
+				if (spikes) pendingGroupSpikes = spikes;
+				pendingWorkerTicks = ticks;
+			},
+			_getGroupIndices: function () {
+				return groupIndices;
+			},
+		};
+	} else {
+		initBridge();
+	}
 
 })();
