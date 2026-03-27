@@ -39,6 +39,7 @@
 	var neuronPositions = null;    // Float32Array(neuronCount * 2) pixel coords for hit-testing
 	var _onMouseMove = null;
 	var _onMouseLeave = null;
+	var _resizeObserver = null;
 
 	function init() {
 		if (!BRAIN.workerNeuronCount) return false;
@@ -96,6 +97,9 @@
 		_onMouseLeave = onMouseLeave;
 		canvas.addEventListener('mouseleave', _onMouseLeave);
 
+		_resizeObserver = new ResizeObserver(function () { handleResize(); });
+		_resizeObserver.observe(wrap);
+
 		active = true;
 		animFrameId = requestAnimationFrame(renderLoop);
 		return true;
@@ -110,6 +114,16 @@
 		if (canvas && _onMouseMove) canvas.removeEventListener('mousemove', _onMouseMove);
 		if (canvas && _onMouseLeave) canvas.removeEventListener('mouseleave', _onMouseLeave);
 		if (tooltipEl) tooltipEl.style.display = 'none';
+		if (_resizeObserver) {
+			_resizeObserver.disconnect();
+			_resizeObserver = null;
+		}
+		if (gl) {
+			if (posBuffer) gl.deleteBuffer(posBuffer);
+			if (colorBuffer) gl.deleteBuffer(colorBuffer);
+			if (brightnessBuffer) gl.deleteBuffer(brightnessBuffer);
+			if (program) gl.deleteProgram(program);
+		}
 		var wrap = document.getElementById('neuro-renderer-wrap');
 		if (wrap && wrap.parentNode) wrap.parentNode.removeChild(wrap);
 		var holder = document.getElementById('nodeHolder');
@@ -267,6 +281,20 @@
 			div.textContent = SECTION_NAMES[r];
 			labelContainer.appendChild(div);
 		}
+	}
+
+	function handleResize() {
+		if (!gl || !canvas || neuronCount === 0) return;
+		var wrap = canvas.parentElement;
+		if (!wrap) return;
+		var newWidth = Math.floor(wrap.getBoundingClientRect().width) || 320;
+		if (newWidth === canvas.width) return;
+		if (posBuffer) gl.deleteBuffer(posBuffer);
+		if (colorBuffer) gl.deleteBuffer(colorBuffer);
+		if (brightnessBuffer) gl.deleteBuffer(brightnessBuffer);
+		canvas.width = newWidth;
+		buildLayout();
+		buildLabels();
 	}
 
 	function renderLoop() {

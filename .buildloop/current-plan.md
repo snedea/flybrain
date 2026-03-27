@@ -1,142 +1,152 @@
-# Plan: D22.1
+# Plan: D22.2
 
-Fix sim-worker not pausing on tab hide causing stale neural state on resume.
+Fix NeuroRenderer GPU resource leak in `destroy()` and add resize handling.
 
 ## Dependencies
-- list: [] (no new dependencies)
-- commands: [] (nothing to install)
+- list: none (vanilla JS, no new packages)
+- commands: none
 
 ## File Operations (in execution order)
 
-### 1. MODIFY js/sim-worker.js
+### 1. MODIFY js/neuro-renderer.js
 - operation: MODIFY
-- reason: Add a 'reset' message handler that zeros all neural state arrays (V, fired, refractory, groupActive, groupCooldown, sustainedIndices/Intensities). The existing 'stop' handler only sets `running = false` -- it does not clear accumulated neural state. Without a reset, restarting the worker on tab resume would replay stale V/fired/refractory values.
-- anchor: `case 'setParams':`
+- reason: (1) Add `gl.deleteBuffer()` / `gl.deleteProgram()` calls in `destroy()` before nulling references, to prevent GPU resource leaks on toggle. (2) Add a ResizeObserver that recomputes layout and re-uploads position buffers when the container width changes.
 
-#### Functions
-- No new functions. Add a new `case 'reset':` block in the `self.onmessage` switch statement.
-- signature: N/A (message handler case)
-  - purpose: Zero all per-neuron simulation state and per-group activation state so the worker starts fresh on resume.
-  - logic:
-    1. Insert a new `case 'reset':` block immediately before `case 'setParams':` in the `self.onmessage` switch statement.
-    2. Inside the case block:
-       - Check `if (N === 0) break;` (guard: not initialized)
-       - Call `V.fill(0);`
-       - Call `fired.fill(0);`
-       - Call `refractory.fill(0);`
-       - Set `sustainedIndices = null;`
-       - Set `sustainedIntensities = null;`
-       - Check `if (groupActive)` then:
-         - Call `groupActive.fill(0);`
-         - Call `groupCooldown.fill(0);`
-         - Call `groupRecvInput.fill(0);`
-         - Call `groupFiredThisTick.fill(0);`
-       - Reset stats accumulators: `tickTimeSum = 0; tickTimeSamples = 0; activeNeuronCount = 0;`
-       - `break;`
-  - calls: TypedArray.fill(0) on V, fired, refractory, groupActive, groupCooldown, groupRecvInput, groupFiredThisTick
-  - returns: N/A
-  - error handling: The `if (N === 0) break;` guard prevents calling .fill on null arrays before init completes.
+#### New Module-Level Variables
 
-### 2. MODIFY js/brain-worker-bridge.js
-- operation: MODIFY
-- reason: Expose `BRAIN.stopWorker()` and `BRAIN.startWorker()` functions that main.js can call from the visibilitychange handler. These send stop/reset/start messages to the worker and clear bridge-side state (latestFireState, BRAIN.latestFireState). Currently the `worker` variable is private inside the IIFE with no external pause/resume API.
-- anchor: `/* ---- start ---- */`
+Add after line `var _onMouseLeave = null;` (anchor: `var _onMouseLeave = null;`):
 
-#### Functions
-
-- signature: `function stopWorker()` (no parameters, no return value)
-  - purpose: Pause the worker tick loop and clear bridge-side fire state so no stale data is read on resume.
-  - logic:
-    1. Check `if (!workerReady || !worker) return;` (no-op if fallback mode or not initialized)
-    2. Call `worker.postMessage({type: 'stop'});` to halt the setTimeout tick loop in the worker
-    3. Call `worker.postMessage({type: 'setStimulusState', indices: null, intensities: null});` to clear sustained stimulation
-    4. Set `latestFireState = null;` (bridge-private variable)
-    5. Set `BRAIN.latestFireState = null;` (public reference used by neuro-renderer.js)
-  - calls: worker.postMessage (twice)
-  - returns: nothing
-  - error handling: early return guard handles fallback mode
-
-- signature: `function startWorker()` (no parameters, no return value)
-  - purpose: Reset worker neural state and restart the tick loop so simulation resumes from a clean slate.
-  - logic:
-    1. Check `if (!workerReady || !worker) return;` (no-op if fallback mode or not initialized)
-    2. Call `worker.postMessage({type: 'reset'});` to zero all neural state in the worker
-    3. Call `worker.postMessage({type: 'start'});` to restart the setTimeout tick loop
-  - calls: worker.postMessage (twice)
-  - returns: nothing
-  - error handling: early return guard handles fallback mode
-
-#### Wiring / Integration
-- After defining `stopWorker` and `startWorker` (both inside the IIFE), expose them on the BRAIN global:
-  - Add `BRAIN.stopWorker = stopWorker;`
-  - Add `BRAIN.startWorker = startWorker;`
-- Place these two function definitions and the two BRAIN assignments immediately before the existing `initBridge();` call (line 397). The exact insertion point is just before the line `/* ---- start ---- */` (line 395). Put the functions between the `aggregateFireState` closing brace (line 393) and the `/* ---- start ---- */` comment.
-
-The resulting code block to insert after line 393 (`}`) and before line 395 (`/* ---- start ---- */`):
-
-```javascript
-	/* ---- pause / resume API for visibilitychange ---- */
-
-	function stopWorker() {
-		if (!workerReady || !worker) return;
-		worker.postMessage({type: 'stop'});
-		worker.postMessage({type: 'setStimulusState', indices: null, intensities: null});
-		latestFireState = null;
-		BRAIN.latestFireState = null;
-	}
-
-	function startWorker() {
-		if (!workerReady || !worker) return;
-		worker.postMessage({type: 'reset'});
-		worker.postMessage({type: 'start'});
-	}
-
-	BRAIN.stopWorker = stopWorker;
-	BRAIN.startWorker = startWorker;
+```js
+var _resizeObserver = null;
 ```
 
-### 3. MODIFY js/main.js
-- operation: MODIFY
-- reason: Call BRAIN.stopWorker() on tab hide and BRAIN.startWorker() on tab show so the worker's setTimeout tick loop is paused/reset alongside the existing setInterval cleanup.
-- anchor: `clearInterval(brainTickId);`
+#### Function: destroy() — add GPU cleanup
+
+- anchor: `function destroy() {`
+- Replace the entire `destroy()` function body (lines 104-128) with the version below.
+- logic:
+  1. Set `active = false`.
+  2. If `animFrameId !== null`, call `cancelAnimationFrame(animFrameId)` and set to `null`.
+  3. Remove mousemove/mouseleave event listeners from canvas (same as current).
+  4. If `tooltipEl`, hide it (same as current).
+  5. **NEW**: If `_resizeObserver !== null`, call `_resizeObserver.disconnect()` and set `_resizeObserver = null`.
+  6. **NEW**: If `gl` is not null AND `posBuffer` is not null, call `gl.deleteBuffer(posBuffer)`.
+  7. **NEW**: If `gl` is not null AND `colorBuffer` is not null, call `gl.deleteBuffer(colorBuffer)`.
+  8. **NEW**: If `gl` is not null AND `brightnessBuffer` is not null, call `gl.deleteBuffer(brightnessBuffer)`.
+  9. **NEW**: If `gl` is not null AND `program` is not null, call `gl.deleteProgram(program)`.
+  10. Remove the wrap element from DOM (same as current).
+  11. Restore nodeHolder display (same as current).
+  12. Null out all references: `gl`, `canvas`, `program`, `neuronCount`, `brightnessData`, `neuronPositions`, `sectionBounds`, `posBuffer`, `colorBuffer`, `brightnessBuffer`, `labelContainer` (same as current).
+
+Exact replacement for the `destroy()` function:
+
+```js
+function destroy() {
+    active = false;
+    if (animFrameId !== null) {
+        cancelAnimationFrame(animFrameId);
+        animFrameId = null;
+    }
+    if (canvas && _onMouseMove) canvas.removeEventListener('mousemove', _onMouseMove);
+    if (canvas && _onMouseLeave) canvas.removeEventListener('mouseleave', _onMouseLeave);
+    if (tooltipEl) tooltipEl.style.display = 'none';
+    if (_resizeObserver) {
+        _resizeObserver.disconnect();
+        _resizeObserver = null;
+    }
+    if (gl) {
+        if (posBuffer) gl.deleteBuffer(posBuffer);
+        if (colorBuffer) gl.deleteBuffer(colorBuffer);
+        if (brightnessBuffer) gl.deleteBuffer(brightnessBuffer);
+        if (program) gl.deleteProgram(program);
+    }
+    var wrap = document.getElementById('neuro-renderer-wrap');
+    if (wrap && wrap.parentNode) wrap.parentNode.removeChild(wrap);
+    var holder = document.getElementById('nodeHolder');
+    if (holder) holder.style.display = '';
+    gl = null;
+    canvas = null;
+    program = null;
+    neuronCount = 0;
+    brightnessData = null;
+    neuronPositions = null;
+    sectionBounds = [];
+    posBuffer = null;
+    colorBuffer = null;
+    brightnessBuffer = null;
+    labelContainer = null;
+}
+```
+
+#### New Function: handleResize()
+
+Add immediately after the closing brace of `buildLabels()` (anchor: the line after the closing `}` of `buildLabels`, which is the blank line before `function renderLoop() {`).
+
+- signature: `function handleResize()`
+- purpose: Recompute layout and re-upload position/color buffers when the container width changes. Reuses existing `buildLayout()` and `buildLabels()`.
+- logic:
+  1. If `gl` is null or `canvas` is null or `neuronCount === 0`, return early (renderer not active).
+  2. Read new width from `canvas.parentElement.getBoundingClientRect().width`. Floor it. If 0, use 320.
+  3. If new width equals current `canvas.width`, return early (no change).
+  4. **Delete** the existing `posBuffer`, `colorBuffer`, and `brightnessBuffer` via `gl.deleteBuffer()` before `buildLayout()` recreates them. This prevents leaking the old buffers on resize.
+  5. Set `canvas.width` to the new width value.
+  6. Call `buildLayout()` — this recreates `posBuffer`, `colorBuffer`, `brightnessBuffer`, recomputes `neuronPositions`, `sectionBounds`, sets `canvas.height`, and calls `gl.viewport()`.
+  7. Call `buildLabels()` — this rebuilds the section label overlays using the updated `sectionBounds`.
+- calls: `gl.deleteBuffer(posBuffer)`, `gl.deleteBuffer(colorBuffer)`, `gl.deleteBuffer(brightnessBuffer)`, `buildLayout()`, `buildLabels()`
+- returns: void
+- error handling: none needed (guarded by null checks at top)
+
+Exact code:
+
+```js
+function handleResize() {
+    if (!gl || !canvas || neuronCount === 0) return;
+    var wrap = canvas.parentElement;
+    if (!wrap) return;
+    var newWidth = Math.floor(wrap.getBoundingClientRect().width) || 320;
+    if (newWidth === canvas.width) return;
+    if (posBuffer) gl.deleteBuffer(posBuffer);
+    if (colorBuffer) gl.deleteBuffer(colorBuffer);
+    if (brightnessBuffer) gl.deleteBuffer(brightnessBuffer);
+    canvas.width = newWidth;
+    buildLayout();
+    buildLabels();
+}
+```
+
+#### Modify Function: init() — attach ResizeObserver
+
+- anchor: `active = true;` (line 99 inside `init()`)
+- Insert the ResizeObserver setup immediately BEFORE the line `active = true;`
+- logic:
+  1. Create a new `ResizeObserver` with a callback that calls `handleResize()`.
+  2. Observe the `wrap` element (the `neuro-renderer-wrap` div that is the parent of the canvas).
+  3. Store the observer in `_resizeObserver`.
+
+Insert this block immediately before `active = true;`:
+
+```js
+_resizeObserver = new ResizeObserver(function () { handleResize(); });
+_resizeObserver.observe(wrap);
+```
 
 #### Wiring / Integration
-
-**Change 1 — On hide (inside `if (document.hidden) {` block):**
-- After the line `brainTickId = null;` (line 539), add:
-  ```javascript
-  		// Stop the sim-worker tick loop and clear stale neural state
-  		BRAIN.stopWorker();
-  ```
-
-**Change 2 — On show (inside the `else` block, just before restarting the brain tick):**
-- Immediately before the line `brainTickId = setInterval(updateBrain, 500);` (line 601), add:
-  ```javascript
-  		// Restart the sim-worker with a clean neural state
-  		BRAIN.startWorker();
-  ```
-
-The placement must be:
-- `BRAIN.stopWorker()` goes right after `brainTickId = null;` (line 539) and before the drive snapshot block.
-- `BRAIN.startWorker()` goes right before `brainTickId = setInterval(updateBrain, 500);` (line 601) and after the `lastTime = -1;` line (line 598).
+- No changes to other files. `NeuroRenderer` is a self-contained IIFE that exposes `init`, `destroy`, `isActive` on `window.NeuroRenderer`. The toggle logic in `main.js` (lines 431-454) calls `destroy()` and `init()` -- no changes needed there.
+- The `handleResize()` function is private to the IIFE -- not exposed on the public API.
+- The ResizeObserver watches the `wrap` div. When the left panel resizes (e.g., window resize, sidebar toggle), the observer fires, `handleResize()` checks if `canvas.width` actually changed, and if so, deletes old GPU buffers and rebuilds the layout.
 
 ## Verification
-- build: No build step. Open `index.html` in a browser.
-- lint: No linter configured for this project.
-- test: No existing test suite.
-- smoke:
-  1. Open the app in Chrome. Let the fly simulation run for 5-10 seconds so neural activity is established.
-  2. Switch to another tab for 10+ seconds.
-  3. Switch back. Verify: no burst of anomalous activity (no sudden behavior cascade, no maxed-out drives, no jarring state change). The fly should resume calmly from idle/current behavior.
-  4. Open DevTools console. Verify no errors related to worker messages.
-  5. After resuming, verify the connectome subtitle updates with tick stats within a few seconds (proves worker restarted).
-  6. Open DevTools console and verify `typeof BRAIN.stopWorker === 'function'` and `typeof BRAIN.startWorker === 'function'`.
+- build: no build step (vanilla JS project, files loaded via `<script>` tags in `index.html`)
+- lint: no linter configured
+- test: no existing tests
+- smoke: Open the app in a browser. (1) Toggle between 59-group and 139K views 5+ times using the connectome toggle button. Open browser DevTools > Performance tab or `about:gpu` and verify no steadily increasing GPU memory. (2) While in 139K view, resize the browser window horizontally. Verify the neuron grid re-layouts to fill the new panel width, section labels reposition, and the WebGL viewport matches the canvas dimensions (no clipping or blank space).
 
 ## Constraints
-- Do NOT modify SPEC.md, CLAUDE.md, or TASKS.md.
-- Do NOT add any new files.
+- Do NOT modify any file other than `js/neuro-renderer.js`.
+- Do NOT modify SPEC.md, TASKS.md, CLAUDE.md, or any file in `.buildloop/` other than `current-plan.md`.
 - Do NOT add any new npm/yarn dependencies.
-- Do NOT change the worker's tick rate, leak rate, threshold, or any simulation parameters.
-- Do NOT change the binary format or connectome loading logic.
-- The `stopWorker()`/`startWorker()` functions must be no-ops (not throw) when the worker is not ready or in fallback mode.
-- Keep changes minimal: only the three files listed above.
+- Do NOT change the public API of `NeuroRenderer` (it must still expose exactly `{ init, destroy, isActive }`).
+- Do NOT change the shader source code, rendering logic, or mouse interaction logic -- only the resource lifecycle and resize handling.
+- The `handleResize` function must delete the OLD buffers before calling `buildLayout()` which creates new ones, to avoid leaking the old buffers.
+- The `destroy()` function must call `gl.delete*` BEFORE nulling `gl`, so the WebGL context is still available for cleanup calls.
+- The `_resizeObserver` must be disconnected in `destroy()` to prevent callbacks firing on a torn-down renderer.
