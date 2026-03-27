@@ -24,6 +24,16 @@ function assertClose(actual, expected, tolerance, msg) {
 	}
 }
 
+function withMockedRandom(mockValue, fn) {
+	var origRandom = Math.random;
+	Math.random = function () { return mockValue; };
+	try {
+		fn();
+	} finally {
+		Math.random = origRandom;
+	}
+}
+
 // ============================================================
 // Section 2: Mutable Test State and Reset Helper
 // ============================================================
@@ -376,10 +386,9 @@ function test_dark_curiosity_range_reduced() {
 	resetBrainState();
 	BRAIN.stimulate.lightLevel = 0.2; // < 0.3 threshold
 	BRAIN.drives.curiosity = 0.5;
-	var origRandom = Math.random;
-	Math.random = function () { return 1.0; };
-	BRAIN.updateDrives();
-	Math.random = origRandom;
+	withMockedRandom(1.0, function () {
+		BRAIN.updateDrives();
+	});
 	// (1.0 - 0.5) * 0.02 = 0.01, curiosity = 0.5 + 0.01 = 0.51
 	assertClose(BRAIN.drives.curiosity, 0.51, 0.001, 'dark curiosity range is 0.02');
 }
@@ -388,10 +397,9 @@ function test_bright_curiosity_range_normal() {
 	resetBrainState();
 	BRAIN.stimulate.lightLevel = 0.5; // >= 0.3 threshold
 	BRAIN.drives.curiosity = 0.5;
-	var origRandom = Math.random;
-	Math.random = function () { return 1.0; };
-	BRAIN.updateDrives();
-	Math.random = origRandom;
+	withMockedRandom(1.0, function () {
+		BRAIN.updateDrives();
+	});
 	// (1.0 - 0.5) * 0.06 = 0.03, curiosity = 0.5 + 0.03 = 0.53
 	assertClose(BRAIN.drives.curiosity, 0.53, 0.001, 'bright curiosity range is 0.06');
 }
@@ -700,19 +708,17 @@ var test_bridge_aggregateFireState_decay = function () {
 
 var test_bridge_synthesize_walk_tonic = function () {
 	resetBrainState();
-	var origRandom = Math.random;
-	Math.random = function () { return 0.5; }; // jitter = 0
+	withMockedRandom(0.5, function () {
+		// Idle tonic: moderate descending + central complex activity
+		BRAIN.postSynaptic['GNG_DESC'][BRAIN.nextState] = 5;
+		BRAIN.postSynaptic['VNC_CPG'][BRAIN.nextState] = 1;
+		BRAIN.postSynaptic['CX_PFN'][BRAIN.nextState] = 3;
+		BRAIN.postSynaptic['CX_FC'][BRAIN.nextState] = 2;
+		BRAIN.postSynaptic['CX_EPG'][BRAIN.nextState] = 2;
 
-	// Idle tonic: moderate descending + central complex activity
-	BRAIN.postSynaptic['GNG_DESC'][BRAIN.nextState] = 5;
-	BRAIN.postSynaptic['VNC_CPG'][BRAIN.nextState] = 1;
-	BRAIN.postSynaptic['CX_PFN'][BRAIN.nextState] = 3;
-	BRAIN.postSynaptic['CX_FC'][BRAIN.nextState] = 2;
-	BRAIN.postSynaptic['CX_EPG'][BRAIN.nextState] = 2;
-
-	BRAIN._bridge.synthesizeMotorOutputs();
-	BRAIN.motorcontrol();
-	Math.random = origRandom;
+		BRAIN._bridge.synthesizeMotorOutputs();
+		BRAIN.motorcontrol();
+	});
 
 	// walkIntent = (3+2+2)*0.3 + 0 + (5+1)*0.2 = 2.1 + 1.2 = 3.3
 	// total = 5+1 = 6, baseWalk = 6*0.6 = 3.6
@@ -728,17 +734,15 @@ var test_bridge_synthesize_walk_tonic = function () {
 
 var test_bridge_synthesize_flight_fear = function () {
 	resetBrainState();
-	var origRandom = Math.random;
-	Math.random = function () { return 0.5; };
+	withMockedRandom(0.5, function () {
+		BRAIN.postSynaptic['GNG_DESC'][BRAIN.nextState] = 3;
+		BRAIN.postSynaptic['DRIVE_FEAR'][BRAIN.nextState] = 8;
+		BRAIN.postSynaptic['MB_MBON_AV'][BRAIN.nextState] = 2;
+		BRAIN.postSynaptic['LH_AV'][BRAIN.nextState] = 1;
 
-	BRAIN.postSynaptic['GNG_DESC'][BRAIN.nextState] = 3;
-	BRAIN.postSynaptic['DRIVE_FEAR'][BRAIN.nextState] = 8;
-	BRAIN.postSynaptic['MB_MBON_AV'][BRAIN.nextState] = 2;
-	BRAIN.postSynaptic['LH_AV'][BRAIN.nextState] = 1;
-
-	BRAIN._bridge.synthesizeMotorOutputs();
-	BRAIN.motorcontrol();
-	Math.random = origRandom;
+		BRAIN._bridge.synthesizeMotorOutputs();
+		BRAIN.motorcontrol();
+	});
 
 	// flightIntent = 8*2 + (2+1)*0.8 + 0 + 0 = 18.4 > 1.0
 	// flightDrive = 18.4*0.6*0.7 = 7.728
@@ -749,16 +753,14 @@ var test_bridge_synthesize_flight_fear = function () {
 
 var test_bridge_synthesize_groom = function () {
 	resetBrainState();
-	var origRandom = Math.random;
-	Math.random = function () { return 0.5; };
+	withMockedRandom(0.5, function () {
+		BRAIN.postSynaptic['GNG_DESC'][BRAIN.nextState] = 3;
+		BRAIN.postSynaptic['DRIVE_GROOM'][BRAIN.nextState] = 5;
+		BRAIN.postSynaptic['SEZ_GROOM'][BRAIN.nextState] = 2;
 
-	BRAIN.postSynaptic['GNG_DESC'][BRAIN.nextState] = 3;
-	BRAIN.postSynaptic['DRIVE_GROOM'][BRAIN.nextState] = 5;
-	BRAIN.postSynaptic['SEZ_GROOM'][BRAIN.nextState] = 2;
-
-	BRAIN._bridge.synthesizeMotorOutputs();
-	BRAIN.motorcontrol();
-	Math.random = origRandom;
+		BRAIN._bridge.synthesizeMotorOutputs();
+		BRAIN.motorcontrol();
+	});
 
 	// groomIntent = 5*1.5 + 2*1.0 = 9.5 > 1.0
 	// MN_ABDOMEN += 9.5*0.6*0.3 = 1.71
@@ -796,16 +798,14 @@ var test_bridge_synthesize_dn_startle = function () {
 
 var test_bridge_synthesize_feed = function () {
 	resetBrainState();
-	var origRandom = Math.random;
-	Math.random = function () { return 0.5; };
+	withMockedRandom(0.5, function () {
+		BRAIN.postSynaptic['GNG_DESC'][BRAIN.nextState] = 3;
+		BRAIN.postSynaptic['SEZ_FEED'][BRAIN.nextState] = 3;
+		BRAIN.postSynaptic['MN_PROBOSCIS'][BRAIN.nextState] = 2;
 
-	BRAIN.postSynaptic['GNG_DESC'][BRAIN.nextState] = 3;
-	BRAIN.postSynaptic['SEZ_FEED'][BRAIN.nextState] = 3;
-	BRAIN.postSynaptic['MN_PROBOSCIS'][BRAIN.nextState] = 2;
-
-	BRAIN._bridge.synthesizeMotorOutputs();
-	BRAIN.motorcontrol();
-	Math.random = origRandom;
+		BRAIN._bridge.synthesizeMotorOutputs();
+		BRAIN.motorcontrol();
+	});
 
 	// feedIntent = 3*1.0 + 2*0.5 = 4.0 > 0.5
 	// addPS('MN_PROBOSCIS', 4.0*0.6*0.3 = 0.72)
@@ -819,24 +819,22 @@ var test_bridge_synthesize_feed = function () {
 
 var test_bridge_virtual_bypass_fear = function () {
 	resetBrainState();
-	var origRandom = Math.random;
-	Math.random = function () { return 0.5; };
+	withMockedRandom(0.5, function () {
+		// Minimal bridge state: 1 virtual group (DRIVE_FEAR, size=0)
+		BRAIN._bridge._setGroupState(1, 0, new Uint16Array(0), [0], ['DRIVE_FEAR']);
+		BRAIN._bridge._setFireState(new Uint8Array(0), null, 0);
 
-	// Minimal bridge state: 1 virtual group (DRIVE_FEAR, size=0)
-	BRAIN._bridge._setGroupState(1, 0, new Uint16Array(0), [0], ['DRIVE_FEAR']);
-	BRAIN._bridge._setFireState(new Uint8Array(0), null, 0);
+		// Set drives before workerUpdate
+		BRAIN.drives.fear = 0.8;
+		BRAIN.stimulate.touch = false;
+		BRAIN.stimulate.wind = false;
+		BRAIN.stimulate.dangerOdor = false;
+		BRAIN._isFeeding = false;
+		BRAIN._isMoving = false;
+		BRAIN._isGrooming = false;
 
-	// Set drives before workerUpdate
-	BRAIN.drives.fear = 0.8;
-	BRAIN.stimulate.touch = false;
-	BRAIN.stimulate.wind = false;
-	BRAIN.stimulate.dangerOdor = false;
-	BRAIN._isFeeding = false;
-	BRAIN._isMoving = false;
-	BRAIN._isGrooming = false;
-
-	BRAIN._bridge.workerUpdate();
-	Math.random = origRandom;
+		BRAIN._bridge.workerUpdate();
+	});
 
 	// After updateDrives: fear = 0.8 * 0.85 = 0.68 (no touch/wind/danger)
 	// Virtual bypass: postSynaptic['DRIVE_FEAR'][nextState] = 0.68 * 100 = 68
@@ -848,22 +846,20 @@ var test_bridge_virtual_bypass_fear = function () {
 
 var test_bridge_virtual_bypass_curiosity = function () {
 	resetBrainState();
-	var origRandom = Math.random;
-	Math.random = function () { return 0.5; }; // curiosity delta = 0
+	withMockedRandom(0.5, function () {
+		BRAIN._bridge._setGroupState(1, 0, new Uint16Array(0), [0], ['DRIVE_CURIOSITY']);
+		BRAIN._bridge._setFireState(new Uint8Array(0), null, 0);
 
-	BRAIN._bridge._setGroupState(1, 0, new Uint16Array(0), [0], ['DRIVE_CURIOSITY']);
-	BRAIN._bridge._setFireState(new Uint8Array(0), null, 0);
+		BRAIN.drives.curiosity = 0.6;
+		BRAIN.stimulate.touch = false;
+		BRAIN.stimulate.wind = false;
+		BRAIN.stimulate.dangerOdor = false;
+		BRAIN._isMoving = false;
+		BRAIN._isFeeding = false;
+		BRAIN._isGrooming = false;
 
-	BRAIN.drives.curiosity = 0.6;
-	BRAIN.stimulate.touch = false;
-	BRAIN.stimulate.wind = false;
-	BRAIN.stimulate.dangerOdor = false;
-	BRAIN._isMoving = false;
-	BRAIN._isFeeding = false;
-	BRAIN._isGrooming = false;
-
-	BRAIN._bridge.workerUpdate();
-	Math.random = origRandom;
+		BRAIN._bridge.workerUpdate();
+	});
 
 	// After updateDrives with Math.random=0.5: curiosity += (0.5-0.5)*range = 0
 	// curiosity stays 0.6
@@ -875,22 +871,20 @@ var test_bridge_virtual_bypass_curiosity = function () {
 
 var test_bridge_virtual_bypass_groom = function () {
 	resetBrainState();
-	var origRandom = Math.random;
-	Math.random = function () { return 0.5; };
+	withMockedRandom(0.5, function () {
+		BRAIN._bridge._setGroupState(1, 0, new Uint16Array(0), [0], ['DRIVE_GROOM']);
+		BRAIN._bridge._setFireState(new Uint8Array(0), null, 0);
 
-	BRAIN._bridge._setGroupState(1, 0, new Uint16Array(0), [0], ['DRIVE_GROOM']);
-	BRAIN._bridge._setFireState(new Uint8Array(0), null, 0);
+		BRAIN.drives.groom = 0.5;
+		BRAIN.stimulate.touch = false;
+		BRAIN.stimulate.wind = false;
+		BRAIN.stimulate.dangerOdor = false;
+		BRAIN._isMoving = false;
+		BRAIN._isFeeding = false;
+		BRAIN._isGrooming = false;
 
-	BRAIN.drives.groom = 0.5;
-	BRAIN.stimulate.touch = false;
-	BRAIN.stimulate.wind = false;
-	BRAIN.stimulate.dangerOdor = false;
-	BRAIN._isMoving = false;
-	BRAIN._isFeeding = false;
-	BRAIN._isGrooming = false;
-
-	BRAIN._bridge.workerUpdate();
-	Math.random = origRandom;
+		BRAIN._bridge.workerUpdate();
+	});
 
 	// After updateDrives: groom = 0.5 + 0.008 = 0.508 (no touch, not grooming)
 	// Virtual bypass: 0.508 * 100 = 50.8
