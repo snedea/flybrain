@@ -438,6 +438,24 @@ self.onmessage = function (e) {
 		sustainedIntensities = e.data.intensities;
 		break;
 
+	case 'reset':
+		if (N === 0) break;
+		V.fill(0);
+		fired.fill(0);
+		refractory.fill(0);
+		sustainedIndices = null;
+		sustainedIntensities = null;
+		if (groupActive) {
+			groupActive.fill(0);
+			groupCooldown.fill(0);
+			groupRecvInput.fill(0);
+			groupFiredThisTick.fill(0);
+		}
+		tickTimeSum = 0;
+		tickTimeSamples = 0;
+		activeNeuronCount = 0;
+		break;
+
 	case 'setParams':
 		if (e.data.leakRate !== undefined) leakRate = e.data.leakRate;
 		if (e.data.threshold !== undefined) threshold = e.data.threshold;

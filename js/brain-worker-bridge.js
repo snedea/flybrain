@@ -392,6 +392,25 @@
 		}
 	}
 
+	/* ---- pause / resume API for visibilitychange ---- */
+
+	function stopWorker() {
+		if (!workerReady || !worker) return;
+		worker.postMessage({type: 'stop'});
+		worker.postMessage({type: 'setStimulusState', indices: null, intensities: null});
+		latestFireState = null;
+		BRAIN.latestFireState = null;
+	}
+
+	function startWorker() {
+		if (!workerReady || !worker) return;
+		worker.postMessage({type: 'reset'});
+		worker.postMessage({type: 'start'});
+	}
+
+	BRAIN.stopWorker = stopWorker;
+	BRAIN.startWorker = startWorker;
+
 	/* ---- start ---- */
 
 	initBridge();

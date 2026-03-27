@@ -538,6 +538,9 @@ document.addEventListener('visibilitychange', function () {
 		clearInterval(brainTickId);
 		brainTickId = null;
 
+		// Stop the sim-worker tick loop and clear stale neural state
+		BRAIN.stopWorker();
+
 		// Snapshot current drive values so we can restore them on resume
 		driveSnapshotOnHide = {
 			hunger: BRAIN.drives.hunger,
@@ -596,6 +599,9 @@ document.addEventListener('visibilitychange', function () {
 
 		// Reset lastTime so the RAF loop does not compute a huge dt on resume
 		lastTime = -1;
+
+		// Restart the sim-worker with a clean neural state
+		BRAIN.startWorker();
 
 		// Restart the brain tick
 		brainTickId = setInterval(updateBrain, 500);

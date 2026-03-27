@@ -1,0 +1,6 @@
+{
+  "task_id": "D22.1",
+  "task_desc": "Fix sim-worker not pausing on tab hide causing stale neural state on resume. The visibilitychange handler in main.js:535 stops the setInterval brain tick and resets drives/stimuli, but the sim-worker tick loop (setTimeout-based) continues running in background tabs at a throttled rate. The worker accumulates stale neural state (V, fired, refractory, group activation) using the last sustained stimulation snapshot. On resume, aggregateFireState() reads this drifted state, causing a burst of anomalous activity. The bridge module (brain-worker-bridge.js) scopes `worker` inside its IIFE and exposes no pause/resume API, so main.js cannot signal the worker. Fix: expose stopWorker()/startWorker() from the bridge (or add them to BRAIN), and call them from the visibilitychange handler alongside the existing setInterval cleanup.",
+  "completed_stage": "builder",
+  "timestamp": "2026-03-27T00:55:25.627048+00:00"
+}
