@@ -61,6 +61,7 @@ var groupActive = null;          // Uint8Array[numGroups]
 var groupCooldown = null;        // Uint8Array[numGroups]
 var groupRecvInput = null;       // Uint8Array[numGroups] per-tick scratch
 var groupFiredThisTick = null;   // Uint8Array[numGroups] per-tick scratch
+var groupStimulatedThisTick = null; // Uint8Array[numGroups] per-tick scratch
 
 /* ---------- decompressGzip ---------- */
 
@@ -228,12 +229,21 @@ function buildGroupStructures() {
 	groupCooldown = new Uint8Array(numGroups);
 	groupRecvInput = new Uint8Array(numGroups);
 	groupFiredThisTick = new Uint8Array(numGroups);
+	groupStimulatedThisTick = new Uint8Array(numGroups);
 }
 
 /* ---------- tick (neuropil-gated) ---------- */
 
 function tick() {
 	var t0 = performance.now();
+	var firedNeuronCount = 0;
+	var groupSpikeCounts = new Uint16Array(numGroups);
+
+	/* reset per-tick scratch */
+	groupRecvInput.fill(0);
+	groupFiredThisTick.fill(0);
+	groupStimulatedThisTick.fill(0);
+	activeNeuronCount = 0;
 
 	/* activate groups with sustained stimulation */
 	if (sustainedIndices) {
@@ -241,6 +251,7 @@ function tick() {
 			var si = sustainedIndices[k];
 			if (si < N) {
 				var g = groupId[si];
+				groupStimulatedThisTick[g] = 1;
 				if (!groupActive[g]) {
 					groupActive[g] = 1;
 					groupCooldown[g] = COOLDOWN_TICKS;
@@ -248,11 +259,6 @@ function tick() {
 			}
 		}
 	}
-
-	/* reset per-tick scratch */
-	groupRecvInput.fill(0);
-	groupFiredThisTick.fill(0);
-	activeNeuronCount = 0;
 
 	/* step 1 -- decay V and refractory for active groups (contiguous access) */
 	for (var g = 0; g < numGroups; g++) {
@@ -313,6 +319,8 @@ function tick() {
 				V[i] = 0;
 				refractory[i] = refractoryPeriod;
 				groupFiredThisTick[g] = 1;
+				groupSpikeCounts[g]++;
+				firedNeuronCount++;
 			}
 		}
 	}
@@ -320,7 +328,7 @@ function tick() {
 	/* update group cooldowns -- deactivate idle groups */
 	for (var g = 0; g < numGroups; g++) {
 		if (!groupActive[g]) continue;
-		if (groupFiredThisTick[g] || groupRecvInput[g]) {
+		if (groupFiredThisTick[g] || groupRecvInput[g] || groupStimulatedThisTick[g]) {
 			groupCooldown[g] = COOLDOWN_TICKS;
 		} else {
 			groupCooldown[g]--;
@@ -337,7 +345,13 @@ function tick() {
 	}
 
 	/* post fire state to main thread */
-	self.postMessage({type: 'tick', fireState: fired, tickCount: tickCount});
+	self.postMessage({
+		type: 'tick',
+		fireState: fired,
+		firedNeurons: firedNeuronCount,
+		groupSpikeCounts: groupSpikeCounts,
+		tickCount: tickCount
+	});
 	tickCount++;
 
 	/* performance stats */
@@ -354,6 +368,7 @@ function tick() {
 		self.postMessage({
 			type: 'stats',
 			avgTickMs: avgMs,
+			firedNeurons: firedNeuronCount,
 			activeNeurons: activeNeuronCount,
 			totalNeurons: N,
 			activeGroups: activeGroups,
@@ -450,6 +465,7 @@ self.onmessage = function (e) {
 			groupCooldown.fill(0);
 			groupRecvInput.fill(0);
 			groupFiredThisTick.fill(0);
+			groupStimulatedThisTick.fill(0);
 		}
 		tickTimeSum = 0;
 		tickTimeSamples = 0;

@@ -435,7 +435,7 @@ connectomeToggleBtn.addEventListener('click', function () {
 			connectomeToggleBtn.textContent = '139K View';
 		} else {
 			if (NeuroRenderer.init()) {
-				connectomeToggleBtn.textContent = '59 Groups';
+				connectomeToggleBtn.textContent = 'Groups';
 			}
 		}
 	} else {
@@ -506,7 +506,7 @@ var _neuroRendererInitTimer = setInterval(function () {
 	if (BRAIN.workerReady && typeof NeuroRenderer !== 'undefined') {
 		clearInterval(_neuroRendererInitTimer);
 		if (NeuroRenderer.init()) {
-			connectomeToggleBtn.textContent = '59 Groups';
+			connectomeToggleBtn.textContent = 'Groups';
 		}
 	}
 }, 200);
@@ -839,7 +839,10 @@ function computeMovementForBehavior() {
 	var state = behavior.current;
 
 	if (state === 'walk' || state === 'explore') {
+		// Direction: motor asymmetry capped to prevent worker noise from causing spinning.
+		// Steering is primarily handled by behavioral biases (food-seek, explore wander).
 		var newDir = (BRAIN.accumleft - BRAIN.accumright) / scalingFactor;
+		newDir = Math.max(-0.05, Math.min(0.05, newDir));
 		targetDir = facingDir + newDir * Math.PI;
 		targetSpeed = (Math.abs(BRAIN.accumleft) + Math.abs(BRAIN.accumright)) / (scalingFactor * 5);
 		speedChangeInterval = (targetSpeed - speed) / (scalingFactor * 1.5);
@@ -852,19 +855,16 @@ function computeMovementForBehavior() {
 			if (nf) {
 				var foodAngle = Math.atan2(-(nf.item.y - fly.y), nf.item.x - fly.x);
 				var seekStrength = Math.min(1, BRAIN.drives.hunger) * 0.6;
-				// Blend targetDir toward foodAngle
 				var angleDiffToFood = foodAngle - targetDir;
-				// Normalize to [-PI, PI]
 				angleDiffToFood = normalizeAngle(angleDiffToFood);
 				targetDir += angleDiffToFood * seekStrength;
-				// Ensure minimum speed when seeking food
 				if (targetSpeed < 0.3) targetSpeed = 0.3;
 				speedChangeInterval = (targetSpeed - speed) / (scalingFactor * 1.5);
 			}
 		}
-		// Head-turn bias from MN_HEAD (CX_FC orientation signal)
+		// Head-turn bias from MN_HEAD (capped to prevent erratic turns)
 		if (BRAIN.accumHead > 3) {
-			var headBias = (BRAIN.accumHead / 40) * 0.15;
+			var headBias = Math.min((BRAIN.accumHead / 40) * 0.15, 0.08);
 			var headSign = (BRAIN.accumWalkLeft - BRAIN.accumWalkRight > 0) ? 1 : -1;
 			targetDir += headBias * headSign;
 		}
@@ -1672,7 +1672,7 @@ function update(dt) {
 	var edgeBias = 0;
 	var edgeBiasY = 0;
 	var topBound = 44;
-	var bottomBound = window.innerHeight;
+	var bottomBound = window.innerHeight - 210;
 	var leftBound = 0;
 	var rightBound = window.innerWidth;
 

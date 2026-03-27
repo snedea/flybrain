@@ -1,6 +1,0 @@
-{
-  "task_id": "D22.2",
-  "task_desc": "Fix NeuroRenderer (js/neuro-renderer.js) GPU resource leak and missing resize handling. (1) destroy() sets posBuffer/colorBuffer/brightnessBuffer/program to null but never calls gl.deleteBuffer() or gl.deleteProgram(), leaking GPU resources each time the user toggles between 59-group and 139K views via the connectome toggle button. (2) Canvas width, neuron grid positions, section bounds, and GL viewport are computed once in init() and never updated on window resize. The main fly canvas has a resize handler (main.js:1833) but the NeuroRenderer has none. Fix: add gl.delete* calls in destroy() before nulling references, and add a ResizeObserver (or window resize listener) that recomputes layout and re-uploads position buffers.",
-  "completed_stage": "builder",
-  "timestamp": "2026-03-27T00:58:26.715873+00:00"
-}

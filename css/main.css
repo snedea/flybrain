@@ -26,6 +26,52 @@ body {
     overflow: hidden;
 }
 
+/* --- Custom Scrollbars --- */
+.connectome-grid,
+#neuro-renderer-wrap,
+.education-content,
+.b3d-tip-neurons {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(136, 146, 164, 0.3) transparent;
+}
+
+.connectome-grid::-webkit-scrollbar,
+#neuro-renderer-wrap::-webkit-scrollbar,
+.education-content::-webkit-scrollbar,
+.b3d-tip-neurons::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+.connectome-grid::-webkit-scrollbar-track,
+#neuro-renderer-wrap::-webkit-scrollbar-track,
+.education-content::-webkit-scrollbar-track,
+.b3d-tip-neurons::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.connectome-grid::-webkit-scrollbar-thumb,
+#neuro-renderer-wrap::-webkit-scrollbar-thumb,
+.education-content::-webkit-scrollbar-thumb,
+.b3d-tip-neurons::-webkit-scrollbar-thumb {
+    background: rgba(136, 146, 164, 0.3);
+    border-radius: 3px;
+}
+
+.connectome-grid::-webkit-scrollbar-thumb:hover,
+#neuro-renderer-wrap::-webkit-scrollbar-thumb:hover,
+.education-content::-webkit-scrollbar-thumb:hover,
+.b3d-tip-neurons::-webkit-scrollbar-thumb:hover {
+    background: rgba(136, 146, 164, 0.5);
+}
+
+.connectome-grid::-webkit-scrollbar-corner,
+#neuro-renderer-wrap::-webkit-scrollbar-corner,
+.education-content::-webkit-scrollbar-corner,
+.b3d-tip-neurons::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
 canvas {
     display: block;
     background-color: #222;
@@ -223,17 +269,18 @@ canvas {
 /* --- Bottom Panel --- */
 #left-panel {
     position: fixed;
-    top: 44px;
     left: 0;
+    right: 0;
     bottom: 0;
-    width: 340px;
+    height: 210px;
     background: var(--surface-alpha);
-    border-right: 1px solid var(--border);
+    border-top: 1px solid var(--border);
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     z-index: 20;
-    padding: 0.4rem 0.5rem;
+    padding: 0.3rem 0.5rem;
     overflow: hidden;
+    gap: 0.5rem;
 }
 
 #bottom-panel {
@@ -247,8 +294,8 @@ canvas {
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
-    min-height: 0;
+    gap: 0.2rem;
+    min-width: 0;
 }
 
 .connectome-label {
@@ -259,12 +306,13 @@ canvas {
 
 #drive-meters {
     flex-shrink: 0;
+    width: 160px;
     display: flex;
     flex-direction: column;
     gap: 0.15rem;
-    border-top: 1px solid var(--border);
-    padding-top: 0.4rem;
-    margin-top: 0.4rem;
+    border-left: 1px solid var(--border);
+    padding-left: 0.5rem;
+    justify-content: center;
 }
 
 .drive-row {
@@ -444,8 +492,9 @@ canvas {
 #neuro-renderer-wrap {
     position: relative;
     flex: 1;
+    min-width: 0;
     min-height: 0;
-    overflow-y: auto;
+    overflow: hidden;
 }
 
 #neuro-canvas {
@@ -465,9 +514,9 @@ canvas {
 #brain3d-overlay {
     position: fixed;
     top: 44px;
-    left: 340px;
+    left: 0;
     right: 0;
-    bottom: 0;
+    bottom: 210px;
     z-index: 15;
     background: #0a0a1a;
 }
