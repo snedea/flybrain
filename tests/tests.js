@@ -704,6 +704,52 @@ var test_bridge_aggregateFireState_decay = function () {
 		'previous activation decays by 0.75');
 };
 
+var test_bridge_aggregateFireState_clears_stale = function () {
+	resetBrainState();
+	// Setup: 2 groups, 10 neurons each
+	var names = ['TEST_ST0', 'TEST_ST1'];
+	for (var g = 0; g < 2; g++) {
+		BRAIN.postSynaptic[names[g]] = [0, 0];
+	}
+	var assignments = new Uint16Array(20);
+	for (var i = 0; i < 10; i++) assignments[i] = 0;
+	for (var i = 10; i < 20; i++) assignments[i] = 1;
+	BRAIN._bridge._setGroupState(2, 20, assignments, [10, 10], names);
+
+	// First call: fire all neurons in group 0 via latestFireState fallback
+	var fire = new Uint8Array(20);
+	for (var i = 0; i < 10; i++) fire[i] = 1;
+	BRAIN._bridge._setFireState(fire, null, 0);
+
+	BRAIN._bridge.aggregateFireState();
+
+	var FSS = BRAIN._bridge.FIRE_STATE_SCALE;
+	assertClose(BRAIN.postSynaptic['TEST_ST0'][BRAIN.nextState], FSS, 0.01,
+		'first call: group 0 fully active');
+
+	// Second call: no new worker tick, latestFireState should have been cleared
+	// so aggregateFireState should be a no-op (no new data to consume).
+	// Copy current activation to thisState to simulate state swap
+	BRAIN.postSynaptic['TEST_ST0'][BRAIN.thisState] =
+		BRAIN.postSynaptic['TEST_ST0'][BRAIN.nextState];
+	BRAIN.postSynaptic['TEST_ST0'][BRAIN.nextState] = 0;
+	BRAIN.postSynaptic['TEST_ST1'][BRAIN.thisState] =
+		BRAIN.postSynaptic['TEST_ST1'][BRAIN.nextState];
+	BRAIN.postSynaptic['TEST_ST1'][BRAIN.nextState] = 0;
+
+	BRAIN._bridge.aggregateFireState();
+
+	// With latestFireState cleared, the fallback branch should NOT run.
+	// Both pendingGroupSpikes and pendingWorkerTicks are 0, and latestFireState is null,
+	// so groupFires stays all-zero. The only contribution is decay: prevActivation * 0.75.
+	// Group 0: max(0, 100 * 0.75) = 75 (decay only, not 100 again from stale snapshot)
+	assertClose(BRAIN.postSynaptic['TEST_ST0'][BRAIN.nextState], FSS * 0.75, 0.01,
+		'second call without new tick: decays instead of re-reading stale fire state');
+	// Group 1: max(0, 0 * 0.75) = 0
+	assertEqual(BRAIN.postSynaptic['TEST_ST1'][BRAIN.nextState], 0,
+		'second call: inactive group stays zero');
+};
+
 // --- synthesizeMotorOutputs tests ---
 
 var test_bridge_synthesize_walk_tonic = function () {

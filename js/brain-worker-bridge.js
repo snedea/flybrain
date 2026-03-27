@@ -548,6 +548,7 @@
 
 		if (pendingGroupSpikes) pendingGroupSpikes.fill(0);
 		pendingWorkerTicks = 0;
+		latestFireState = null;
 	}
 
 	/* ---- pause / resume API for visibilitychange ---- */
