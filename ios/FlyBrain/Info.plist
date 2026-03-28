@@ -20,7 +20,13 @@
     <dict>
         <key>UIColorName</key>
         <string>LaunchBG</string>
+        <key>UIImageName</key>
+        <string>AppIcon</string>
+        <key>UIImageRespectsSafeAreaInsets</key>
+        <false/>
     </dict>
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
     <key>UISupportedInterfaceOrientations</key>
     <array>
         <string>UIInterfaceOrientationPortrait</string>

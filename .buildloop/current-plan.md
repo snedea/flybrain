@@ -1,715 +1,655 @@
-# Plan: T9.2
+# Plan: T9.3
 
 ## Dependencies
-- list: none (all deps already vendored)
+- list: none (no new packages or tools required)
 - commands: none
+
+## Context
+
+The iOS project already exists at `ios/FlyBrain.xcodeproj` with `project.yml` (XcodeGen) and a hand-maintained `.pbxproj`. The build settings already reference `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon` but no `Assets.xcassets` directory exists yet. Info.plist exists with most metadata already set. No launch screen storyboard exists -- Info.plist uses `UILaunchScreen` dict with `UIColorName = LaunchBG`.
+
+The project uses `project.yml` (XcodeGen format) which generates the `.pbxproj`. Both must be updated in sync.
+
+CSS custom properties from `css/main.css`:
+- `--bg: #1a1a2e` (dark background -- use for launch screen and icon background)
+- `--surface: #16213e` (neural panel blue)
+- `--border: #2a3a5c`
+- `--neuron-sensory: #3b82f6` (blue)
+- `--neuron-central: #8b5cf6` (purple)
+- `--neuron-drives: #f59e0b` (amber)
+- `--neuron-motor: #ef4444` (red)
+- `--accent: #E3734B` (orange)
+- `--text: #e8e8e8`
+
+Font: `system-ui, -apple-system, sans-serif` throughout the web UI.
 
 ## File Operations (in execution order)
 
-### 1. MODIFY index.html
-- operation: MODIFY
-- reason: Add viewport-fit=cover to existing viewport meta (required for safe-area env() to return non-zero values in WKWebView). Add hamburger menu button. Add drawer backdrop overlay element. Add Lite mode button to toolbar.
+### 1. CREATE `svg/app-icon.svg`
+- operation: CREATE
+- reason: Source 1024x1024 SVG for the app icon -- a stylized top-down Drosophila brain silhouette using project colors
 
-#### Change 1: Update viewport meta tag
-- anchor: `<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">`
-- Replace with: `<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">`
+#### Content Specification
 
-#### Change 2: Add hamburger button as first child of toolbar-left
-- anchor: `<div class="toolbar-left">`
-- Insert immediately after that line:
-```html
-            <button class="tool-btn sidebar-toggle" id="sidebarToggle" aria-label="Toggle panel">&#9776;</button>
+The SVG must be exactly 1024x1024 viewBox. Design:
+
+**Background**: Rounded rectangle (radius 224 for iOS superellipse simulation) filled with `#1a1a2e` (--bg).
+
+**Brain silhouette**: A top-down Drosophila brain outline (mushroom-shaped: two large mushroom body lobes at top, narrowing to a central body, with optic lobes as lateral bulges). Use two concentric shapes:
+- Outer glow/stroke: `#2a3a5c` (--border), 4px stroke, no fill
+- Inner fill: linear gradient from `#16213e` (--surface, top) to `#1a2744` (--surface-hover, bottom)
+
+**Neural pathway lines**: 6-8 thin lines (1.5-2px stroke) inside the brain shape representing neural tracts, using these colors:
+- 2 lines in `#3b82f6` (--neuron-sensory) -- optic tract paths from lateral lobes to center
+- 2 lines in `#8b5cf6` (--neuron-central) -- mushroom body to central complex connections
+- 1 line in `#f59e0b` (--neuron-drives) -- central descending pathway
+- 1 line in `#ef4444` (--neuron-motor) -- motor output path downward
+
+**Neuron dots**: 12-16 small circles (radius 8-12) scattered along the neural pathway lines, filled with the same neuron colors at 80% opacity, representing active neurons.
+
+**Exact SVG content** (the builder must use this exact SVG -- do not modify):
+
+```svg
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="brainFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#16213e"/>
+      <stop offset="100%" stop-color="#1a2744"/>
+    </linearGradient>
+    <clipPath id="roundedBg">
+      <rect width="1024" height="1024" rx="224" ry="224"/>
+    </clipPath>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1024" height="1024" rx="224" ry="224" fill="#1a1a2e"/>
+
+  <g clip-path="url(#roundedBg)">
+    <!-- Brain silhouette: top-down Drosophila brain -->
+    <!-- Two mushroom body lobes (top), optic lobes (sides), central body -->
+    <path d="
+      M 512 180
+      C 420 180, 340 220, 310 300
+      C 280 370, 240 380, 180 370
+      C 140 365, 110 400, 110 450
+      C 110 520, 160 570, 230 560
+      C 280 555, 310 580, 330 640
+      C 350 700, 400 760, 440 800
+      C 470 830, 500 845, 512 850
+      C 524 845, 554 830, 584 800
+      C 624 760, 674 700, 694 640
+      C 714 580, 744 555, 794 560
+      C 864 570, 914 520, 914 450
+      C 914 400, 884 365, 844 370
+      C 784 380, 744 370, 714 300
+      C 684 220, 604 180, 512 180
+      Z"
+      fill="url(#brainFill)"
+      stroke="#2a3a5c"
+      stroke-width="4"
+    />
+
+    <!-- Mushroom body lobes (two top bulges) -->
+    <ellipse cx="410" cy="280" rx="80" ry="60" fill="url(#brainFill)" stroke="#2a3a5c" stroke-width="2.5"/>
+    <ellipse cx="614" cy="280" rx="80" ry="60" fill="url(#brainFill)" stroke="#2a3a5c" stroke-width="2.5"/>
+
+    <!-- Neural pathway lines -->
+    <!-- Sensory: optic tract from left optic lobe to center -->
+    <path d="M 180 450 Q 280 440, 380 380 Q 440 340, 480 320" fill="none" stroke="#3b82f6" stroke-width="2" opacity="0.7"/>
+    <!-- Sensory: optic tract from right optic lobe to center -->
+    <path d="M 844 450 Q 744 440, 644 380 Q 584 340, 544 320" fill="none" stroke="#3b82f6" stroke-width="2" opacity="0.7"/>
+
+    <!-- Central: mushroom body connections -->
+    <path d="M 410 310 Q 430 380, 470 440 Q 500 480, 512 520" fill="none" stroke="#8b5cf6" stroke-width="2" opacity="0.7"/>
+    <path d="M 614 310 Q 594 380, 554 440 Q 524 480, 512 520" fill="none" stroke="#8b5cf6" stroke-width="2" opacity="0.7"/>
+
+    <!-- Drives: central descending -->
+    <path d="M 512 320 L 512 520 Q 512 600, 512 680" fill="none" stroke="#f59e0b" stroke-width="2" opacity="0.7"/>
+
+    <!-- Motor: output pathway -->
+    <path d="M 512 680 Q 490 740, 470 790" fill="none" stroke="#ef4444" stroke-width="2" opacity="0.7"/>
+    <path d="M 512 680 Q 534 740, 554 790" fill="none" stroke="#ef4444" stroke-width="2" opacity="0.7"/>
+
+    <!-- Neuron dots along pathways -->
+    <!-- Sensory neurons (blue) -->
+    <circle cx="230" cy="450" r="10" fill="#3b82f6" opacity="0.85"/>
+    <circle cx="380" cy="385" r="8" fill="#3b82f6" opacity="0.85"/>
+    <circle cx="794" cy="450" r="10" fill="#3b82f6" opacity="0.85"/>
+    <circle cx="644" cy="385" r="8" fill="#3b82f6" opacity="0.85"/>
+
+    <!-- Central neurons (purple) -->
+    <circle cx="420" cy="350" r="9" fill="#8b5cf6" opacity="0.85"/>
+    <circle cx="604" cy="350" r="9" fill="#8b5cf6" opacity="0.85"/>
+    <circle cx="480" cy="440" r="8" fill="#8b5cf6" opacity="0.85"/>
+    <circle cx="544" cy="440" r="8" fill="#8b5cf6" opacity="0.85"/>
+
+    <!-- Drive neurons (amber) -->
+    <circle cx="512" cy="420" r="10" fill="#f59e0b" opacity="0.85"/>
+    <circle cx="512" cy="580" r="9" fill="#f59e0b" opacity="0.85"/>
+
+    <!-- Motor neurons (red) -->
+    <circle cx="480" cy="760" r="9" fill="#ef4444" opacity="0.85"/>
+    <circle cx="544" cy="760" r="9" fill="#ef4444" opacity="0.85"/>
+    <circle cx="512" cy="700" r="8" fill="#ef4444" opacity="0.85"/>
+  </g>
+</svg>
 ```
 
-#### Change 3: Add Lite mode button after the helpBtn
-- anchor: `<button class="tool-btn" id="helpBtn">?</button>`
-- Insert immediately after that line:
-```html
-            <button class="tool-btn" id="liteBtn">Lite</button>
-```
+### 2. CREATE `ios/FlyBrain/Assets.xcassets/Contents.json`
+- operation: CREATE
+- reason: Root asset catalog manifest required by Xcode
 
-#### Change 4: Add drawer backdrop before closing body tag area (after left-panel, before canvas)
-- anchor: `<canvas id='canvas'></canvas>`
-- Insert immediately before that line:
-```html
-    <div id="drawer-backdrop" class="drawer-backdrop"></div>
-```
-
-### 2. MODIFY css/main.css
-- operation: MODIFY
-- reason: Add touch-action on canvas, safe-area insets on toolbar/panel, mobile media queries, drawer styles, hamburger visibility, lite button visibility, landscape orientation handling, brain3d-overlay mobile override.
-
-#### Change 1: Add touch-action to canvas rule
-- anchor: `canvas {` (line 75)
-- Replace the entire `canvas { ... }` block with:
-```css
-canvas {
-    display: block;
-    background-color: #222;
-    transition: background-color 0.5s ease;
-    touch-action: none;
+#### Content (exact JSON)
+```json
+{
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
 }
 ```
 
-#### Change 2: Add safe-area padding to toolbar
-- anchor: `#toolbar {` (line 202)
-- Replace the entire `#toolbar { ... }` block (lines 202-216) with:
-```css
-#toolbar {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 44px;
-    padding-top: env(safe-area-inset-top, 0px);
-    background: var(--surface-alpha);
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding-left: max(1rem, env(safe-area-inset-left, 0px));
-    padding-right: max(1rem, env(safe-area-inset-right, 0px));
-    z-index: 20;
-    font-family: system-ui, -apple-system, sans-serif;
-    box-sizing: content-box;
-}
-```
-Note: `box-sizing: content-box` so height stays 44px and padding-top is additive. The total toolbar visual height becomes `44px + env(safe-area-inset-top)`.
+### 3. CREATE `ios/FlyBrain/Assets.xcassets/AppIcon.appiconset/Contents.json`
+- operation: CREATE
+- reason: App icon asset catalog entry -- iOS 17+ only needs a single 1024x1024 image
 
-#### Change 3: Add safe-area padding to left-panel (bottom panel)
-- anchor: `#left-panel {` (line 278)
-- Replace the entire `#left-panel { ... }` block (lines 278-292) with:
-```css
-#left-panel {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: 210px;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
-    background: var(--surface-alpha);
-    border-top: 1px solid var(--border);
-    display: flex;
-    flex-direction: row;
-    z-index: 20;
-    padding-top: 0.3rem;
-    padding-left: max(0.5rem, env(safe-area-inset-left, 0px));
-    padding-right: max(0.5rem, env(safe-area-inset-right, 0px));
-    overflow: hidden;
-    gap: 0.5rem;
-    box-sizing: content-box;
+#### Content (exact JSON)
+
+Since the deployment target is iOS 17.0, use the single-size icon format (iOS 17+ does automatic resizing from a single 1024x1024 source):
+
+```json
+{
+  "images" : [
+    {
+      "filename" : "app-icon-1024.png",
+      "idiom" : "universal",
+      "platform" : "ios",
+      "size" : "1024x1024"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
 }
 ```
 
-#### Change 4: Add hamburger button hidden on desktop, drawer-backdrop, and mobile styles as a new block at the END of the file
-- anchor: append after the last line of the file (after the closing `}` of `.edu-links a:hover`)
-- Add the following CSS block:
+### 4. CREATE `ios/FlyBrain/Assets.xcassets/AppIcon.appiconset/app-icon-1024.png`
+- operation: CREATE
+- reason: The actual 1024x1024 PNG icon image rendered from the source SVG
 
-```css
+#### Generation Steps
 
-/* --- Hamburger toggle (hidden on desktop) --- */
-#sidebarToggle {
-    display: none;
-    font-size: 1.2rem;
-    padding: 0.25rem 0.5rem;
-    line-height: 1;
-}
+The builder must create the PNG from the SVG. Use one of these approaches (in order of preference):
 
-/* --- Lite mode button (hidden on desktop) --- */
-#liteBtn {
-    display: none;
-}
-
-#liteBtn.active {
-    border-color: var(--accent);
-    background: var(--accent-subtle);
-    color: var(--accent);
-}
-
-/* --- Drawer backdrop --- */
-.drawer-backdrop {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.5);
-    z-index: 19;
-}
-
-.drawer-backdrop.visible {
-    display: block;
-}
-
-/* ========================================
-   MOBILE LAYOUT (max-width: 768px)
-   ======================================== */
-@media (max-width: 768px) {
-    /* --- Hamburger visible on mobile --- */
-    #sidebarToggle {
-        display: inline-block;
-    }
-
-    /* --- Lite button visible on mobile --- */
-    #liteBtn {
-        display: inline-block;
-    }
-
-    /* --- Compact toolbar: smaller buttons, tighter spacing --- */
-    #toolbar {
-        height: 36px;
-        padding-left: max(0.5rem, env(safe-area-inset-left, 0px));
-        padding-right: max(0.5rem, env(safe-area-inset-right, 0px));
-    }
-
-    .toolbar-left {
-        gap: 0.25rem;
-    }
-
-    .toolbar-right {
-        gap: 0.35rem;
-    }
-
-    .tool-btn {
-        padding: 0.2rem 0.5rem;
-        font-size: 0.7rem;
-    }
-
-    .toolbar-title {
-        font-size: 0.75rem;
-    }
-
-    /* Hide non-essential toolbar items on mobile */
-    #centerButton,
-    #clearButton,
-    #githubButton,
-    #scaleIndicator {
-        display: none !important;
-    }
-
-    /* Also hide the GitHub link anchor */
-    .toolbar-right a {
-        display: none;
-    }
-
-    /* --- Bottom panel becomes a slide-up drawer --- */
-    #left-panel {
-        height: auto;
-        max-height: 50vh;
-        transform: translateY(100%);
-        transition: transform 0.3s ease;
-        border-radius: var(--radius) var(--radius) 0 0;
-        flex-direction: column;
-        padding-top: 0.5rem;
-        z-index: 21;
-    }
-
-    #left-panel.drawer-open {
-        transform: translateY(0);
-    }
-
-    /* Drawer handle indicator */
-    #left-panel::before {
-        content: '';
-        display: block;
-        width: 40px;
-        height: 4px;
-        background: var(--border);
-        border-radius: 2px;
-        margin: 0 auto 0.5rem auto;
-        flex-shrink: 0;
-    }
-
-    /* Drive meters sit below connectome instead of beside */
-    #drive-meters {
-        width: auto;
-        border-left: none;
-        border-top: 1px solid var(--border);
-        padding-left: 0;
-        padding-top: 0.5rem;
-        flex-direction: row;
-        flex-wrap: wrap;
-        gap: 0.25rem 1rem;
-    }
-
-    .drive-row {
-        flex: 1 1 40%;
-        min-width: 100px;
-    }
-
-    /* --- Brain 3D overlay goes edge-to-edge on mobile --- */
-    #brain3d-overlay {
-        bottom: 0 !important;
-    }
-
-    /* --- Education panel full-width on mobile --- */
-    .education-panel {
-        width: 100%;
-        max-width: 100vw;
-        top: calc(36px + env(safe-area-inset-top, 0px));
-    }
-
-    /* --- Help overlay repositioned for compact toolbar --- */
-    .help-overlay {
-        top: calc(46px + env(safe-area-inset-top, 0px));
-    }
-}
-
-/* ========================================
-   LANDSCAPE on mobile devices
-   ======================================== */
-@media (orientation: landscape) and (max-height: 500px) {
-    #toolbar {
-        height: 32px;
-    }
-
-    .tool-btn {
-        padding: 0.15rem 0.4rem;
-        font-size: 0.65rem;
-    }
-
-    /* In landscape, neuron panel sits beside canvas on right side */
-    #left-panel {
-        left: auto;
-        right: 0;
-        top: calc(32px + env(safe-area-inset-top, 0px));
-        bottom: 0;
-        width: 280px;
-        max-height: none;
-        height: auto;
-        transform: translateX(100%);
-        transition: transform 0.3s ease;
-        flex-direction: column;
-        border-top: none;
-        border-left: 1px solid var(--border);
-        border-radius: 0;
-        padding-bottom: env(safe-area-inset-bottom, 0px);
-    }
-
-    #left-panel.drawer-open {
-        transform: translateX(0);
-    }
-
-    #left-panel::before {
-        display: none;
-    }
-
-    #drive-meters {
-        border-top: 1px solid var(--border);
-        flex-direction: column;
-        flex-wrap: nowrap;
-        width: auto;
-        padding-top: 0.5rem;
-    }
-
-    .drive-row {
-        flex: none;
-        min-width: 0;
-    }
-}
+**Option A: Use `rsvg-convert` (if available)**
+```bash
+rsvg-convert -w 1024 -h 1024 svg/app-icon.svg -o ios/FlyBrain/Assets.xcassets/AppIcon.appiconset/app-icon-1024.png
 ```
 
-### 3. MODIFY js/main.js
-- operation: MODIFY
-- reason: (a) Replace hardcoded boundary constants with a dynamic `getLayoutBounds()` function. (b) Add hamburger/drawer toggle logic. (c) Add Lite mode toggle logic. (d) Lock body scroll when drawer is open (known pattern #4).
+**Option B: Use `sips` (macOS built-in) with a two-step process**
 
-#### Change 1: Add `getLayoutBounds()` helper and `isMobile()` check after the state declarations
-- anchor: `var currentDtScale = 1;` (line 28)
-- Insert immediately after that line:
-
-```javascript
-
-// --- Layout helpers (mobile-aware) ---
-function isMobile() {
-	return window.innerWidth <= 768;
-}
-
-function getLayoutBounds() {
-	var toolbar = document.getElementById('toolbar');
-	var panel = document.getElementById('left-panel');
-	var topH = toolbar ? toolbar.offsetHeight : 44;
-	var bottomH = 0;
-	if (panel && !isMobile()) {
-		bottomH = panel.offsetHeight;
-	} else if (panel && panel.classList.contains('drawer-open')) {
-		bottomH = panel.offsetHeight;
-	}
-	return {
-		top: topH,
-		bottom: window.innerHeight - bottomH,
-		left: 0,
-		right: window.innerWidth
-	};
-}
+`sips` cannot read SVG directly. Use Python with `cairosvg` if available:
+```bash
+python3 -c "import cairosvg; cairosvg.svg2png(url='svg/app-icon.svg', write_to='ios/FlyBrain/Assets.xcassets/AppIcon.appiconset/app-icon-1024.png', output_width=1024, output_height=1024)"
 ```
 
-#### Change 2: Replace hardcoded topBound/bottomBound in movement code
-- anchor: `var topBound = 44;` (line 1676, after the getLayoutBounds is available)
-- Replace these two lines:
-```javascript
-	var topBound = 44;
-	var bottomBound = window.innerHeight - 210;
-```
-- With:
-```javascript
-	var bounds = getLayoutBounds();
-	var topBound = bounds.top;
-	var bottomBound = bounds.bottom;
+**Option C: Use `qlmanage` (macOS built-in, always available)**
+```bash
+qlmanage -t -s 1024 -o /tmp/ svg/app-icon.svg && cp /tmp/app-icon.svg.png ios/FlyBrain/Assets.xcassets/AppIcon.appiconset/app-icon-1024.png
 ```
 
-#### Change 3: Replace hardcoded `foodMinY = 44` in handleCanvasMousedown
-- anchor: `var foodMinY = 44;` (line 649)
-- Replace:
-```javascript
-		var foodMinY = 44;
-```
-- With:
-```javascript
-		var foodMinY = getLayoutBounds().top;
+**Option D: Use `convert` from ImageMagick (if available)**
+```bash
+convert -background none -density 300 -resize 1024x1024 svg/app-icon.svg ios/FlyBrain/Assets.xcassets/AppIcon.appiconset/app-icon-1024.png
 ```
 
-#### Change 4: Replace hardcoded `44` in resize IIFE for food clamping
-- anchor: `food[i].y = Math.max(44, Math.min(food[i].y, window.innerHeight));` (line 1860)
-- Replace:
-```javascript
-		food[i].y = Math.max(44, Math.min(food[i].y, window.innerHeight));
-```
-- With:
-```javascript
-		food[i].y = Math.max(getLayoutBounds().top, Math.min(food[i].y, window.innerHeight));
+**Option E: Use `python3` with `Pillow` and `cairosvg`**
+```bash
+pip3 install cairosvg 2>/dev/null; python3 -c "import cairosvg; cairosvg.svg2png(url='svg/app-icon.svg', write_to='ios/FlyBrain/Assets.xcassets/AppIcon.appiconset/app-icon-1024.png', output_width=1024, output_height=1024)"
 ```
 
-#### Change 5: Replace hardcoded `44` in resize IIFE for fly clamping
-- anchor: `fly.y = Math.max(44, Math.min(fly.y, window.innerHeight));` (line 1864)
-- Replace:
-```javascript
-	fly.y = Math.max(44, Math.min(fly.y, window.innerHeight));
-```
-- With:
-```javascript
-	fly.y = Math.max(getLayoutBounds().top, Math.min(fly.y, window.innerHeight));
-```
+**Option F: If no SVG-to-PNG converter is available**, create a programmatic PNG using Python's built-in modules. Write a Python script that:
+1. Creates a 1024x1024 image filled with `#1a1a2e`
+2. Draws a simplified brain shape using basic ellipses and circles for the neuron dots
+3. Saves as PNG
 
-#### Change 6: Add hamburger drawer toggle, Lite mode toggle, and scroll locking after the help overlay click-outside handler
-- anchor: The closing `});` of the "Close education panel when clicking outside" handler, which ends around line 425. Insert after:
-```javascript
-});
-```
-(the one closing the education panel click-outside handler)
+```python
+#!/usr/bin/env python3
+"""Generate app icon PNG when no SVG converter is available."""
+import struct
+import zlib
+import os
 
-- Insert after that block:
+WIDTH = HEIGHT = 1024
 
-```javascript
+def make_png(width, height, pixels):
+    """Create a minimal PNG from raw RGBA pixel data."""
+    def chunk(chunk_type, data):
+        c = chunk_type + data
+        return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xffffffff)
 
-// --- Mobile drawer toggle ---
-var sidebarToggle = document.getElementById('sidebarToggle');
-var leftPanel = document.getElementById('left-panel');
-var drawerBackdrop = document.getElementById('drawer-backdrop');
+    header = b'\x89PNG\r\n\x1a\n'
+    ihdr = chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 6, 0, 0, 0))
+    raw = b''
+    for y in range(height):
+        raw += b'\x00'  # filter none
+        raw += pixels[y * width * 4:(y + 1) * width * 4]
+    idat = chunk(b'IDAT', zlib.compress(raw, 9))
+    iend = chunk(b'IEND', b'')
+    return header + ihdr + idat + iend
 
-function openDrawer() {
-	if (leftPanel) leftPanel.classList.add('drawer-open');
-	if (drawerBackdrop) drawerBackdrop.classList.add('visible');
-	document.body.style.overflow = 'hidden';
-}
+def hex_to_rgba(h, a=255):
+    return (int(h[1:3], 16), int(h[3:5], 16), int(h[5:7], 16), a)
 
-function closeDrawer() {
-	if (leftPanel) leftPanel.classList.remove('drawer-open');
-	if (drawerBackdrop) drawerBackdrop.classList.remove('visible');
-	document.body.style.overflow = '';
-}
+def dist(x1, y1, x2, y2):
+    return ((x1-x2)**2 + (y1-y2)**2) ** 0.5
 
-if (sidebarToggle) {
-	sidebarToggle.addEventListener('click', function (e) {
-		e.stopPropagation();
-		if (leftPanel && leftPanel.classList.contains('drawer-open')) {
-			closeDrawer();
-		} else {
-			openDrawer();
-		}
-	});
-}
+bg = hex_to_rgba('#1a1a2e')
+surface = hex_to_rgba('#16213e')
+border_c = hex_to_rgba('#2a3a5c')
+blue = hex_to_rgba('#3b82f6', 217)
+purple = hex_to_rgba('#8b5cf6', 217)
+amber = hex_to_rgba('#f59e0b', 217)
+red = hex_to_rgba('#ef4444', 217)
 
-if (drawerBackdrop) {
-	drawerBackdrop.addEventListener('click', function () {
-		closeDrawer();
-	});
-}
+pixels = bytearray(WIDTH * HEIGHT * 4)
 
-// --- Lite mode toggle ---
-var liteBtn = document.getElementById('liteBtn');
-var liteModeActive = false;
+# Fill background
+for i in range(WIDTH * HEIGHT):
+    pixels[i*4:i*4+4] = bytes(bg)
 
-if (liteBtn) {
-	liteBtn.addEventListener('click', function () {
-		liteModeActive = !liteModeActive;
-		if (liteModeActive) {
-			liteBtn.classList.add('active');
-			// Slow down brain tick from 500ms (2Hz) to 1000ms (1Hz)
-			clearInterval(brainTickId);
-			brainTickId = setInterval(updateBrain, 1000);
-			// Tell neuro-renderer to skip idle frames
-			if (typeof NeuroRenderer !== 'undefined') {
-				NeuroRenderer.setLiteMode(true);
-			}
-		} else {
-			liteBtn.classList.remove('active');
-			// Restore brain tick to 500ms (2Hz)
-			clearInterval(brainTickId);
-			brainTickId = setInterval(updateBrain, 500);
-			if (typeof NeuroRenderer !== 'undefined') {
-				NeuroRenderer.setLiteMode(false);
-			}
-		}
-	});
-}
-```
+# Draw brain shape (simplified: large ellipse for main body + two top lobes + two side lobes)
+def in_ellipse(px, py, cx, cy, rx, ry):
+    return ((px - cx) / rx) ** 2 + ((py - cy) / ry) ** 2 <= 1.0
 
-#### Change 7: Update the visibilitychange resume handler to respect lite mode
-- anchor: `brainTickId = setInterval(updateBrain, 500);` (line 609, inside the visibilitychange handler's `else` branch)
-- Replace:
-```javascript
-		brainTickId = setInterval(updateBrain, 500);
-```
-- With:
-```javascript
-		brainTickId = setInterval(updateBrain, liteModeActive ? 1000 : 500);
-```
+def blend(base, overlay):
+    a = overlay[3] / 255.0
+    return (
+        int(base[0] * (1 - a) + overlay[0] * a),
+        int(base[1] * (1 - a) + overlay[1] * a),
+        int(base[2] * (1 - a) + overlay[2] * a),
+        255
+    )
 
-### 4. MODIFY js/neuro-renderer.js
-- operation: MODIFY
-- reason: Add `setLiteMode()` API and frame-skipping optimization for Lite mode. When lite mode is active, skip the WebGL bufferSubData + drawArrays call if no neurons are firing (all brightness < 0.01).
+def set_pixel(x, y, color):
+    if 0 <= x < WIDTH and 0 <= y < HEIGHT:
+        idx = (y * WIDTH + x) * 4
+        existing = tuple(pixels[idx:idx+4])
+        blended = blend(existing, color)
+        pixels[idx:idx+4] = bytes(blended)
 
-#### Change 1: Add liteMode variable after existing module variables
-- anchor: `var LABEL_BGS = ['rgba(59,130,246,0.1)', 'rgba(139,92,246,0.1)', 'rgba(245,158,11,0.1)', 'rgba(239,68,68,0.1)'];` (line 25)
-- Insert immediately after:
-```javascript
-	var liteMode = false;
-	var liteSkipCount = 0;
-```
+def fill_ellipse(cx, cy, rx, ry, color):
+    for y in range(max(0, int(cy - ry) - 1), min(HEIGHT, int(cy + ry) + 2)):
+        for x in range(max(0, int(cx - rx) - 1), min(WIDTH, int(cx + rx) + 2)):
+            if in_ellipse(x, y, cx, cy, rx, ry):
+                set_pixel(x, y, color)
 
-#### Change 2: Add frame-skipping logic in renderLoop
-- anchor: `gl.bindBuffer(gl.ARRAY_BUFFER, brightnessBuffer);` (line 435, the first one in renderLoop that does bufferSubData)
-- Replace lines 435-460 (from `gl.bindBuffer(gl.ARRAY_BUFFER, brightnessBuffer);` through `gl.drawArrays(gl.POINTS, 0, neuronCount);`) with:
-```javascript
-		/* Lite mode: skip GPU update when nothing is firing */
-		var skipDraw = false;
-		if (liteMode) {
-			var maxB = 0;
-			for (var i = 0; i < neuronCount; i++) {
-				if (brightnessData[i] > maxB) maxB = brightnessData[i];
-			}
-			if (maxB < 0.01) {
-				liteSkipCount++;
-				/* Redraw every 30th frame even when idle to prevent stale state */
-				if (liteSkipCount < 30) skipDraw = true;
-			} else {
-				liteSkipCount = 0;
-			}
-		}
+def fill_circle(cx, cy, r, color):
+    fill_ellipse(cx, cy, r, r, color)
 
-		if (!skipDraw) {
-			gl.bindBuffer(gl.ARRAY_BUFFER, brightnessBuffer);
-			gl.bufferSubData(gl.ARRAY_BUFFER, 0, brightnessData);
+def stroke_ellipse(cx, cy, rx, ry, color, width=3):
+    for y in range(max(0, int(cy - ry) - width - 1), min(HEIGHT, int(cy + ry) + width + 2)):
+        for x in range(max(0, int(cx - rx) - width - 1), min(WIDTH, int(cx + rx) + width + 2)):
+            d = ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2
+            if abs(d - 1.0) < width / min(rx, ry):
+                set_pixel(x, y, color)
 
-			gl.clearColor(0.086, 0.129, 0.243, 1.0);
-			gl.clear(gl.COLOR_BUFFER_BIT);
+# Main brain body
+fill_ellipse(512, 500, 250, 300, surface)
+stroke_ellipse(512, 500, 250, 300, border_c, 4)
 
-			gl.useProgram(program);
-			gl.uniform2f(program.u_resolution, canvas.width, canvas.height);
+# Left optic lobe
+fill_ellipse(220, 440, 110, 80, surface)
+stroke_ellipse(220, 440, 110, 80, border_c, 3)
 
-			gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
-			gl.enableVertexAttribArray(program.a_position);
-			gl.vertexAttribPointer(program.a_position, 2, gl.FLOAT, false, 0, 0);
+# Right optic lobe
+fill_ellipse(804, 440, 110, 80, surface)
+stroke_ellipse(804, 440, 110, 80, border_c, 3)
 
-			gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
-			gl.enableVertexAttribArray(program.a_color);
-			gl.vertexAttribPointer(program.a_color, 3, gl.FLOAT, false, 0, 0);
+# Left mushroom body lobe
+fill_ellipse(410, 270, 85, 65, surface)
+stroke_ellipse(410, 270, 85, 65, border_c, 3)
 
-			gl.bindBuffer(gl.ARRAY_BUFFER, brightnessBuffer);
-			gl.enableVertexAttribArray(program.a_brightness);
-			gl.vertexAttribPointer(program.a_brightness, 1, gl.FLOAT, false, 0, 0);
+# Right mushroom body lobe
+fill_ellipse(614, 270, 85, 65, surface)
+stroke_ellipse(614, 270, 85, 65, border_c, 3)
 
-			gl.bindBuffer(gl.ARRAY_BUFFER, pointSizeBuffer);
-			gl.enableVertexAttribArray(program.a_pointSize);
-			gl.vertexAttribPointer(program.a_pointSize, 1, gl.FLOAT, false, 0, 0);
+# Neuron dots
+# Sensory (blue)
+for cx, cy, r in [(230, 445, 12), (380, 380, 10), (794, 445, 12), (644, 380, 10)]:
+    fill_circle(cx, cy, r, blue)
 
-			gl.drawArrays(gl.POINTS, 0, neuronCount);
-		}
+# Central (purple)
+for cx, cy, r in [(420, 340, 11), (604, 340, 11), (480, 430, 10), (544, 430, 10)]:
+    fill_circle(cx, cy, r, purple)
+
+# Drives (amber)
+for cx, cy, r in [(512, 410, 12), (512, 570, 11)]:
+    fill_circle(cx, cy, r, amber)
+
+# Motor (red)
+for cx, cy, r in [(480, 720, 11), (544, 720, 11), (512, 660, 10)]:
+    fill_circle(cx, cy, r, red)
+
+png_data = make_png(WIDTH, HEIGHT, bytes(pixels))
+os.makedirs('ios/FlyBrain/Assets.xcassets/AppIcon.appiconset', exist_ok=True)
+with open('ios/FlyBrain/Assets.xcassets/AppIcon.appiconset/app-icon-1024.png', 'wb') as f:
+    f.write(png_data)
+
+print("Generated app-icon-1024.png")
 ```
 
-#### Change 3: Add setLiteMode function and expose it on the NeuroRenderer global
-- anchor: Find the line where NeuroRenderer is assigned to window. Search for `window.NeuroRenderer` or the object literal that exposes the public API.
-- Need to find exact location first.
+**Attempt order**: Try Option A, then C, then D, then E. If all fail, use Option F (the Python fallback -- it always works with no dependencies). Verify the output file exists and is a valid PNG (file size > 1000 bytes).
 
-### 4b. (continued) Find the NeuroRenderer public API export
+### 5. CREATE `ios/FlyBrain/Assets.xcassets/LaunchBG.colorset/Contents.json`
+- operation: CREATE
+- reason: Color set referenced by Info.plist UILaunchScreen.UIColorName for the launch screen background
 
-- anchor: The NeuroRenderer public API is exposed at the end of the IIFE. Look for `window.NeuroRenderer =` or similar.
-- After identifying, add `setLiteMode: setLiteMode` to the exported object.
-- Add this function definition before the public API export:
+#### Content (exact JSON)
 
-```javascript
-	function setLiteMode(enabled) {
-		liteMode = enabled;
-		liteSkipCount = 0;
-	}
-```
+The color must match `--bg: #1a1a2e` (RGB: 26, 26, 46 -> 0.102, 0.102, 0.180):
 
-### 5. MODIFY css/main.css — brain3d-overlay safe-area adjustment
-- operation: MODIFY (already partially done in step 2, but need to update the desktop brain3d-overlay `top` to account for safe-area)
-- reason: The brain3d-overlay uses `top: 44px` which does not account for the safe-area inset added to the toolbar
-
-#### Change 1: Update brain3d-overlay top
-- anchor: `#brain3d-overlay {` (line 522)
-- Replace the entire `#brain3d-overlay { ... }` block (lines 522-530) with:
-```css
-#brain3d-overlay {
-    position: fixed;
-    top: calc(44px + env(safe-area-inset-top, 0px));
-    left: 0;
-    right: 0;
-    bottom: 210px;
-    z-index: 15;
-    background: #0a0a1a;
-}
-```
-
-### 6. MODIFY ios/FlyBrain/ContentView.swift
-- operation: MODIFY
-- reason: Set WKWebView background to match --bg color for seamless loading appearance. Set preferred status bar style to light content for dark background.
-
-#### Change 1: Set webView background color to match CSS --bg (#1a1a2e)
-- anchor: `webView.backgroundColor = .black`
-- Replace:
-```swift
-        webView.backgroundColor = .black
-```
-- With:
-```swift
-        webView.backgroundColor = UIColor(red: 0.102, green: 0.102, blue: 0.180, alpha: 1.0)
-```
-
-#### Change 2: Add a UIViewControllerRepresentable wrapper to set light status bar style
-- anchor: `struct WebView: UIViewRepresentable {`
-- This requires wrapping the WKWebView in a UIViewController that overrides `preferredStatusBarStyle`. Replace the entire `ContentView` and `WebView` structs with:
-
-```swift
-struct ContentView: View {
-    var body: some View {
-        WebViewControllerWrapper()
-            .ignoresSafeArea()
-    }
-}
-
-struct WebViewControllerWrapper: UIViewControllerRepresentable {
-    func makeUIViewController(context: Context) -> WebViewController {
-        return WebViewController()
-    }
-
-    func updateUIViewController(_ uiViewController: WebViewController, context: Context) {}
-}
-
-class WebViewController: UIViewController {
-    override var preferredStatusBarStyle: UIStatusBarStyle {
-        return .lightContent
-    }
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-
-        let config = WKWebViewConfiguration()
-        config.preferences.javaScriptEnabled = true
-        config.setValue(true, forKey: "allowUniversalAccessFromFileURLs")
-
-        let script = WKUserScript(
-            source: "document.documentElement.style.webkitTouchCallout='none';document.documentElement.style.webkitUserSelect='none';",
-            injectionTime: .atDocumentStart,
-            forMainFrameOnly: false
-        )
-        config.userContentController.addUserScript(script)
-
-        let webView = WKWebView(frame: view.bounds, configuration: config)
-        webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        webView.scrollView.bounces = false
-        webView.scrollView.isScrollEnabled = false
-        webView.scrollView.contentInsetAdjustmentBehavior = .never
-        webView.allowsLinkPreview = false
-        webView.isOpaque = false
-        webView.backgroundColor = UIColor(red: 0.102, green: 0.102, blue: 0.180, alpha: 1.0)
-
-        view.addSubview(webView)
-
-        guard let indexURL = Bundle.main.url(forResource: "index", withExtension: "html") else {
-            fatalError("index.html not found in bundle")
+```json
+{
+  "colors" : [
+    {
+      "color" : {
+        "color-space" : "srgb",
+        "components" : {
+          "alpha" : "1.000",
+          "blue" : "0.180",
+          "green" : "0.102",
+          "red" : "0.102"
         }
-        let webDir = indexURL.deletingLastPathComponent()
-        webView.loadFileURL(indexURL, allowingReadAccessTo: webDir)
+      },
+      "idiom" : "universal"
     }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
 }
 ```
 
-Note: The `FlyBrainApp.swift` `ContentView().ignoresSafeArea()` in the WindowGroup body still works with this change because `ContentView` still exists and applies `.ignoresSafeArea()` internally via the `WebViewControllerWrapper`.
-
-### 7. MODIFY js/neuro-renderer.js — expose setLiteMode on public API
+### 6. MODIFY `ios/FlyBrain/Info.plist`
 - operation: MODIFY
-- reason: The NeuroRenderer public API object needs to include setLiteMode
+- reason: Add launch screen image reference to show app icon during launch, and add ITSAppUsesNonExemptEncryption=false for App Store compliance
+- anchor: `<key>UILaunchScreen</key>`
 
-#### Change 1: Add setLiteMode function before the public API export
-- anchor: `function onMouseLeave(e) {` (line 533)
-- Insert after the `onMouseLeave` function closing brace (after `if (tooltipEl) tooltipEl.style.display = 'none';` and its closing `}`):
+#### Changes
 
-```javascript
+Replace the entire `UILaunchScreen` dict block (lines 19-23) with a richer configuration that shows the app icon centered on the launch background:
 
-	function setLiteMode(enabled) {
-		liteMode = enabled;
-		liteSkipCount = 0;
-	}
+**Old (lines 19-23):**
+```xml
+    <key>UILaunchScreen</key>
+    <dict>
+        <key>UIColorName</key>
+        <string>LaunchBG</string>
+    </dict>
 ```
 
-#### Change 2: Add setLiteMode to the public API object
-- anchor: `window.NeuroRenderer = { init: init, destroy: destroy, isActive: isActive };` (line 537)
-- Replace with:
-```javascript
-	window.NeuroRenderer = { init: init, destroy: destroy, isActive: isActive, setLiteMode: setLiteMode };
+**New:**
+```xml
+    <key>UILaunchScreen</key>
+    <dict>
+        <key>UIColorName</key>
+        <string>LaunchBG</string>
+        <key>UIImageName</key>
+        <string>AppIcon</string>
+        <key>UIImageRespectsSafeAreaInsets</key>
+        <false/>
+    </dict>
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
 ```
 
-### 8. MODIFY index.html — Cache-busting version bump
-- operation: MODIFY
-- reason: Bump ?v=7 to ?v=8 on all script and CSS tags to ensure WKWebView loads updated files after T9.2 changes
+Note: `UILaunchScreen` dict with `UIImageName` displays the named image centered on the background color. This provides the launch screen with the app icon centered on the dark background. The `ITSAppUsesNonExemptEncryption = false` avoids the export compliance question during App Store submission (the app has no encryption).
 
-#### Change 1: Bump all `?v=7` to `?v=8`
-- anchor: `?v=7` (appears on every script and CSS tag)
-- Replace ALL occurrences of `?v=7` with `?v=8` in the file. Affected lines:
-  - `href="./css/main.css?v=7"` -> `href="./css/main.css?v=8"`
-  - `src="./js/constants.js?v=7"` -> `src="./js/constants.js?v=8"`
-  - `src="./js/connectome.js?v=7"` -> `src="./js/connectome.js?v=8"`
-  - `src="./js/brain-worker-bridge.js?v=7"` -> `src="./js/brain-worker-bridge.js?v=8"`
-  - `src="./js/neuro-renderer.js?v=7"` -> `src="./js/neuro-renderer.js?v=8"`
-  - `src="./js/fly-logic.js?v=7"` -> `src="./js/fly-logic.js?v=8"`
-  - `src="./js/brain3d.js?v=7"` -> `src="./js/brain3d.js?v=8"`
-  - `src="./js/education.js?v=7"` -> `src="./js/education.js?v=8"`
-  - `src="./js/main.js?v=7"` -> `src="./js/main.js?v=8"`
-  - `src="./js/caretaker-renderer.js?v=7"` -> `src="./js/caretaker-renderer.js?v=8"`
-  - `src="./js/caretaker-bridge.js?v=7"` -> `src="./js/caretaker-bridge.js?v=8"`
+IMPORTANT: Do NOT use a LaunchScreen.storyboard. The Info.plist `UILaunchScreen` dictionary approach is the modern replacement and is already partially configured. A storyboard would conflict with it.
+
+### 7. MODIFY `ios/FlyBrain/Assets.xcassets/AppIcon.appiconset/Contents.json`
+- operation: MODIFY (only if needed -- this is a conditional step)
+- reason: If the build fails because Xcode cannot find the icon, verify the Contents.json matches exactly what was written in step 3.
+- anchor: `"filename" : "app-icon-1024.png"`
+
+No changes expected -- this is a validation checkpoint. If the icon PNG was generated correctly in step 4, the asset catalog should resolve.
+
+### 8. MODIFY `ios/project.yml`
+- operation: MODIFY
+- reason: Add Assets.xcassets to the sources so XcodeGen includes the asset catalog in the project
+- anchor: `sources:`
+
+The current sources section:
+```yaml
+    sources:
+      - path: FlyBrain
+        type: group
+```
+
+This already includes the entire `FlyBrain/` directory as a group, which should automatically pick up `Assets.xcassets` since it is inside `FlyBrain/`. No change needed UNLESS the build fails to find the asset catalog.
+
+**However**, verify that the `.pbxproj` includes a Resources build phase for the asset catalog. The current `.pbxproj` has no `PBXResourcesBuildPhase` section -- it only has Sources and Copy Web Assets (shell script). This means the asset catalog will NOT be compiled.
+
+Add a `PBXResourcesBuildPhase` by updating `project.yml` to explicitly include Assets.xcassets as a resource:
+
+**Old:**
+```yaml
+    sources:
+      - path: FlyBrain
+        type: group
+```
+
+**New:**
+```yaml
+    sources:
+      - path: FlyBrain
+        type: group
+        excludes:
+          - "Assets.xcassets"
+      - path: FlyBrain/Assets.xcassets
+        type: folder
+        buildPhase: resources
+```
+
+Wait -- XcodeGen with `type: group` should automatically handle `.xcassets` as resources. The issue is the hand-maintained `.pbxproj` not having a resources build phase. Since `project.yml` exists and XcodeGen was used to generate the project, the builder should re-run XcodeGen after adding the assets to regenerate the `.pbxproj` with proper build phases.
+
+**Revised approach**: Do NOT manually edit `.pbxproj`. Instead, after creating all asset files, run `xcodegen generate` from the `ios/` directory to regenerate `.pbxproj`. This will automatically add the Assets.xcassets to a Resources build phase.
+
+### 9. MODIFY `ios/FlyBrain.xcodeproj/project.pbxproj` (via XcodeGen regeneration)
+- operation: MODIFY (automatic -- via running `xcodegen generate`)
+- reason: The current .pbxproj has no PBXResourcesBuildPhase, so Assets.xcassets won't be compiled into the app bundle. Regenerating from project.yml with the new asset catalog in place will add the proper build phases.
+- anchor: N/A (regenerated entirely)
+
+#### Steps
+1. Check if `xcodegen` is installed: `which xcodegen`
+2. If available: `cd ios && xcodegen generate`
+3. If NOT available: manually add these sections to `project.pbxproj`:
+
+**Manual .pbxproj edits (only if xcodegen is unavailable):**
+
+Add to `PBXFileReference section`:
+```
+		AA000001000000000000001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+```
+
+Add `AA000001000000000000001 /* Assets.xcassets */,` to the FlyBrain group children (after `91A09BBBE9C48B988915F03D /* Info.plist */,`):
+```
+			B8EEAB892B081557566A14BB /* FlyBrain */ = {
+				isa = PBXGroup;
+				children = (
+					AA000001000000000000001 /* Assets.xcassets */,
+					9E8070875B6BC05A09AB1F20 /* ContentView.swift */,
+					A948A5CD778FD0FDC1CFC702 /* FlyBrainApp.swift */,
+					91A09BBBE9C48B988915F03D /* Info.plist */,
+				);
+```
+
+Add a new `PBXResourcesBuildPhase section` before `PBXShellScriptBuildPhase`:
+```
+/* Begin PBXResourcesBuildPhase section */
+		AA000002000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA000003000000000000001 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+```
+
+Add a PBXBuildFile entry:
+```
+		AA000003000000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA000001000000000000001 /* Assets.xcassets */; };
+```
+
+Add `AA000002000000000000001 /* Resources */,` to the target's buildPhases array, BEFORE the Sources phase:
+```
+			buildPhases = (
+				AA000002000000000000001 /* Resources */,
+				53BE5A6DDB27A8C541627024 /* Sources */,
+				BEE1DBE999BF872436D030FB /* Copy Web Assets */,
+			);
+```
+
+### 10. CREATE `metadata/appstore.md`
+- operation: CREATE
+- reason: App Store submission reference document with description, keywords, and screenshots checklist
+
+#### Content (exact markdown)
+
+```markdown
+# FlyBrain - App Store Metadata
+
+## App Name
+FlyBrain
+
+## Subtitle (30 chars max)
+Virtual Fruit Fly Brain Sim
+
+## Category
+Education
+
+## Price
+Free
+
+## Description
+
+FlyBrain is an interactive simulation of a fruit fly (Drosophila melanogaster) driven by a simplified connectome of 139,000 neurons. Watch a virtual fly respond to stimuli with biologically plausible behaviors that emerge from real neural signal propagation -- not scripted animations.
+
+Feed it, touch it, blow air on it, or change the light. The fly's internal drives (hunger, fear, fatigue, curiosity) shift its behavior between walking, grooming, feeding, flying, resting, and exploring. Every response is computed by signal flow through weighted neural connections modeled after the FlyWire FAFB connectome.
+
+Features:
+- 139,000-neuron connectome running in real time via Web Workers
+- Interactive tools: feed, touch, air, light, temperature
+- Live neuron firing visualization panel (color-coded by brain region)
+- 3D brain view showing the connectome in three dimensions
+- Internal drive meters (hunger, fear, fatigue, curiosity)
+- Education panel explaining each brain region's role
+- Fully offline after install -- no network requests, no tracking, no data collection
+
+Built for neuroscience enthusiasts, students, educators, and anyone curious about how a tiny brain produces complex behavior.
+
+## Keywords (100 chars max)
+neuroscience,connectome,drosophila,brain,simulation,fly,biology,education,neurons,interactive
+
+## Privacy Policy URL
+N/A (no data collected -- declare "Data Not Collected" in App Store Connect)
+
+## App Store Privacy Details
+- Data Not Collected
+- No tracking
+- No third-party analytics
+- No network requests after install
+
+## Screenshots Checklist
+- [ ] 6.7" (iPhone 15 Pro Max) -- 1290 x 2796 or 2796 x 1290
+  - [ ] Main canvas with fly walking (portrait)
+  - [ ] Feeding interaction with food on canvas (portrait)
+  - [ ] Neuron panel open showing firing activity (portrait)
+  - [ ] 3D brain view (landscape)
+  - [ ] Education panel open (portrait)
+- [ ] 6.5" (iPhone 14 Plus) -- 1284 x 2778 or 2778 x 1284
+  - [ ] Same set as 6.7"
+- [ ] 5.5" (iPhone 8 Plus) -- 1242 x 2208 or 2208 x 1242 (optional but recommended)
+  - [ ] Same set as 6.7"
+
+## App Review Notes
+This app is fully offline. It loads a bundled HTML/JS/CSS simulation in a WKWebView. There are no network requests, no user accounts, no in-app purchases, and no external dependencies. The simulation runs entirely on-device using Web Workers for the neural computation. No camera or microphone access is needed.
+
+## Version
+1.0.0
+
+## Copyright
+2026 snedea
+
+## Support URL
+https://github.com/snedea/homelab/tree/master/flybrain
+```
 
 ## Verification
-- build: Open `index.html` in a desktop browser. Verify the page loads without JS console errors. Resize the window below 768px width and verify: hamburger button appears, toolbar compresses, bottom panel is hidden (not visible until hamburger tapped), canvas fills viewport.
-- lint: No linter configured (vanilla JS project). Manually verify no syntax errors by checking the browser console.
-- test: Run `node tests/run-node.js` from the project root. All existing 69+ tests must pass. The tests exercise brain-worker-bridge, connectome, and fly-logic -- not UI code, so they should be unaffected.
-- smoke:
-  1. Desktop (> 768px): Page looks identical to before. Toolbar is 44px. Bottom panel shows. Brain 3D overlay fills between toolbar and panel. No hamburger visible. No Lite button visible.
-  2. Mobile portrait (< 768px or Chrome DevTools iPhone emulator): Hamburger visible. Bottom panel hidden (slid down). Tap hamburger -> panel slides up from bottom with handle. Tap backdrop -> panel closes. Toolbar is compact (36px). Hidden items (GitHub, center, clear) not visible. Canvas fills full viewport.
-  3. Mobile landscape (< 500px height): Panel slides in from right side instead of bottom.
-  4. Touch: On canvas, verify touch-action:none prevents iOS scroll/zoom. Touch events for Feed/Touch/Air work.
-  5. Safe areas: In iPhone simulator with notch, toolbar does not sit under the notch, bottom panel does not sit under the home indicator.
-  6. Lite mode: On mobile, tap Lite button. Verify it gets active class. Brain tick slows to 1Hz. Neuro-renderer skips idle frames. Tap again to deactivate.
-  7. 3D Brain: Verify OrbitControls touch works natively (single-finger rotate, pinch zoom). Overlay fills to bottom on mobile.
-  8. Xcode: Build the iOS target in Xcode and run in iPhone 15 Pro simulator. Status bar shows white text. WebView background matches --bg color during load.
+
+### Build verification
+```bash
+# Check if xcodegen is available and regenerate project
+which xcodegen && (cd ios && xcodegen generate) || echo "xcodegen not available -- manual pbxproj edits required"
+```
+
+```bash
+# Verify asset catalog structure
+ls -la ios/FlyBrain/Assets.xcassets/AppIcon.appiconset/app-icon-1024.png
+ls -la ios/FlyBrain/Assets.xcassets/AppIcon.appiconset/Contents.json
+ls -la ios/FlyBrain/Assets.xcassets/LaunchBG.colorset/Contents.json
+ls -la ios/FlyBrain/Assets.xcassets/Contents.json
+```
+
+```bash
+# Verify PNG is valid (should output "PNG image data, 1024 x 1024")
+file ios/FlyBrain/Assets.xcassets/AppIcon.appiconset/app-icon-1024.png
+```
+
+```bash
+# Verify SVG source exists
+file svg/app-icon.svg
+```
+
+```bash
+# Verify metadata file exists
+test -f metadata/appstore.md && echo "OK" || echo "MISSING"
+```
+
+```bash
+# Verify Info.plist is valid XML
+plutil -lint ios/FlyBrain/Info.plist
+```
+
+```bash
+# Verify the .pbxproj includes Assets.xcassets (either via xcodegen or manual edit)
+grep -c "Assets.xcassets" ios/FlyBrain.xcodeproj/project.pbxproj
+```
+
+```bash
+# Build the project (if Xcode CLI tools are available)
+xcodebuild -project ios/FlyBrain.xcodeproj -scheme FlyBrain -destination 'platform=iOS Simulator,name=iPhone 16 Pro' -configuration Debug build 2>&1 | tail -5
+```
+
+- build: `xcodebuild -project ios/FlyBrain.xcodeproj -scheme FlyBrain -destination 'platform=iOS Simulator,name=iPhone 16 Pro' -configuration Debug build`
+- lint: `plutil -lint ios/FlyBrain/Info.plist`
+- test: no existing tests for the iOS shell
+- smoke: Verify `app-icon-1024.png` exists and is 1024x1024, verify `metadata/appstore.md` contains "FlyBrain", verify Info.plist contains `ITSAppUsesNonExemptEncryption`
 
 ## Constraints
-- Do NOT modify SPEC.md, TASKS.md, CLAUDE.md, or any files in .buildloop/ (other than this plan)
-- Do NOT add new JS dependencies or external libraries
-- Do NOT change the desktop layout when viewport is wider than 768px (except adding safe-area env() which returns 0 on desktop browsers)
-- Do NOT modify the sim-worker.js tick rate -- Lite mode only affects the main-thread brain tick interval and the neuro-renderer frame skipping
-- Do NOT modify js/brain3d.js -- OrbitControls already handles touch natively in the vendored v0.128.0
-- Do NOT modify js/education.js -- the education panel CSS changes handle mobile layout
-- Preserve all existing touch event handlers in js/main.js (lines 622-642) -- they already use `{ passive: false }` and `event.preventDefault()`. Only add CSS `touch-action: none` as a complementary layer.
-- The `#brain3d-overlay` bottom value must remain `210px` on desktop (for the fixed bottom panel) but become `0` on mobile via the media query
-- Cache-busting: bump `?v=7` to `?v=8` on all script/CSS tags in index.html to ensure iOS WKWebView loads the updated files
+
+- Do NOT create a `LaunchScreen.storyboard` file. The `UILaunchScreen` dictionary in Info.plist is the modern replacement and is already in use.
+- Do NOT modify `ios/FlyBrain/ContentView.swift` or `ios/FlyBrain/FlyBrainApp.swift`.
+- Do NOT modify any web files (`css/`, `js/`, `index.html`).
+- Do NOT modify SPEC.md, TASKS.md, or CLAUDE.md.
+- Do NOT add any third-party dependencies.
+- The PNG icon MUST be exactly 1024x1024 pixels. Verify with `file` or `sips -g pixelWidth -g pixelHeight`.
+- If xcodegen is available, use it to regenerate `.pbxproj`. If not, manually edit `.pbxproj` as specified in step 9.
+- The `metadata/` directory is at the project root (`/Users/name/homelab/flybrain/metadata/`), not inside `ios/`.
+- All colors must come from the CSS custom properties listed in the Context section. No arbitrary hex values.
+- The app icon SVG uses a gradient, which is intentional and acceptable (it is for the icon, not a UI surface background -- the known pattern about no gradients applies to UI backgrounds/cards only).

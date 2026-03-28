@@ -138,13 +138,23 @@ FEAR_BACKOFF: ${IN_BACKOFF}
 Current fly state:
 ${STATE}"
 
-  RESPONSE=$(command claude -p \
+  RAW_RESPONSE=$(command claude -p \
     --system-prompt "$POLICY_CONTENT" \
     --no-session-persistence \
     --model haiku \
-    --max-budget-usd 0.01 \
+    --output-format json \
+    --max-budget-usd 0.50 \
     "$PROMPT" \
     2>/dev/null) || true
+
+  # Extract the result text from claude's JSON envelope, then parse as our action JSON
+  RESPONSE=$(echo "$RAW_RESPONSE" | jq -r '.result // empty' 2>/dev/null | jq '.' 2>/dev/null) || true
+
+  if [[ -z "$RESPONSE" || "$RESPONSE" == "null" ]]; then
+    echo "[caretaker] Could not parse response, skipping" >&2
+    echo "[caretaker] Raw: $(echo "$RAW_RESPONSE" | head -c 200)" >&2
+    continue
+  fi
 
   ACTION=$(echo "$RESPONSE" | jq -r '.action' 2>/dev/null)
   if [[ -z "$ACTION" || "$ACTION" == "null" ]]; then

@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="brainFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#16213e"/>
+      <stop offset="100%" stop-color="#1a2744"/>
+    </linearGradient>
+    <clipPath id="roundedBg">
+      <rect width="1024" height="1024" rx="224" ry="224"/>
+    </clipPath>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1024" height="1024" rx="224" ry="224" fill="#1a1a2e"/>
+
+  <g clip-path="url(#roundedBg)">
+    <!-- Brain silhouette: top-down Drosophila brain -->
+    <!-- Two mushroom body lobes (top), optic lobes (sides), central body -->
+    <path d="
+      M 512 180
+      C 420 180, 340 220, 310 300
+      C 280 370, 240 380, 180 370
+      C 140 365, 110 400, 110 450
+      C 110 520, 160 570, 230 560
+      C 280 555, 310 580, 330 640
+      C 350 700, 400 760, 440 800
+      C 470 830, 500 845, 512 850
+      C 524 845, 554 830, 584 800
+      C 624 760, 674 700, 694 640
+      C 714 580, 744 555, 794 560
+      C 864 570, 914 520, 914 450
+      C 914 400, 884 365, 844 370
+      C 784 380, 744 370, 714 300
+      C 684 220, 604 180, 512 180
+      Z"
+      fill="url(#brainFill)"
+      stroke="#2a3a5c"
+      stroke-width="4"
+    />
+
+    <!-- Mushroom body lobes (two top bulges) -->
+    <ellipse cx="410" cy="280" rx="80" ry="60" fill="url(#brainFill)" stroke="#2a3a5c" stroke-width="2.5"/>
+    <ellipse cx="614" cy="280" rx="80" ry="60" fill="url(#brainFill)" stroke="#2a3a5c" stroke-width="2.5"/>
+
+    <!-- Neural pathway lines -->
+    <!-- Sensory: optic tract from left optic lobe to center -->
+    <path d="M 180 450 Q 280 440, 380 380 Q 440 340, 480 320" fill="none" stroke="#3b82f6" stroke-width="2" opacity="0.7"/>
+    <!-- Sensory: optic tract from right optic lobe to center -->
+    <path d="M 844 450 Q 744 440, 644 380 Q 584 340, 544 320" fill="none" stroke="#3b82f6" stroke-width="2" opacity="0.7"/>
+
+    <!-- Central: mushroom body connections -->
+    <path d="M 410 310 Q 430 380, 470 440 Q 500 480, 512 520" fill="none" stroke="#8b5cf6" stroke-width="2" opacity="0.7"/>
+    <path d="M 614 310 Q 594 380, 554 440 Q 524 480, 512 520" fill="none" stroke="#8b5cf6" stroke-width="2" opacity="0.7"/>
+
+    <!-- Drives: central descending -->
+    <path d="M 512 320 L 512 520 Q 512 600, 512 680" fill="none" stroke="#f59e0b" stroke-width="2" opacity="0.7"/>
+
+    <!-- Motor: output pathway -->
+    <path d="M 512 680 Q 490 740, 470 790" fill="none" stroke="#ef4444" stroke-width="2" opacity="0.7"/>
+    <path d="M 512 680 Q 534 740, 554 790" fill="none" stroke="#ef4444" stroke-width="2" opacity="0.7"/>
+
+    <!-- Neuron dots along pathways -->
+    <!-- Sensory neurons (blue) -->
+    <circle cx="230" cy="450" r="10" fill="#3b82f6" opacity="0.85"/>
+    <circle cx="380" cy="385" r="8" fill="#3b82f6" opacity="0.85"/>
+    <circle cx="794" cy="450" r="10" fill="#3b82f6" opacity="0.85"/>
+    <circle cx="644" cy="385" r="8" fill="#3b82f6" opacity="0.85"/>
+
+    <!-- Central neurons (purple) -->
+    <circle cx="420" cy="350" r="9" fill="#8b5cf6" opacity="0.85"/>
+    <circle cx="604" cy="350" r="9" fill="#8b5cf6" opacity="0.85"/>
+    <circle cx="480" cy="440" r="8" fill="#8b5cf6" opacity="0.85"/>
+    <circle cx="544" cy="440" r="8" fill="#8b5cf6" opacity="0.85"/>
+
+    <!-- Drive neurons (amber) -->
+    <circle cx="512" cy="420" r="10" fill="#f59e0b" opacity="0.85"/>
+    <circle cx="512" cy="580" r="9" fill="#f59e0b" opacity="0.85"/>
+
+    <!-- Motor neurons (red) -->
+    <circle cx="480" cy="760" r="9" fill="#ef4444" opacity="0.85"/>
+    <circle cx="544" cy="760" r="9" fill="#ef4444" opacity="0.85"/>
+    <circle cx="512" cy="700" r="8" fill="#ef4444" opacity="0.85"/>
+  </g>
+</svg>

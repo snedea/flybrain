@@ -83,6 +83,8 @@
     ws.onopen = function() {
       connected = true;
       if (typeof CaretakerRenderer !== 'undefined') { CaretakerRenderer.setConnected(true); }
+      var statusEl = document.getElementById('claudeStatus');
+      if (statusEl) statusEl.style.display = '';
       console.log('[caretaker] Connected to ' + WS_URL);
       stateTimer = setInterval(sendState, STATE_INTERVAL);
       sendState();
@@ -91,6 +93,8 @@
     ws.onclose = function() {
       connected = false;
       if (typeof CaretakerRenderer !== 'undefined') { CaretakerRenderer.setConnected(false); }
+      var statusEl = document.getElementById('claudeStatus');
+      if (statusEl) statusEl.style.display = 'none';
       if (stateTimer !== null) { clearInterval(stateTimer); stateTimer = null; }
       console.log('[caretaker] Disconnected, reconnecting in ' + (RECONNECT_DELAY / 1000) + 's');
       reconnectTimer = setTimeout(connect, RECONNECT_DELAY);

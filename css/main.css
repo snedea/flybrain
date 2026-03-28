@@ -274,8 +274,42 @@ canvas {
 
 .tool-btn.claude-highlight {
     border-color: #E3734B;
-    box-shadow: 0 0 8px rgba(227, 115, 75, 0.4);
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    background: rgba(227, 115, 75, 0.15);
+    color: #E3734B;
+    box-shadow: 0 0 10px rgba(227, 115, 75, 0.5);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.claude-status {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: var(--radius);
+    border: 1px solid #E3734B;
+    background: rgba(227, 115, 75, 0.1);
+    font-family: system-ui, -apple-system, sans-serif;
+    cursor: default;
+}
+
+.claude-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #E3734B;
+    animation: claude-pulse 2s ease-in-out infinite;
+}
+
+.claude-status-text {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #E3734B;
+    letter-spacing: 0.05em;
+}
+
+@keyframes claude-pulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 4px #E3734B; }
+    50% { opacity: 0.5; box-shadow: none; }
 }
 
 /* --- Bottom Panel --- */

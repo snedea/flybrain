@@ -7,11 +7,13 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		080B9F6361577D3A52FBC40D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0F1E58AC7D5317CE6ED75E20 /* Assets.xcassets */; };
 		0C26E0309B7B9F6059595BC9 /* FlyBrainApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A948A5CD778FD0FDC1CFC702 /* FlyBrainApp.swift */; };
 		8141AC74B5C5108429B9F8E1 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E8070875B6BC05A09AB1F20 /* ContentView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		0F1E58AC7D5317CE6ED75E20 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		5B926E404E42DDA201887AC5 /* FlyBrain.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = FlyBrain.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		91A09BBBE9C48B988915F03D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		9E8070875B6BC05A09AB1F20 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -38,6 +40,7 @@
 		B8EEAB892B081557566A14BB /* FlyBrain */ = {
 			isa = PBXGroup;
 			children = (
+				0F1E58AC7D5317CE6ED75E20 /* Assets.xcassets */,
 				9E8070875B6BC05A09AB1F20 /* ContentView.swift */,
 				A948A5CD778FD0FDC1CFC702 /* FlyBrainApp.swift */,
 				91A09BBBE9C48B988915F03D /* Info.plist */,
@@ -53,6 +56,7 @@
 			buildConfigurationList = FA7C757DD71DD79670349BF0 /* Build configuration list for PBXNativeTarget "FlyBrain" */;
 			buildPhases = (
 				53BE5A6DDB27A8C541627024 /* Sources */,
+				A3DEFADF96B5E56307B4E426 /* Resources */,
 				BEE1DBE999BF872436D030FB /* Copy Web Assets */,
 			);
 			buildRules = (
@@ -95,6 +99,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A3DEFADF96B5E56307B4E426 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				080B9F6361577D3A52FBC40D /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
 		BEE1DBE999BF872436D030FB /* Copy Web Assets */ = {
