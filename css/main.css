@@ -76,6 +76,7 @@ canvas {
     display: block;
     background-color: #222;
     transition: background-color 0.5s ease;
+    touch-action: none;
 }
 
 .brainNode {
@@ -205,14 +206,17 @@ canvas {
     left: 0;
     right: 0;
     height: 44px;
+    padding-top: env(safe-area-inset-top, 0px);
     background: var(--surface-alpha);
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 1rem;
+    padding-left: max(1rem, env(safe-area-inset-left, 0px));
+    padding-right: max(1rem, env(safe-area-inset-right, 0px));
     z-index: 20;
     font-family: system-ui, -apple-system, sans-serif;
+    box-sizing: content-box;
 }
 
 .toolbar-left {
@@ -281,14 +285,18 @@ canvas {
     right: 0;
     bottom: 0;
     height: 210px;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
     background: var(--surface-alpha);
     border-top: 1px solid var(--border);
     display: flex;
     flex-direction: row;
     z-index: 20;
-    padding: 0.3rem 0.5rem;
+    padding-top: 0.3rem;
+    padding-left: max(0.5rem, env(safe-area-inset-left, 0px));
+    padding-right: max(0.5rem, env(safe-area-inset-right, 0px));
     overflow: hidden;
     gap: 0.5rem;
+    box-sizing: content-box;
 }
 
 #bottom-panel {
@@ -521,7 +529,7 @@ canvas {
 /* --- Brain 3D Overlay --- */
 #brain3d-overlay {
     position: fixed;
-    top: 44px;
+    top: calc(44px + env(safe-area-inset-top, 0px));
     left: 0;
     right: 0;
     bottom: 210px;
@@ -862,4 +870,203 @@ canvas {
 
 .edu-links a:hover {
     color: var(--accent-hover);
+}
+
+/* --- Hamburger toggle (hidden on desktop) --- */
+#sidebarToggle {
+    display: none;
+    font-size: 1.2rem;
+    padding: 0.25rem 0.5rem;
+    line-height: 1;
+}
+
+/* --- Lite mode button (hidden on desktop) --- */
+#liteBtn {
+    display: none;
+}
+
+#liteBtn.active {
+    border-color: var(--accent);
+    background: var(--accent-subtle);
+    color: var(--accent);
+}
+
+/* --- Drawer backdrop --- */
+.drawer-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 19;
+}
+
+.drawer-backdrop.visible {
+    display: block;
+}
+
+/* ========================================
+   MOBILE LAYOUT (max-width: 768px)
+   ======================================== */
+@media (max-width: 768px) {
+    /* --- Hamburger visible on mobile --- */
+    #sidebarToggle {
+        display: inline-block;
+    }
+
+    /* --- Lite button visible on mobile --- */
+    #liteBtn {
+        display: inline-block;
+    }
+
+    /* --- Compact toolbar: smaller buttons, tighter spacing --- */
+    #toolbar {
+        height: 36px;
+        padding-left: max(0.5rem, env(safe-area-inset-left, 0px));
+        padding-right: max(0.5rem, env(safe-area-inset-right, 0px));
+    }
+
+    .toolbar-left {
+        gap: 0.25rem;
+    }
+
+    .toolbar-right {
+        gap: 0.35rem;
+    }
+
+    .tool-btn {
+        padding: 0.2rem 0.5rem;
+        font-size: 0.7rem;
+    }
+
+    .toolbar-title {
+        font-size: 0.75rem;
+    }
+
+    /* Hide non-essential toolbar items on mobile */
+    #centerButton,
+    #clearButton,
+    #githubButton,
+    #scaleIndicator {
+        display: none !important;
+    }
+
+    /* Also hide the GitHub link anchor */
+    .toolbar-right a {
+        display: none;
+    }
+
+    /* --- Bottom panel becomes a slide-up drawer --- */
+    #left-panel {
+        height: auto;
+        max-height: 50vh;
+        transform: translateY(100%);
+        transition: transform 0.3s ease;
+        border-radius: var(--radius) var(--radius) 0 0;
+        flex-direction: column;
+        padding-top: 0.5rem;
+        z-index: 21;
+    }
+
+    #left-panel.drawer-open {
+        transform: translateY(0);
+    }
+
+    /* Drawer handle indicator */
+    #left-panel::before {
+        content: '';
+        display: block;
+        width: 40px;
+        height: 4px;
+        background: var(--border);
+        border-radius: 2px;
+        margin: 0 auto 0.5rem auto;
+        flex-shrink: 0;
+    }
+
+    /* Drive meters sit below connectome instead of beside */
+    #drive-meters {
+        width: auto;
+        border-left: none;
+        border-top: 1px solid var(--border);
+        padding-left: 0;
+        padding-top: 0.5rem;
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 0.25rem 1rem;
+    }
+
+    .drive-row {
+        flex: 1 1 40%;
+        min-width: 100px;
+    }
+
+    /* --- Brain 3D overlay goes edge-to-edge on mobile --- */
+    #brain3d-overlay {
+        bottom: 0 !important;
+    }
+
+    /* --- Education panel full-width on mobile --- */
+    .education-panel {
+        width: 100%;
+        max-width: 100vw;
+        top: calc(36px + env(safe-area-inset-top, 0px));
+    }
+
+    /* --- Help overlay repositioned for compact toolbar --- */
+    .help-overlay {
+        top: calc(46px + env(safe-area-inset-top, 0px));
+    }
+}
+
+/* ========================================
+   LANDSCAPE on mobile devices
+   ======================================== */
+@media (orientation: landscape) and (max-height: 500px) {
+    #toolbar {
+        height: 32px;
+    }
+
+    .tool-btn {
+        padding: 0.15rem 0.4rem;
+        font-size: 0.65rem;
+    }
+
+    /* In landscape, neuron panel sits beside canvas on right side */
+    #left-panel {
+        left: auto;
+        right: 0;
+        top: calc(32px + env(safe-area-inset-top, 0px));
+        bottom: 0;
+        width: 280px;
+        max-height: none;
+        height: auto;
+        transform: translateX(100%);
+        transition: transform 0.3s ease;
+        flex-direction: column;
+        border-top: none;
+        border-left: 1px solid var(--border);
+        border-radius: 0;
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+
+    #left-panel.drawer-open {
+        transform: translateX(0);
+    }
+
+    #left-panel::before {
+        display: none;
+    }
+
+    #drive-meters {
+        border-top: 1px solid var(--border);
+        flex-direction: column;
+        flex-wrap: nowrap;
+        width: auto;
+        padding-top: 0.5rem;
+    }
+
+    .drive-row {
+        flex: none;
+        min-width: 0;
+    }
 }

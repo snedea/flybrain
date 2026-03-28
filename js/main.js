@@ -27,6 +27,29 @@ var windResetTime = 0;
 var dragToolOrigin = null;
 var currentDtScale = 1;
 
+// --- Layout helpers (mobile-aware) ---
+function isMobile() {
+	return window.innerWidth <= 768;
+}
+
+function getLayoutBounds() {
+	var toolbar = document.getElementById('toolbar');
+	var panel = document.getElementById('left-panel');
+	var topH = toolbar ? toolbar.offsetHeight : 44;
+	var bottomH = 0;
+	if (panel && !isMobile()) {
+		bottomH = panel.offsetHeight;
+	} else if (panel && panel.classList.contains('drawer-open')) {
+		bottomH = panel.offsetHeight;
+	}
+	return {
+		top: topH,
+		bottom: window.innerHeight - bottomH,
+		left: 0,
+		right: window.innerWidth
+	};
+}
+
 // Visual feedback effects
 var ripples = [];
 var windArrowEnd = null;
@@ -424,6 +447,68 @@ document.addEventListener('click', function (e) {
     }
 });
 
+// --- Mobile drawer toggle ---
+var sidebarToggle = document.getElementById('sidebarToggle');
+var leftPanel = document.getElementById('left-panel');
+var drawerBackdrop = document.getElementById('drawer-backdrop');
+
+function openDrawer() {
+	if (leftPanel) leftPanel.classList.add('drawer-open');
+	if (drawerBackdrop) drawerBackdrop.classList.add('visible');
+	document.body.style.overflow = 'hidden';
+}
+
+function closeDrawer() {
+	if (leftPanel) leftPanel.classList.remove('drawer-open');
+	if (drawerBackdrop) drawerBackdrop.classList.remove('visible');
+	document.body.style.overflow = '';
+}
+
+if (sidebarToggle) {
+	sidebarToggle.addEventListener('click', function (e) {
+		e.stopPropagation();
+		if (leftPanel && leftPanel.classList.contains('drawer-open')) {
+			closeDrawer();
+		} else {
+			openDrawer();
+		}
+	});
+}
+
+if (drawerBackdrop) {
+	drawerBackdrop.addEventListener('click', function () {
+		closeDrawer();
+	});
+}
+
+// --- Lite mode toggle ---
+var liteBtn = document.getElementById('liteBtn');
+var liteModeActive = false;
+
+if (liteBtn) {
+	liteBtn.addEventListener('click', function () {
+		liteModeActive = !liteModeActive;
+		if (liteModeActive) {
+			liteBtn.classList.add('active');
+			// Slow down brain tick from 500ms (2Hz) to 1000ms (1Hz)
+			clearInterval(brainTickId);
+			brainTickId = setInterval(updateBrain, 1000);
+			// Tell neuro-renderer to skip idle frames
+			if (typeof NeuroRenderer !== 'undefined') {
+				NeuroRenderer.setLiteMode(true);
+			}
+		} else {
+			liteBtn.classList.remove('active');
+			// Restore brain tick to 500ms (2Hz)
+			clearInterval(brainTickId);
+			brainTickId = setInterval(updateBrain, 500);
+			if (typeof NeuroRenderer !== 'undefined') {
+				NeuroRenderer.setLiteMode(false);
+			}
+		}
+	});
+}
+
 // --- Connectome panel toggle ---
 var connectomeToggleBtn = document.getElementById('connectomeToggleBtn');
 var nodeHolder = document.getElementById('nodeHolder');
@@ -606,7 +691,7 @@ document.addEventListener('visibilitychange', function () {
 		BRAIN.startWorker();
 
 		// Restart the brain tick
-		brainTickId = setInterval(updateBrain, 500);
+		brainTickId = setInterval(updateBrain, liteModeActive ? 1000 : 500);
 	}
 });
 
@@ -646,7 +731,7 @@ function handleCanvasMousedown(event) {
 	var cy = event.clientY;
 
 	if (activeTool === 'feed') {
-		var foodMinY = 44;
+		var foodMinY = getLayoutBounds().top;
 		var foodMaxY = window.innerHeight;
 		cy = Math.max(foodMinY, Math.min(foodMaxY, cy));
 		food.push({ x: cx, y: cy, radius: 10, feedStart: 0, feedDuration: 0, eaten: 0 });
@@ -1673,8 +1758,9 @@ function update(dt) {
 	var edgeMargin = 50;
 	var edgeBias = 0;
 	var edgeBiasY = 0;
-	var topBound = 44;
-	var bottomBound = window.innerHeight - 210;
+	var bounds = getLayoutBounds();
+	var topBound = bounds.top;
+	var bottomBound = bounds.bottom;
 	var leftBound = 0;
 	var rightBound = window.innerWidth;
 
@@ -1857,11 +1943,11 @@ function draw() {
 	// near old edges don't become unreachable after window shrinks
 	for (var i = 0; i < food.length; i++) {
 		food[i].x = Math.max(0, Math.min(food[i].x, window.innerWidth));
-		food[i].y = Math.max(44, Math.min(food[i].y, window.innerHeight));
+		food[i].y = Math.max(getLayoutBounds().top, Math.min(food[i].y, window.innerHeight));
 	}
 	// Also re-clamp the fly position to the new bounds
 	fly.x = Math.max(0, Math.min(fly.x, window.innerWidth));
-	fly.y = Math.max(44, Math.min(fly.y, window.innerHeight));
+	fly.y = Math.max(getLayoutBounds().top, Math.min(fly.y, window.innerHeight));
 	window.addEventListener('resize', resize);
 })();
 

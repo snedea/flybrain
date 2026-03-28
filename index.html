@@ -1,14 +1,15 @@
 <!DOCTYPE html>
 
 <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>FlyBrain</title>
-    <link rel="stylesheet" type="text/css" href="./css/main.css?v=7">
+    <link rel="stylesheet" type="text/css" href="./css/main.css?v=9">
 </head>
 
 <body>
     <div id="toolbar">
         <div class="toolbar-left">
+            <button class="tool-btn sidebar-toggle" id="sidebarToggle" aria-label="Toggle panel">&#9776;</button>
             <button class="tool-btn active" data-tool="feed">Feed</button>
             <button class="tool-btn" data-tool="touch">Touch</button>
             <button class="tool-btn" data-tool="air">Air</button>
@@ -17,6 +18,7 @@
             <button class="tool-btn" id="brain3dBtn" aria-pressed="false">Brain 3D</button>
             <button class="tool-btn" id="learnBtn">Learn</button>
             <button class="tool-btn" id="helpBtn">?</button>
+            <button class="tool-btn" id="liteBtn">Lite</button>
         </div>
         <div class="toolbar-right">
             <span class="toolbar-title">FlyBrain</span>
@@ -76,6 +78,7 @@
             </div>
         </div>
     </div>
+    <div id="drawer-backdrop" class="drawer-backdrop"></div>
     <canvas id='canvas'></canvas>
     <div id="education-panel" class="education-panel" style="display:none;">
         <div class="education-panel-header">
@@ -89,16 +92,16 @@
     <!-- Three.js v0.128.0 (vendored) -- do NOT upgrade one without the other -->
     <script src="./js/vendor/three.min.js"></script>
     <script src="./js/vendor/OrbitControls.js"></script>
-    <script type="text/javascript" src="./js/constants.js?v=7"></script>
-    <script type="text/javascript" src="./js/connectome.js?v=7"></script>
-    <script type="text/javascript" src="./js/brain-worker-bridge.js?v=7"></script>
-    <script type="text/javascript" src="./js/neuro-renderer.js?v=7"></script>
-    <script type="text/javascript" src="./js/fly-logic.js?v=7"></script>
-    <script type="text/javascript" src="./js/brain3d.js?v=7"></script>
-    <script type="text/javascript" src="./js/education.js?v=7"></script>
-    <script type="text/javascript" src="./js/main.js?v=7"></script>
-    <script type="text/javascript" src="./js/caretaker-renderer.js?v=7"></script>
-    <script type="text/javascript" src="./js/caretaker-bridge.js?v=7"></script>
+    <script type="text/javascript" src="./js/constants.js?v=9"></script>
+    <script type="text/javascript" src="./js/connectome.js?v=9"></script>
+    <script type="text/javascript" src="./js/brain-worker-bridge.js?v=9"></script>
+    <script type="text/javascript" src="./js/neuro-renderer.js?v=9"></script>
+    <script type="text/javascript" src="./js/fly-logic.js?v=9"></script>
+    <script type="text/javascript" src="./js/brain3d.js?v=9"></script>
+    <script type="text/javascript" src="./js/education.js?v=9"></script>
+    <script type="text/javascript" src="./js/main.js?v=9"></script>
+    <script type="text/javascript" src="./js/caretaker-renderer.js?v=9"></script>
+    <script type="text/javascript" src="./js/caretaker-bridge.js?v=9"></script>
 </body>
 
 </html>

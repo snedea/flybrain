@@ -80,10 +80,16 @@
 
   function setConnected(isConnected) {
     caretakerConnected = isConnected;
-    if (isConnected && idleStart === 0) {
-      idleStart = Date.now();
-    }
-    if (!isConnected) {
+    if (isConnected) {
+      if (idleStart === 0) idleStart = Date.now();
+      // Default attention to fly position so cursor is visible immediately
+      if (attentionX < 0 && typeof fly !== 'undefined') {
+        attentionX = fly.x;
+        attentionY = fly.y;
+        attentionTargetX = fly.x;
+        attentionTargetY = fly.y;
+      }
+    } else {
       attentionX = -1;
       attentionY = -1;
       trail = [];
@@ -99,7 +105,18 @@
   }
 
   function update(dt) {
-    if (!caretakerConnected || attentionX < 0) return;
+    if (!caretakerConnected) return;
+    // When idle (no recent command), gently follow the fly
+    var idleTime = Date.now() - lastCommandTime;
+    if (idleTime > 2000 && typeof fly !== 'undefined') {
+      attentionTargetX = fly.x + Math.cos(Date.now() * 0.001) * 30;
+      attentionTargetY = fly.y + Math.sin(Date.now() * 0.0007) * 20;
+    }
+    if (attentionX < 0 && typeof fly !== 'undefined') {
+      attentionX = fly.x;
+      attentionY = fly.y;
+    }
+    if (attentionX < 0) return;
     var lerpSpeed = 0.08;
     attentionX += (attentionTargetX - attentionX) * lerpSpeed;
     attentionY += (attentionTargetY - attentionY) * lerpSpeed;

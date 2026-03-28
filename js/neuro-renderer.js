@@ -23,6 +23,8 @@
 	var SECTION_NAMES = ['Sensory', 'Central', 'Drives', 'Motor'];
 	var LABEL_COLORS = ['#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444'];
 	var LABEL_BGS = ['rgba(59,130,246,0.1)', 'rgba(139,92,246,0.1)', 'rgba(245,158,11,0.1)', 'rgba(239,68,68,0.1)'];
+	var liteMode = false;
+	var liteSkipCount = 0;
 
 	var canvas = null;
 	var gl = null;
@@ -432,32 +434,50 @@
 			}
 		}
 
-		gl.bindBuffer(gl.ARRAY_BUFFER, brightnessBuffer);
-		gl.bufferSubData(gl.ARRAY_BUFFER, 0, brightnessData);
+		/* Lite mode: skip GPU update when nothing is firing */
+		var skipDraw = false;
+		if (liteMode) {
+			var maxB = 0;
+			for (var i = 0; i < neuronCount; i++) {
+				if (brightnessData[i] > maxB) maxB = brightnessData[i];
+			}
+			if (maxB < 0.01) {
+				liteSkipCount++;
+				/* Redraw every 30th frame even when idle to prevent stale state */
+				if (liteSkipCount < 30) skipDraw = true;
+			} else {
+				liteSkipCount = 0;
+			}
+		}
 
-		gl.clearColor(0.086, 0.129, 0.243, 1.0);
-		gl.clear(gl.COLOR_BUFFER_BIT);
+		if (!skipDraw) {
+			gl.bindBuffer(gl.ARRAY_BUFFER, brightnessBuffer);
+			gl.bufferSubData(gl.ARRAY_BUFFER, 0, brightnessData);
 
-		gl.useProgram(program);
-		gl.uniform2f(program.u_resolution, canvas.width, canvas.height);
+			gl.clearColor(0.086, 0.129, 0.243, 1.0);
+			gl.clear(gl.COLOR_BUFFER_BIT);
 
-		gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
-		gl.enableVertexAttribArray(program.a_position);
-		gl.vertexAttribPointer(program.a_position, 2, gl.FLOAT, false, 0, 0);
+			gl.useProgram(program);
+			gl.uniform2f(program.u_resolution, canvas.width, canvas.height);
 
-		gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
-		gl.enableVertexAttribArray(program.a_color);
-		gl.vertexAttribPointer(program.a_color, 3, gl.FLOAT, false, 0, 0);
+			gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
+			gl.enableVertexAttribArray(program.a_position);
+			gl.vertexAttribPointer(program.a_position, 2, gl.FLOAT, false, 0, 0);
 
-		gl.bindBuffer(gl.ARRAY_BUFFER, brightnessBuffer);
-		gl.enableVertexAttribArray(program.a_brightness);
-		gl.vertexAttribPointer(program.a_brightness, 1, gl.FLOAT, false, 0, 0);
+			gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+			gl.enableVertexAttribArray(program.a_color);
+			gl.vertexAttribPointer(program.a_color, 3, gl.FLOAT, false, 0, 0);
 
-		gl.bindBuffer(gl.ARRAY_BUFFER, pointSizeBuffer);
-		gl.enableVertexAttribArray(program.a_pointSize);
-		gl.vertexAttribPointer(program.a_pointSize, 1, gl.FLOAT, false, 0, 0);
+			gl.bindBuffer(gl.ARRAY_BUFFER, brightnessBuffer);
+			gl.enableVertexAttribArray(program.a_brightness);
+			gl.vertexAttribPointer(program.a_brightness, 1, gl.FLOAT, false, 0, 0);
 
-		gl.drawArrays(gl.POINTS, 0, neuronCount);
+			gl.bindBuffer(gl.ARRAY_BUFFER, pointSizeBuffer);
+			gl.enableVertexAttribArray(program.a_pointSize);
+			gl.vertexAttribPointer(program.a_pointSize, 1, gl.FLOAT, false, 0, 0);
+
+			gl.drawArrays(gl.POINTS, 0, neuronCount);
+		}
 
 		animFrameId = requestAnimationFrame(renderLoop);
 	}
@@ -534,7 +554,12 @@
 		if (tooltipEl) tooltipEl.style.display = 'none';
 	}
 
-	window.NeuroRenderer = { init: init, destroy: destroy, isActive: isActive };
+	function setLiteMode(enabled) {
+		liteMode = enabled;
+		liteSkipCount = 0;
+	}
+
+	window.NeuroRenderer = { init: init, destroy: destroy, isActive: isActive, setLiteMode: setLiteMode };
 
 	if (typeof BRAIN !== 'undefined' && BRAIN._testMode) {
 		NeuroRenderer._test = {
