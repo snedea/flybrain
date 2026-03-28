@@ -13,7 +13,7 @@
       position: { x: fly.x, y: fly.y, facingDir: facingDir, speed: speed },
       firingStats: { firedNeurons: BRAIN.workerFiredNeurons || 0 },
       food: food.map(function(f) { return { x: f.x, y: f.y, radius: f.radius, eaten: f.eaten }; }),
-      environment: { lightLevel: BRAIN.stimulate.lightLevel, temperature: BRAIN.stimulate.temperature }
+      environment: { lightLevel: lightStateIndex, temperature: tempStateIndex }
     };
   }
 
@@ -44,6 +44,11 @@
           lightStateIndex = li;
           BRAIN.stimulate.lightLevel = lightStates[li];
           document.getElementById('lightBtn').textContent = 'Light: ' + lightLabels[li];
+        } else if (typeof params.level === 'number' && params.level >= 0 && params.level <= 2) {
+          var li2 = params.level;
+          lightStateIndex = li2;
+          BRAIN.stimulate.lightLevel = lightStates[li2];
+          document.getElementById('lightBtn').textContent = 'Light: ' + lightLabels[li2];
         }
         break;
       case 'set_temp':
@@ -52,6 +57,11 @@
           tempStateIndex = ti;
           BRAIN.stimulate.temperature = tempStates[ti];
           document.getElementById('tempBtn').textContent = 'Temp: ' + tempLabels[ti];
+        } else if (typeof params.level === 'number' && params.level >= 0 && params.level <= 2) {
+          var ti2 = params.level;
+          tempStateIndex = ti2;
+          BRAIN.stimulate.temperature = tempStates[ti2];
+          document.getElementById('tempBtn').textContent = 'Temp: ' + tempLabels[ti2];
         }
         break;
       case 'touch':
@@ -103,6 +113,10 @@
   }
 
   function init() {
+    if (location.protocol === 'file:') {
+      console.log('[caretaker] Skipping WebSocket connection in file:// context (iOS/local)');
+      return;
+    }
     if (typeof BRAIN !== 'undefined' && BRAIN.drives) { connect(); return; }
     setTimeout(init, 500);
   }

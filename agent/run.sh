@@ -131,7 +131,7 @@ while true; do
     IN_BACKOFF="true"
   fi
 
-  CURRENT_TIME=$(date +%s%3N)
+  CURRENT_TIME=$(python3 -c "import time; print(int(time.time()*1000))")
   PROMPT="CURRENT_TIME: ${CURRENT_TIME}
 FEAR_BACKOFF: ${IN_BACKOFF}
 

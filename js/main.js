@@ -746,6 +746,16 @@ document.addEventListener('mouseup', handleCanvasMouseup, false);
 
 // --- Touch event handlers (mobile/tablet support) ---
 canvas.addEventListener('touchstart', function (event) {
+	if (event.touches.length === 2) {
+		// Pinch-to-zoom start
+		event.preventDefault();
+		var dx = event.touches[0].clientX - event.touches[1].clientX;
+		var dy = event.touches[0].clientY - event.touches[1].clientY;
+		pinchStartDist = Math.hypot(dx, dy);
+		pinchStartZoom = zoomLevel;
+		canvasTouchActive = false;
+		return;
+	}
 	canvasTouchActive = true;
 	event.preventDefault();
 	var touch = event.touches[0];
@@ -753,12 +763,24 @@ canvas.addEventListener('touchstart', function (event) {
 }, { passive: false });
 
 canvas.addEventListener('touchmove', function (event) {
+	if (event.touches.length === 2) {
+		// Pinch-to-zoom
+		event.preventDefault();
+		var dx = event.touches[0].clientX - event.touches[1].clientX;
+		var dy = event.touches[0].clientY - event.touches[1].clientY;
+		var dist = Math.hypot(dx, dy);
+		var midX = (event.touches[0].clientX + event.touches[1].clientX) / 2;
+		var midY = (event.touches[0].clientY + event.touches[1].clientY) / 2;
+		setZoom(pinchStartZoom * (dist / pinchStartDist), midX, midY);
+		return;
+	}
 	event.preventDefault();
 	var touch = event.touches[0];
 	handleCanvasMousemove({ clientX: touch.clientX, clientY: touch.clientY });
 }, { passive: false });
 
 document.addEventListener('touchend', function (event) {
+	pinchStartDist = 0;
 	if (canvasTouchActive) {
 		event.preventDefault();
 		var touch = event.changedTouches[0];
@@ -767,9 +789,17 @@ document.addEventListener('touchend', function (event) {
 	}
 }, { passive: false });
 
+// --- Scroll wheel zoom ---
+canvas.addEventListener('wheel', function (event) {
+	event.preventDefault();
+	var factor = event.deltaY < 0 ? 1.1 : 0.9;
+	setZoom(zoomLevel * factor, event.clientX, event.clientY);
+}, { passive: false });
+
 function handleCanvasMousedown(event) {
-	var cx = event.clientX;
-	var cy = event.clientY;
+	var world = screenToWorld(event.clientX, event.clientY);
+	var cx = world.x;
+	var cy = world.y;
 
 	if (activeTool === 'feed') {
 		var foodMinY = getLayoutBounds().top;
@@ -1946,6 +1976,15 @@ function draw() {
 	}
 
 	ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+
+	// Apply zoom/pan transform
+	ctx.save();
+	var cx = window.innerWidth / 2;
+	var cy = window.innerHeight / 2;
+	ctx.translate(cx + panX, cy + panY);
+	ctx.scale(zoomLevel, zoomLevel);
+	ctx.translate(-cx, -cy);
+
 	drawFood();
 	drawRipples();
 	drawWindArrow();
@@ -1970,6 +2009,8 @@ function draw() {
 	ctx.fillStyle = 'rgba(255,255,255,0.08)';
 	ctx.fill();
 	if (typeof CaretakerRenderer !== 'undefined') { CaretakerRenderer.drawOverlay(ctx); }
+
+	ctx.restore(); // end zoom/pan transform
 }
 
 // --- Resize (with high-DPI support) ---
