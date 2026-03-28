@@ -1,6 +1,6 @@
 {
-  "task_id": "T8.6",
-  "task_desc": "Left sidebar -- Activity Feed. Add a collapsible left sidebar to the UI with a real-time scrolling activity feed. Feed shows Claude's actions and notable events: \"Placed food at (320, 280) -- hunger was 0.82\", \"Set light to Dim -- fatigue rising\", \"WARNING: fly fear spiked to 0.7\". Each entry: timestamp, action icon, description, reasoning. Color-coded: green = feeding, blue = comfort, yellow = warning, red = incident. Data pulled from actions/incidents tables via WebSocket channel from server. Auto-scrolls, click to expand reasoning. Files: new `js/caretaker-sidebar.js`, `css/main.css` (sidebar layout), `index.html` (sidebar HTML), `server/caretaker.js` (broadcast actions/incidents to sidebar).",
+  "task_id": "T8.7",
+  "task_desc": "Left sidebar -- Chat Box. Add a chat input below the activity feed. User types a question (\"why didn't you feed the fly when it was hungry?\", \"what do you think the fly needs next?\"), it's sent to Claude with relevant database context (last N observations, recent actions, incident history around the time in question). Claude responds with data-backed answers referencing specific timestamps. Chat history persisted in chat_messages table. Files: `js/caretaker-sidebar.js` (chat UI), `server/caretaker.js` (chat endpoint -- queries DB, builds context, calls Claude), `agent/chat-policy.md` (system prompt for chat mode).",
   "completed_stage": "builder",
-  "timestamp": "2026-03-28T02:52:52.355956+00:00"
+  "timestamp": "2026-03-28T03:01:27.381392+00:00"
 }

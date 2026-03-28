@@ -3,7 +3,11 @@ var http = require('http');
 var fs = require('fs');
 var path = require('path');
 var readline = require('readline');
+var Anthropic = require('@anthropic-ai/sdk');
 var dbModule = require('./db');
+var chatPolicyPath = path.join(__dirname, '..', 'agent', 'chat-policy.md');
+var chatPolicyContent = fs.readFileSync(chatPolicyPath, 'utf-8');
+var anthropic = new Anthropic();
 
 var PORT = parseInt(process.env.CARETAKER_PORT, 10) || 7600;
 var caretakerDb = dbModule.openDb();
@@ -109,7 +113,80 @@ function handleStdinCommand(line) {
   }
 }
 
+function buildChatContext(userMessage) {
+  var currentDate = new Date().toISOString().slice(0, 19) + 'Z';
+  var observations = caretakerDb.getRecentObservations(20);
+  var actions = caretakerDb.getRecentActions(20);
+  var incidents = caretakerDb.getRecentIncidents(20);
+  var context = 'Current date: ' + currentDate + '\n\n';
+  context += '## Recent Observations (last ' + observations.length + ')\n\n';
+  if (observations.length === 0) {
+    context += '(none)\n';
+  } else {
+    for (var i = 0; i < observations.length; i++) {
+      var obs = observations[i];
+      context += '- ' + obs.timestamp + ' | behavior=' + obs.behavior + ' hunger=' + (obs.hunger != null ? obs.hunger.toFixed(2) : '?') + ' fear=' + (obs.fear != null ? obs.fear.toFixed(2) : '?') + ' fatigue=' + (obs.fatigue != null ? obs.fatigue.toFixed(2) : '?') + ' curiosity=' + (obs.curiosity != null ? obs.curiosity.toFixed(2) : '?') + ' food_count=' + obs.food_count + '\n';
+    }
+  }
+  context += '\n## Recent Actions (last ' + actions.length + ')\n\n';
+  if (actions.length === 0) {
+    context += '(none)\n';
+  } else {
+    for (var j = 0; j < actions.length; j++) {
+      var act = actions[j];
+      context += '- ' + act.timestamp + ' | ' + act.action + ' params=' + act.params + ' reason: ' + act.reasoning + '\n';
+    }
+  }
+  context += '\n## Recent Incidents (last ' + incidents.length + ')\n\n';
+  if (incidents.length === 0) {
+    context += '(none)\n';
+  } else {
+    for (var k = 0; k < incidents.length; k++) {
+      var inc = incidents[k];
+      context += '- ' + inc.timestamp + ' | ' + inc.type + ' [' + inc.severity + '] ' + inc.description + '\n';
+    }
+  }
+  return context;
+}
+
+async function handleChatRequest(userMessage, viewContext) {
+  var context = buildChatContext(userMessage);
+  var systemPrompt = chatPolicyContent + '\n\n---\n\n' + context;
+  if (viewContext != null) {
+    systemPrompt += '\n\n## User\'s Current View\n\n' + JSON.stringify(viewContext);
+  }
+  var history = caretakerDb.getChatHistory(20);
+  var messages = [];
+  for (var i = 0; i < history.length; i++) {
+    messages.push({ role: history[i].role, content: history[i].message });
+  }
+  messages.push({ role: 'user', content: userMessage });
+  try {
+    var response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 512,
+      system: systemPrompt,
+      messages: messages
+    });
+    var assistantMessage = response.content[0].text;
+    var ts = new Date().toISOString();
+    caretakerDb.insertChatMessage(ts, 'user', userMessage);
+    caretakerDb.insertChatMessage(ts, 'assistant', assistantMessage);
+    return { role: 'assistant', message: assistantMessage, timestamp: ts };
+  } catch (err) {
+    return { role: 'assistant', message: 'Sorry, I could not process that question. Error: ' + err.message, timestamp: new Date().toISOString(), error: true };
+  }
+}
+
 var server = http.createServer(function(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
   if (req.method === 'GET' && req.url === '/state') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     if (lastState) {
@@ -117,6 +194,40 @@ var server = http.createServer(function(req, res) {
     } else {
       res.end('null');
     }
+    return;
+  }
+  if (req.method === 'POST' && req.url === '/chat') {
+    var body = '';
+    req.on('data', function(chunk) { body += chunk; });
+    req.on('end', function() {
+      var parsed;
+      try { parsed = JSON.parse(body); } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid JSON' }));
+        return;
+      }
+      if (!parsed.message || typeof parsed.message !== 'string' || parsed.message.trim() === '') {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'message field is required' }));
+        return;
+      }
+      handleChatRequest(parsed.message.trim(), parsed.context || null)
+        .then(function(result) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        })
+        .catch(function(err) {
+          process.stderr.write('[caretaker] chat error: ' + err.message + '\n');
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Internal error' }));
+        });
+    });
+    return;
+  }
+  if (req.method === 'GET' && req.url === '/chat/history') {
+    var history = caretakerDb.getChatHistory(50);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(history));
     return;
   }
   res.writeHead(404);

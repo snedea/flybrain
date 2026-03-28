@@ -173,6 +173,42 @@ function openDb(dbPath) {
       ).all(limit);
     },
 
+    getRecentObservations: function(limit) {
+      if (limit === undefined) limit = 20;
+      var rows = db.prepare(
+        'SELECT timestamp, hunger, fear, fatigue, curiosity, groom, behavior, pos_x, pos_y, food_count, light_level, temperature FROM observations ORDER BY id DESC LIMIT ?'
+      ).all(limit);
+      rows.reverse();
+      return rows;
+    },
+
+    getRecentActions: function(limit) {
+      if (limit === undefined) limit = 20;
+      var rows = db.prepare(
+        'SELECT timestamp, action, params, reasoning FROM actions ORDER BY id DESC LIMIT ?'
+      ).all(limit);
+      rows.reverse();
+      return rows;
+    },
+
+    getRecentIncidents: function(limit) {
+      if (limit === undefined) limit = 20;
+      var rows = db.prepare(
+        'SELECT timestamp, type, severity, description FROM incidents ORDER BY id DESC LIMIT ?'
+      ).all(limit);
+      rows.reverse();
+      return rows;
+    },
+
+    getChatHistory: function(limit) {
+      if (limit === undefined) limit = 50;
+      var rows = db.prepare(
+        'SELECT id, timestamp, role, message FROM chat_messages ORDER BY id DESC LIMIT ?'
+      ).all(limit);
+      rows.reverse();
+      return rows;
+    },
+
     computeDailyScore: function(dateStr) {
       var dayStart = dateStr + 'T00:00:00.000Z';
       var dayEnd = dateStr + 'T23:59:59.999Z';

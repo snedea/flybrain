@@ -1,636 +1,558 @@
-# Plan: T8.6
+# Plan: T8.7
+
+Left sidebar -- Chat Box. Add a chat input below the activity feed. User sends questions to Claude with DB context. Chat history persisted in chat_messages table.
 
 ## Dependencies
-- list: none (all dependencies already present: ws, better-sqlite3, vanilla JS)
-- commands: none
+- list: [@anthropic-ai/sdk] (Claude API client for Node.js)
+- commands: ["cd /Users/name/homelab/flybrain && npm install @anthropic-ai/sdk"]
+- env: ANTHROPIC_API_KEY must be set in the environment before starting the server (add to example.env as placeholder)
 
 ## File Operations (in execution order)
 
-### 1. MODIFY server/db.js
-- operation: MODIFY
-- reason: Add `getRecentActivity(limit)` query that merges actions + incidents tables for initial history load
-- anchor: `getLastIncidentTime: function(type) {`
-
-#### Functions
-- signature: `getRecentActivity: function(limit)`
-  - purpose: Return the most recent N activity entries (actions + incidents combined), sorted newest-first
-  - logic:
-    1. If `limit` is undefined, default to 50
-    2. Execute a SQL query using `db.prepare(...)` that does a UNION ALL of two SELECTs:
-       - SELECT from `actions`: `id, timestamp, 'action' AS kind, action AS name, params, reasoning, fly_state AS state_snapshot`
-       - SELECT from `incidents`: `id, timestamp, 'incident' AS kind, type AS name, NULL AS params, description AS reasoning, state_snapshot`
-    3. ORDER BY `timestamp DESC` LIMIT the given `limit`
-    4. Return the array of rows from `.all(limit)`
-  - calls: `db.prepare().all(limit)`
-  - returns: `Array<{id: number, timestamp: string, kind: 'action'|'incident', name: string, params: string|null, reasoning: string, state_snapshot: string|null}>`
-  - error handling: none needed -- empty tables return empty array
-
-#### Wiring / Integration
-- Add the `getRecentActivity` function to the returned object from `openDb()`, placed after the `getLastIncidentTime` function and before the `computeDailyScore` function
-
-### 2. MODIFY server/caretaker.js
-- operation: MODIFY
-- reason: Broadcast activity_action and activity_incident messages to the browser via WebSocket; send activity_history on new connection
-
-#### Functions
-- signature: `function broadcastActivity(obj)` (new module-level function)
-  - purpose: Send a JSON message to the browser WebSocket if connected
-  - logic:
-    1. Check `browserSocket !== null && browserSocket.readyState === WebSocket.OPEN`
-    2. If true, call `browserSocket.send(JSON.stringify(obj))`
-    3. Wrap in try/catch, log errors to stderr
-  - returns: void
-  - error handling: catch send errors, write to `process.stderr`
-
-#### Wiring / Integration
-
-**Anchor 1** -- after `insertAction` call in `handleStdinCommand`:
-- anchor: `caretakerDb.insertAction(ts, cmd.action, cmd.params || {}, cmd.reasoning || '', lastState);`
-- After that line, before the `if (browserSocket !== null` block, add:
-  ```
-  broadcastActivity({ type: 'activity_action', timestamp: ts, action: cmd.action, params: cmd.params || {}, reasoning: cmd.reasoning || '', flyState: lastState });
-  ```
-
-**Anchor 2** -- after `insertIncident` for `scared_the_fly` in `detectIncidents`:
-- anchor: `caretakerDb.insertIncident(now, 'scared_the_fly', 'high',`
-- After the `writeStdout({ type: 'incident', incident: 'scared_the_fly'...` line (after the insertIncident + writeStdout pair), add:
-  ```
-  broadcastActivity({ type: 'activity_incident', timestamp: now, incidentType: 'scared_the_fly', severity: 'high', description: 'Fear spiked from ' + preFearLevel.toFixed(2) + ' to ' + fear.toFixed(2) + ' after ' + lastActionType });
-  ```
-
-**Anchor 3** -- after `insertIncident` for `forgot_to_feed` in `detectIncidents`:
-- anchor: `caretakerDb.insertIncident(now, 'forgot_to_feed', 'medium',`
-- After the `writeStdout({ type: 'incident', incident: 'forgot_to_feed'...` line (after the insertIncident + writeStdout pair), add:
-  ```
-  broadcastActivity({ type: 'activity_incident', timestamp: now, incidentType: 'forgot_to_feed', severity: 'medium', description: 'Hunger at ' + hunger.toFixed(2) + ' with no food available' });
-  ```
-
-**Anchor 4** -- inside `wss.on('connection')` callback, send history:
-- anchor: `process.stderr.write('[caretaker] Browser connected\n');`
-- After that line, add:
-  ```
-  var history = caretakerDb.getRecentActivity(50);
-  broadcastActivity({ type: 'activity_history', entries: history });
-  ```
-
-### 3. CREATE js/caretaker-sidebar.js
+### 1. CREATE agent/chat-policy.md
 - operation: CREATE
-- reason: New file -- browser-side module for receiving, rendering, and managing the activity feed sidebar
+- reason: System prompt for chat mode -- tells Claude how to answer user questions about the fly using DB context
+
+#### Content
+The file must contain exactly this system prompt (no frontmatter, just markdown):
+
+```
+# Chat Mode -- FlyBrain Caretaker
+
+## Role
+
+You are the AI caretaker for a virtual Drosophila (fruit fly) in the FlyBrain simulation. The user is asking you questions about your caretaking -- why you took certain actions, what the fly needs, how it's doing. You have access to database context injected below.
+
+## How to Answer
+
+- Reference specific timestamps, action names, and drive values from the provided context.
+- If the context shows you scared the fly, own it. If you forgot to feed it, explain why.
+- Be conversational but data-backed. Quote numbers: "At 14:32:05, hunger was 0.87 and I placed food at (320, 280)."
+- If you don't have enough context to answer, say so honestly.
+- Keep answers concise -- 2-4 sentences for simple questions, up to a paragraph for complex ones.
+- Use the fly's drive values, behavior states, and incident history to support your answers.
+
+## Context Format
+
+You will receive context blocks labeled:
+- **Recent Observations**: Last N state snapshots (drives, behavior, position)
+- **Recent Actions**: Last N caretaker actions with reasoning
+- **Recent Incidents**: Last N incidents (scared_the_fly, forgot_to_feed)
+- **User's Current View**: What the user sees in the UI right now (if provided)
+
+## Important
+
+- Do not output JSON. Respond in natural language.
+- Do not make up data. Only reference what is in the provided context.
+- Current date is injected in the context header -- use it for relative time references.
+```
+
+### 2. MODIFY server/db.js
+- operation: MODIFY
+- reason: Add query methods for chat context (recent observations, actions, incidents) and chat history retrieval
+- anchor: `getRecentActivity: function(limit) {`
+
+#### Functions
+
+Add these methods to the returned object from `openDb()`, after the `getRecentActivity` method and before the `computeDailyScore` method.
+
+- signature: `getRecentObservations: function(limit)`
+  - purpose: Fetch last N observations with parsed drives/behavior for chat context
+  - logic:
+    1. If limit is undefined, set limit to 20
+    2. Execute SQL: `SELECT timestamp, hunger, fear, fatigue, curiosity, groom, behavior, pos_x, pos_y, food_count, light_level, temperature FROM observations ORDER BY id DESC LIMIT ?` with param limit
+    3. Reverse the result array (so entries are in chronological order, oldest first)
+    4. Return the reversed array
+  - returns: Array of row objects in chronological order (oldest first)
+
+- signature: `getRecentActions: function(limit)`
+  - purpose: Fetch last N caretaker actions for chat context
+  - logic:
+    1. If limit is undefined, set limit to 20
+    2. Execute SQL: `SELECT timestamp, action, params, reasoning FROM actions ORDER BY id DESC LIMIT ?` with param limit
+    3. Reverse the result array
+    4. Return the reversed array
+  - returns: Array of row objects in chronological order
+
+- signature: `getRecentIncidents: function(limit)`
+  - purpose: Fetch last N incidents for chat context
+  - logic:
+    1. If limit is undefined, set limit to 20
+    2. Execute SQL: `SELECT timestamp, type, severity, description FROM incidents ORDER BY id DESC LIMIT ?` with param limit
+    3. Reverse the result array
+    4. Return the reversed array
+  - returns: Array of row objects in chronological order
+
+- signature: `getChatHistory: function(limit)`
+  - purpose: Fetch last N chat messages for conversation history display
+  - logic:
+    1. If limit is undefined, set limit to 50
+    2. Execute SQL: `SELECT id, timestamp, role, message FROM chat_messages ORDER BY id DESC LIMIT ?` with param limit
+    3. Reverse the result array
+    4. Return the reversed array
+  - returns: Array of row objects in chronological order
+
+#### Wiring / Integration
+These are added as properties on the object returned by `openDb()`, between line 173 (end of `getRecentActivity`) and line 176 (start of `computeDailyScore`). Each uses `db.prepare(...).all(limit)` pattern consistent with `getRecentActivity`.
+
+### 3. MODIFY server/caretaker.js
+- operation: MODIFY
+- reason: Add HTTP POST /chat endpoint that queries DB for context, calls Claude API, persists messages, returns response. Also add GET /chat/history endpoint.
 
 #### Imports / Dependencies
-- none (vanilla JS IIFE, reads from global DOM)
+At the top of the file (after existing require statements on lines 1-6), add:
+```
+var Anthropic = require('@anthropic-ai/sdk');
+var chatPolicyPath = path.join(__dirname, '..', 'agent', 'chat-policy.md');
+var chatPolicyContent = fs.readFileSync(chatPolicyPath, 'utf-8');
+var anthropic = new Anthropic();
+```
 
-#### Structs / Types
-- Feed entry DOM structure (created dynamically):
-  ```
-  <div class="activity-entry activity-{colorClass}" data-expanded="false">
-    <div class="activity-entry-header">
-      <span class="activity-icon">{icon}</span>
-      <span class="activity-time">{HH:MM:SS}</span>
-      <span class="activity-desc">{description text}</span>
-    </div>
-    <div class="activity-entry-detail">{reasoning text}</div>
-  </div>
-  ```
-- colorClass mapping:
-  - `'feed'` (green) when `action === 'place_food'` or `action === 'clear_food'`
-  - `'comfort'` (blue) when `action === 'set_light'` or `action === 'set_temp'`
-  - `'warning'` (yellow) when `kind === 'incident' && severity === 'medium'`
-  - `'incident'` (red) when `kind === 'incident' && severity === 'high'`
-  - `'neutral'` (default, --text-muted) for everything else (touch, blow_wind)
-- icon mapping (plain text, no emojis per project convention):
-  - `'place_food'` -> `'F'`
-  - `'clear_food'` -> `'X'`
-  - `'set_light'` -> `'L'`
-  - `'set_temp'` -> `'T'`
-  - `'touch'` -> `'H'`
-  - `'blow_wind'` -> `'W'`
-  - incident (any) -> `'!'`
+The `Anthropic` constructor reads `ANTHROPIC_API_KEY` from `process.env` automatically.
 
 #### Functions
-- The file is an IIFE `(function() { ... })();` that exposes `window.CaretakerSidebar`
 
-- signature: `function init()`
-  - purpose: Cache DOM references, set up click-to-expand delegation
+- signature: `function buildChatContext(userMessage)`
+  - purpose: Query DB for recent observations, actions, incidents and format them as a context string for Claude
   - logic:
-    1. Set `feedList = document.getElementById('activity-feed-list')`
-    2. Set `sidebar = document.getElementById('caretaker-sidebar')`
-    3. If `feedList` is null, return early (graceful no-op for file:// context)
-    4. Add click event listener on `feedList` using event delegation:
-       - `var entry = e.target.closest('.activity-entry')`
-       - If entry exists, toggle its `data-expanded` attribute between `'true'` and `'false'`
-       - Toggle class `expanded` on the entry
-    5. Set `userScrolled = false`
-    6. Add scroll event listener on `feedList`:
-       - If `feedList.scrollTop > 20`, set `userScrolled = true`
-       - If `feedList.scrollTop <= 5`, set `userScrolled = false`
-  - returns: void
-
-- signature: `function formatTime(isoString)`
-  - purpose: Format an ISO timestamp to HH:MM:SS local time
-  - logic:
-    1. Create `var d = new Date(isoString)`
-    2. Return `d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })`
+    1. Get current UTC date string: `new Date().toISOString().slice(0, 19) + 'Z'`
+    2. Call `caretakerDb.getRecentObservations(20)` -- store as `observations`
+    3. Call `caretakerDb.getRecentActions(20)` -- store as `actions`
+    4. Call `caretakerDb.getRecentIncidents(20)` -- store as `incidents`
+    5. Build context string by concatenating these sections:
+       - `"Current date: " + currentDate + "\n\n"`
+       - `"## Recent Observations (last " + observations.length + ")\n\n"` followed by each observation formatted as: `"- " + obs.timestamp + " | behavior=" + obs.behavior + " hunger=" + (obs.hunger != null ? obs.hunger.toFixed(2) : "?") + " fear=" + (obs.fear != null ? obs.fear.toFixed(2) : "?") + " fatigue=" + (obs.fatigue != null ? obs.fatigue.toFixed(2) : "?") + " curiosity=" + (obs.curiosity != null ? obs.curiosity.toFixed(2) : "?") + " food_count=" + obs.food_count + "\n"`
+       - `"\n## Recent Actions (last " + actions.length + ")\n\n"` followed by each action formatted as: `"- " + act.timestamp + " | " + act.action + " params=" + act.params + " reason: " + act.reasoning + "\n"`
+       - `"\n## Recent Incidents (last " + incidents.length + ")\n\n"` followed by each incident formatted as: `"- " + inc.timestamp + " | " + inc.type + " [" + inc.severity + "] " + inc.description + "\n"`
+       - If no entries in a section, write `"(none)\n"`
+    6. Return the context string
   - returns: string
 
-- signature: `function getColorClass(kind, action, severity)`
-  - purpose: Determine the CSS color class for a feed entry
+- signature: `async function handleChatRequest(userMessage, viewContext)`
+  - purpose: Send user message + DB context to Claude API, persist both messages, return assistant response
   - logic:
-    1. If `kind === 'incident'` and `severity === 'high'`, return `'incident'`
-    2. If `kind === 'incident'`, return `'warning'`
-    3. If `action === 'place_food' || action === 'clear_food'`, return `'feed'`
-    4. If `action === 'set_light' || action === 'set_temp'`, return `'comfort'`
-    5. Return `'neutral'`
-  - returns: string
-
-- signature: `function getIcon(kind, action)`
-  - purpose: Return a single-character icon for the entry type
-  - logic:
-    1. If `kind === 'incident'`, return `'!'`
-    2. Map: `{ place_food: 'F', clear_food: 'X', set_light: 'L', set_temp: 'T', touch: 'H', blow_wind: 'W' }`
-    3. Return the mapped value or `'*'` as default
-  - returns: string
-
-- signature: `function buildDescription(kind, action, params, reasoning)`
-  - purpose: Build a human-readable one-line description for the feed entry
-  - logic:
-    1. If `kind === 'incident'`, return `reasoning` directly (the description field is already human-readable)
-    2. Parse `params` if it is a string: `var p = typeof params === 'string' ? JSON.parse(params) : (params || {})`
-    3. Switch on `action`:
-       - `'place_food'`: return `'Placed food at (' + Math.round(p.x) + ', ' + Math.round(p.y) + ')'`
-       - `'clear_food'`: return `'Cleared all food'`
-       - `'set_light'`: return `'Set light to ' + (p.level || 'unknown')`
-       - `'set_temp'`: return `'Set temp to ' + (p.level || 'unknown')`
-       - `'touch'`: return `'Touched fly at (' + Math.round(p.x || 0) + ', ' + Math.round(p.y || 0) + ')'`
-       - `'blow_wind'`: return `'Blew wind (strength ' + (p.strength || 0.5).toFixed(1) + ')'`
-       - default: return `action`
-    4. Catch JSON.parse errors: if parse fails, return `action` as fallback
-  - returns: string
-
-- signature: `function createEntryEl(kind, action, params, reasoning, severity, timestamp)`
-  - purpose: Create and return a DOM element for one feed entry
-  - logic:
-    1. Call `var colorClass = getColorClass(kind, action, severity)`
-    2. Call `var icon = getIcon(kind, action)`
-    3. Call `var desc = buildDescription(kind, action, params, reasoning)`
-    4. Call `var time = formatTime(timestamp)`
-    5. Create `var el = document.createElement('div')`
-    6. Set `el.className = 'activity-entry activity-' + colorClass`
-    7. Set `el.setAttribute('data-expanded', 'false')`
-    8. Build a `reasoningText` variable: if `kind === 'incident'`, use empty string (description is already the main text). If `kind === 'action'`, use `reasoning || ''`.
-    9. Set `el.innerHTML` to:
-       ```
-       '<div class="activity-entry-header">' +
-         '<span class="activity-icon">' + icon + '</span>' +
-         '<span class="activity-time">' + time + '</span>' +
-         '<span class="activity-desc">' + desc + '</span>' +
-       '</div>' +
-       (reasoningText ? '<div class="activity-entry-detail">' + reasoningText + '</div>' : '')
-       ```
-    10. Return `el`
-  - returns: HTMLDivElement
-
-- signature: `function addEntry(kind, action, params, reasoning, severity, timestamp)`
-  - purpose: Create an entry element and prepend it to the feed list (newest on top)
-  - logic:
-    1. If `feedList` is null, return
-    2. Call `var el = createEntryEl(kind, action, params, reasoning, severity, timestamp)`
-    3. Prepend: `feedList.insertBefore(el, feedList.firstChild)`
-    4. Cap total entries: if `feedList.children.length > 200`, remove `feedList.lastChild`
-    5. If `userScrolled` is false, set `feedList.scrollTop = 0` (keep scrolled to top = newest)
-  - returns: void
-
-- signature: `function onAction(msg)`
-  - purpose: Handle an `activity_action` WebSocket message
-  - logic:
-    1. Call `addEntry('action', msg.action, msg.params, msg.reasoning, null, msg.timestamp)`
-  - returns: void
-
-- signature: `function onIncident(msg)`
-  - purpose: Handle an `activity_incident` WebSocket message
-  - logic:
-    1. Call `addEntry('incident', msg.incidentType, null, msg.description, msg.severity, msg.timestamp)`
-  - returns: void
-
-- signature: `function onHistory(msg)`
-  - purpose: Handle an `activity_history` WebSocket message (initial load of recent entries)
-  - logic:
-    1. If `feedList` is null, return
-    2. Set `feedList.innerHTML = ''` (clear any existing entries)
-    3. Iterate `msg.entries` in forward order (they are sorted timestamp DESC from server, so index 0 is newest)
-    4. For each entry `e`:
-       - If `e.kind === 'action'`: call `createEntryEl('action', e.name, e.params, e.reasoning, null, e.timestamp)` and append to feedList
-       - If `e.kind === 'incident'`: call `createEntryEl('incident', e.name, null, e.reasoning, null, e.timestamp)` and append to feedList
-       - Note: append (not prepend) because we iterate newest-first and want newest at top
-    5. Set `feedList.scrollTop = 0`
-  - returns: void
-
-- signature: `function toggle()`
-  - purpose: Toggle sidebar visibility
-  - logic:
-    1. If `sidebar` is null, return
-    2. Toggle class `sidebar-open` on `sidebar`: `sidebar.classList.toggle('sidebar-open')`
-    3. Return the current open state: `return sidebar.classList.contains('sidebar-open')`
-  - returns: boolean
-
-- signature: `function isOpen()`
-  - purpose: Check if sidebar is currently open
-  - logic:
-    1. Return `sidebar !== null && sidebar.classList.contains('sidebar-open')`
-  - returns: boolean
+    1. Build context string by calling `buildChatContext(userMessage)`
+    2. Build system prompt: concatenate `chatPolicyContent` + `"\n\n---\n\n"` + context string
+    3. If `viewContext` is not null and not undefined, append `"\n\n## User's Current View\n\n" + JSON.stringify(viewContext)` to the system prompt
+    4. Call `caretakerDb.getChatHistory(20)` to get recent history
+    5. Build `messages` array for the Anthropic API. For each row in history, push `{ role: row.role, content: row.message }`. Then push `{ role: 'user', content: userMessage }`.
+    6. Call Claude API: `var response = await anthropic.messages.create({ model: 'claude-sonnet-4-20250514', max_tokens: 512, system: systemPrompt, messages: messages })`
+    7. Extract the assistant text: `var assistantMessage = response.content[0].text`
+    8. Get current timestamp: `var ts = new Date().toISOString()`
+    9. Call `caretakerDb.insertChatMessage(ts, 'user', userMessage)`
+    10. Call `caretakerDb.insertChatMessage(ts, 'assistant', assistantMessage)`
+    11. Return object: `{ role: 'assistant', message: assistantMessage, timestamp: ts }`
+  - calls: `buildChatContext(userMessage)`, `caretakerDb.getChatHistory(20)`, `anthropic.messages.create(...)`, `caretakerDb.insertChatMessage(...)`
+  - returns: `{ role: string, message: string, timestamp: string }`
+  - error handling: If the anthropic.messages.create call throws, catch the error and return `{ role: 'assistant', message: 'Sorry, I could not process that question. Error: ' + err.message, timestamp: new Date().toISOString(), error: true }`
 
 #### Wiring / Integration
-- Expose as: `window.CaretakerSidebar = { init: init, onAction: onAction, onIncident: onIncident, onHistory: onHistory, toggle: toggle, isOpen: isOpen }`
-- Call `init()` at the end of the IIFE (self-initializing, like caretaker-bridge.js)
-- Module-level variables: `var feedList = null, sidebar = null, userScrolled = false`
 
-### 4. MODIFY js/caretaker-bridge.js
-- operation: MODIFY
-- reason: Route activity_action, activity_incident, and activity_history WebSocket message types to CaretakerSidebar instead of only handling 'command' type
-- anchor: `ws.onmessage = function(event) { executeCommand(event.data); };`
+Modify the HTTP server request handler (the `http.createServer` callback at line 112) to add two new routes before the 404 fallback.
 
-#### Functions
-- Replace the `ws.onmessage` handler:
-  - Old line: `ws.onmessage = function(event) { executeCommand(event.data); };`
-  - New logic:
-    ```javascript
-    ws.onmessage = function(event) {
-      var msg;
-      try { msg = JSON.parse(event.data); } catch (e) { return; }
-      if (msg.type === 'command') {
-        executeCommand(event.data);
-      } else if (typeof CaretakerSidebar !== 'undefined') {
-        if (msg.type === 'activity_action') {
-          CaretakerSidebar.onAction(msg);
-        } else if (msg.type === 'activity_incident') {
-          CaretakerSidebar.onIncident(msg);
-        } else if (msg.type === 'activity_history') {
-          CaretakerSidebar.onHistory(msg);
-        }
+- anchor: `res.writeHead(404);`
+
+The existing server handler currently has:
+```javascript
+var server = http.createServer(function(req, res) {
+  if (req.method === 'GET' && req.url === '/state') {
+    ...
+    return;
+  }
+  res.writeHead(404);
+  res.end('Not found');
+});
+```
+
+Replace the section from `res.writeHead(404);` through `res.end('Not found');` with:
+
+```javascript
+  if (req.method === 'POST' && req.url === '/chat') {
+    var body = '';
+    req.on('data', function(chunk) { body += chunk; });
+    req.on('end', function() {
+      var parsed;
+      try { parsed = JSON.parse(body); } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid JSON' }));
+        return;
       }
-    };
-    ```
-  - Note: `executeCommand` already does its own `JSON.parse`, so passing `event.data` (the raw string) to it is correct -- it re-parses internally. The outer parse is only to check `msg.type` for routing.
+      if (!parsed.message || typeof parsed.message !== 'string' || parsed.message.trim() === '') {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'message field is required' }));
+        return;
+      }
+      handleChatRequest(parsed.message.trim(), parsed.context || null)
+        .then(function(result) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        })
+        .catch(function(err) {
+          process.stderr.write('[caretaker] chat error: ' + err.message + '\n');
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Internal error' }));
+        });
+    });
+    return;
+  }
+  if (req.method === 'GET' && req.url === '/chat/history') {
+    var history = caretakerDb.getChatHistory(50);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(history));
+    return;
+  }
+  res.writeHead(404);
+  res.end('Not found');
+```
 
-### 5. MODIFY index.html
+Also add CORS headers: Modify the `http.createServer` callback to handle OPTIONS preflight and add CORS headers on all responses. At the very start of the callback (before the GET /state check), add:
+
+```javascript
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+```
+
+Anchor for this insertion: `if (req.method === 'GET' && req.url === '/state') {`
+
+Insert the CORS lines immediately before that `if` statement.
+
+### 4. MODIFY index.html
 - operation: MODIFY
-- reason: Add sidebar HTML structure and load the new caretaker-sidebar.js script
+- reason: Add chat box HTML below the activity feed inside the caretaker sidebar
 
-#### Wiring / Integration
+- anchor: `<div class="activity-feed" id="activity-feed-list"></div>`
 
-**Anchor 1** -- Insert sidebar HTML. Place it right before the `<div id="drawer-backdrop"` line:
-- anchor: `<div id="drawer-backdrop" class="drawer-backdrop"></div>`
-- Insert BEFORE that line:
-  ```html
-  <div id="caretaker-sidebar" class="caretaker-sidebar">
-      <div class="caretaker-sidebar-header">
-          <span class="caretaker-sidebar-title">Activity</span>
-          <button class="caretaker-sidebar-close" id="caretaker-sidebar-close">&times;</button>
-      </div>
-      <div class="activity-feed" id="activity-feed-list"></div>
-  </div>
-  ```
+Replace:
+```html
+        <div class="activity-feed" id="activity-feed-list"></div>
+    </div>
+```
 
-**Anchor 2** -- Add script tag. Place it after `caretaker-renderer.js` and before `caretaker-bridge.js`:
-- anchor: `<script type="text/javascript" src="./js/caretaker-renderer.js?v=17"></script>`
-- Insert AFTER that line:
-  ```html
-  <script type="text/javascript" src="./js/caretaker-sidebar.js?v=17"></script>
-  ```
-- caretaker-sidebar.js MUST load before caretaker-bridge.js so that `CaretakerSidebar` is defined when the bridge's `onmessage` handler fires.
+With:
+```html
+        <div class="activity-feed" id="activity-feed-list"></div>
+        <div class="chat-section" id="chat-section">
+            <div class="chat-history" id="chat-history"></div>
+            <div class="chat-input-row">
+                <input type="text" class="chat-input" id="chat-input" placeholder="Ask about the fly..." autocomplete="off" />
+                <button class="chat-send-btn" id="chat-send-btn">Send</button>
+            </div>
+        </div>
+    </div>
+```
 
-### 6. MODIFY css/main.css
+The `</div>` at the end is the closing `</div>` for `#caretaker-sidebar`.
+
+### 5. MODIFY css/main.css
 - operation: MODIFY
-- reason: Add all styles for the caretaker sidebar, activity feed entries, color coding, and a desktop-visible activity toggle button
+- reason: Add chat section styles (chat history area, input row, message bubbles)
 
-#### Wiring / Integration
+- anchor: `.activity-feed::-webkit-scrollbar-thumb:hover {`
 
-**Anchor 1** -- Add sidebar styles. Insert a new block AFTER the education panel section (after the `.edu-links a:hover` rule):
-- anchor: `.edu-links a:hover {`
-- Insert AFTER that closing `}` block:
+Insert the following CSS immediately after the `.activity-feed::-webkit-scrollbar-thumb:hover` rule block (after line 1025, before `.activity-entry {` on line 1028):
 
 ```css
-/* --- Caretaker Activity Sidebar --- */
-.caretaker-sidebar {
-    position: fixed;
-    top: 44px;
-    left: 0;
-    bottom: 180px;
-    width: 280px;
-    max-width: 85vw;
-    background: var(--surface);
-    border-right: 1px solid var(--border);
-    z-index: 22;
-    font-family: system-ui, -apple-system, sans-serif;
+
+.chat-section {
     display: flex;
     flex-direction: column;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-    transform: translateX(-100%);
-    transition: transform 0.3s ease;
-}
-
-.caretaker-sidebar.sidebar-open {
-    transform: translateX(0);
-}
-
-.caretaker-sidebar-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid var(--border);
+    border-top: 1px solid var(--border);
     flex-shrink: 0;
+    max-height: 45%;
+    min-height: 120px;
 }
 
-.caretaker-sidebar-title {
-    color: var(--text);
-    font-size: 0.9rem;
-    font-weight: 600;
-}
-
-.caretaker-sidebar-close {
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    font-size: 1.2rem;
-    cursor: pointer;
-    padding: 0 0.25rem;
-    line-height: 1;
-}
-
-.caretaker-sidebar-close:hover {
-    color: var(--text);
-}
-
-.activity-feed {
+.chat-history {
     flex: 1;
     overflow-y: auto;
     padding: 0.5rem;
     scrollbar-width: thin;
     scrollbar-color: rgba(136, 146, 164, 0.3) transparent;
+    font-size: 0.8rem;
 }
 
-.activity-feed::-webkit-scrollbar {
+.chat-history::-webkit-scrollbar {
     width: 6px;
 }
 
-.activity-feed::-webkit-scrollbar-track {
+.chat-history::-webkit-scrollbar-track {
     background: transparent;
 }
 
-.activity-feed::-webkit-scrollbar-thumb {
+.chat-history::-webkit-scrollbar-thumb {
     background: rgba(136, 146, 164, 0.3);
     border-radius: 3px;
 }
 
-.activity-feed::-webkit-scrollbar-thumb:hover {
-    background: rgba(136, 146, 164, 0.5);
-}
-
-.activity-entry {
-    padding: 0.4rem 0.5rem;
+.chat-msg {
+    padding: 0.35rem 0.5rem;
     border-radius: var(--radius);
-    margin-bottom: 0.25rem;
-    cursor: pointer;
-    border-left: 3px solid var(--text-muted);
-    background: transparent;
-    transition: background 0.2s ease;
-}
-
-.activity-entry:hover {
-    background: var(--surface-hover);
-}
-
-.activity-entry-header {
-    display: flex;
-    align-items: baseline;
-    gap: 0.4rem;
-    font-size: 0.8rem;
-    color: var(--text);
-    line-height: 1.3;
-}
-
-.activity-icon {
-    font-weight: 700;
-    font-size: 0.7rem;
-    width: 1rem;
-    text-align: center;
-    flex-shrink: 0;
-}
-
-.activity-time {
-    color: var(--text-muted);
-    font-size: 0.7rem;
-    flex-shrink: 0;
-    font-variant-numeric: tabular-nums;
-}
-
-.activity-desc {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.activity-entry-detail {
-    display: none;
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    padding-top: 0.3rem;
-    padding-left: 1.4rem;
+    margin-bottom: 0.35rem;
     line-height: 1.4;
-    white-space: pre-wrap;
-    word-break: break-word;
+    word-wrap: break-word;
 }
 
-.activity-entry.expanded .activity-entry-detail {
-    display: block;
+.chat-msg-user {
+    background: var(--accent-subtle);
+    color: var(--text);
+    text-align: right;
 }
 
-.activity-entry.expanded .activity-desc {
-    white-space: normal;
+.chat-msg-assistant {
+    background: rgba(42, 58, 92, 0.4);
+    color: var(--text);
 }
 
-/* Color-coded left borders and icon colors */
-.activity-feed .activity-entry.activity-feed {
-    border-left-color: var(--success);
-}
-
-.activity-feed .activity-entry.activity-feed .activity-icon {
-    color: var(--success);
-}
-
-.activity-feed .activity-entry.activity-comfort {
-    border-left-color: var(--neuron-sensory);
-}
-
-.activity-feed .activity-entry.activity-comfort .activity-icon {
-    color: var(--neuron-sensory);
-}
-
-.activity-feed .activity-entry.activity-warning {
-    border-left-color: var(--warning);
-}
-
-.activity-feed .activity-entry.activity-warning .activity-icon {
-    color: var(--warning);
-}
-
-.activity-feed .activity-entry.activity-incident {
-    border-left-color: var(--error);
-}
-
-.activity-feed .activity-entry.activity-incident .activity-icon {
+.chat-msg-error {
+    background: rgba(248, 113, 113, 0.15);
     color: var(--error);
 }
 
-.activity-feed .activity-entry.activity-neutral {
-    border-left-color: var(--text-muted);
+.chat-msg-time {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    margin-bottom: 0.15rem;
 }
 
-.activity-feed .activity-entry.activity-neutral .activity-icon {
+.chat-input-row {
+    display: flex;
+    gap: 0.35rem;
+    padding: 0.5rem;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.chat-input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    padding: 0.4rem 0.6rem;
+    font-size: 0.8rem;
+    font-family: system-ui, -apple-system, sans-serif;
+    outline: none;
+}
+
+.chat-input:focus {
+    border-color: var(--accent);
+}
+
+.chat-input::placeholder {
     color: var(--text-muted);
 }
 
-/* Activity toggle button (desktop) */
-#activityToggle {
+.chat-send-btn {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    padding: 0.4rem 0.75rem;
+    font-size: 0.8rem;
+    cursor: pointer;
+    font-family: system-ui, -apple-system, sans-serif;
+    white-space: nowrap;
+}
+
+.chat-send-btn:hover {
+    background: var(--accent-hover);
+}
+
+.chat-send-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.chat-loading {
     display: inline-block;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    padding: 0.35rem 0.5rem;
 }
 
-#activityToggle.active {
-    border-color: var(--accent);
-    background: var(--accent-subtle);
-    color: var(--accent);
+.chat-loading::after {
+    content: '...';
+    animation: chatDots 1.2s steps(4, end) infinite;
+}
+
+@keyframes chatDots {
+    0%, 20% { content: ''; }
+    40% { content: '.'; }
+    60% { content: '..'; }
+    80%, 100% { content: '...'; }
 }
 ```
 
-**Anchor 2** -- Mobile overrides inside `@media (max-width: 768px)`. Add after the education panel mobile override:
-- anchor: `.education-panel {` (inside the `@media (max-width: 768px)` block, around line 1099)
-- After the `.education-panel { ... }` mobile override block, add:
-
-```css
-    .caretaker-sidebar {
-        top: calc(36px + env(safe-area-inset-top, 0px));
-        bottom: 120px;
-        width: 100%;
-        max-width: 100vw;
-        z-index: 23;
-    }
-
-    #activityToggle {
-        display: none;
-    }
-```
-
-**Anchor 3** -- Add landscape mobile override. Find the landscape media query section:
-- anchor: `/* In landscape, neuron panel sits beside canvas on right side */`
-- After the existing landscape `#left-panel` rules (after the `#left-panel::before { display: none; }` block around line 1148), add:
-
-```css
-    .caretaker-sidebar {
-        top: calc(32px + env(safe-area-inset-top, 0px));
-        bottom: 0;
-        width: 240px;
-    }
-```
-
-### 7. MODIFY index.html (second pass -- add Activity toggle button)
+### 6. MODIFY js/caretaker-sidebar.js
 - operation: MODIFY
-- reason: Add a new "Activity" toolbar button visible on desktop, placed next to the Learn button
-- anchor: `<button class="tool-btn" id="learnBtn">Learn</button>`
-- Insert BEFORE that line:
-  ```html
-  <button class="tool-btn" id="activityToggle">Activity</button>
-  ```
+- reason: Add chat UI logic -- send messages via HTTP POST to /chat endpoint, display chat history, load history on init
 
-### 8. MODIFY js/main.js
-- operation: MODIFY
-- reason: Wire the Activity toggle button and sidebar close button click handlers
+- anchor: `function init() {`
 
-#### Wiring / Integration
+#### Strategy
 
-**Anchor** -- Add the activity toggle handler. Insert after the existing `sidebarToggle` event listener block:
-- anchor: `if (drawerBackdrop) {`
-- Insert BEFORE that line:
+Extend the existing IIFE to add chat functionality. The modifications are:
+
+**A. Add chat variables at the top of the IIFE (after `var userScrolled = false;` on line 4):**
 
 ```javascript
-// --- Activity sidebar toggle (desktop) ---
-var activityToggle = document.getElementById('activityToggle');
-var activityCloseBtn = document.getElementById('caretaker-sidebar-close');
-
-if (activityToggle) {
-	activityToggle.addEventListener('click', function(e) {
-		e.stopPropagation();
-		if (typeof CaretakerSidebar !== 'undefined') {
-			var isOpen = CaretakerSidebar.toggle();
-			activityToggle.classList.toggle('active', isOpen);
-		}
-	});
-}
-
-if (activityCloseBtn) {
-	activityCloseBtn.addEventListener('click', function() {
-		if (typeof CaretakerSidebar !== 'undefined') {
-			var sidebar = document.getElementById('caretaker-sidebar');
-			if (sidebar) sidebar.classList.remove('sidebar-open');
-			if (activityToggle) activityToggle.classList.remove('active');
-		}
-	});
-}
+  var chatHistory = null;
+  var chatInput = null;
+  var chatSendBtn = null;
+  var chatLoading = false;
+  var CHAT_API_URL = 'http://' + (location.hostname || 'localhost') + ':7600';
 ```
 
-**Anchor 2** -- Update the mobile `sidebarToggle` handler to also toggle the activity sidebar on mobile:
-- anchor: `if (sidebarToggle) {`
-- Replace the entire `if (sidebarToggle) { ... }` block (lines 508-517) with:
+**B. Add chat functions before the `init()` call on line 151:**
+
+- signature: `function formatChatTime(isoString)`
+  - purpose: Format ISO timestamp to short time string
+  - logic: Same as existing `formatTime` function -- `var d = new Date(isoString); return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });`
+  - returns: string
+
+- signature: `function appendChatMessage(role, message, timestamp, isError)`
+  - purpose: Create and append a chat message element to the chat history div
+  - logic:
+    1. If `chatHistory` is null, return
+    2. Create a `div` element
+    3. Set className to `'chat-msg chat-msg-' + (isError ? 'error' : role)`
+    4. Set innerHTML to `'<div class="chat-msg-time">' + (role === 'user' ? 'You' : 'Claude') + ' -- ' + formatChatTime(timestamp) + '</div>' + '<div>' + escapeHtml(message) + '</div>'`
+    5. Append to `chatHistory`
+    6. Set `chatHistory.scrollTop = chatHistory.scrollHeight` to auto-scroll to bottom
+  - returns: void
+
+- signature: `function escapeHtml(str)`
+  - purpose: Escape HTML entities to prevent XSS
+  - logic:
+    1. Create a `div` element: `var d = document.createElement('div')`
+    2. Set `d.textContent = str`
+    3. Return `d.innerHTML`
+  - returns: string
+
+- signature: `function sendChatMessage()`
+  - purpose: Read input value, POST to /chat, display response
+  - logic:
+    1. If `chatInput` is null or `chatLoading` is true, return
+    2. Read `var msg = chatInput.value.trim()`
+    3. If `msg === ''`, return
+    4. Set `chatInput.value = ''`
+    5. Call `appendChatMessage('user', msg, new Date().toISOString(), false)`
+    6. Set `chatLoading = true`
+    7. Set `chatSendBtn.disabled = true`
+    8. Create a loading indicator: `var loadingEl = document.createElement('div'); loadingEl.className = 'chat-loading'; loadingEl.textContent = 'Thinking'; chatHistory.appendChild(loadingEl); chatHistory.scrollTop = chatHistory.scrollHeight;`
+    9. Build the request body: `var body = JSON.stringify({ message: msg, context: null })`
+    10. Call `fetch(CHAT_API_URL + '/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body })`
+    11. In the `.then(function(res) { return res.json(); })` handler:
+    12. In the next `.then(function(data) { ... })`:
+        - Remove `loadingEl` from `chatHistory` if it is still a child
+        - If `data.error` is truthy, call `appendChatMessage('assistant', data.error, new Date().toISOString(), true)`
+        - Else call `appendChatMessage('assistant', data.message, data.timestamp, false)`
+        - Set `chatLoading = false`
+        - Set `chatSendBtn.disabled = false`
+        - Call `chatInput.focus()`
+    13. In the `.catch(function(err) { ... })`:
+        - Remove `loadingEl` from `chatHistory` if it is still a child
+        - Call `appendChatMessage('assistant', 'Connection error: ' + err.message, new Date().toISOString(), true)`
+        - Set `chatLoading = false`
+        - Set `chatSendBtn.disabled = false`
+  - calls: `appendChatMessage`, `fetch`, `escapeHtml` (via appendChatMessage)
+  - returns: void
+
+- signature: `function loadChatHistory()`
+  - purpose: Fetch existing chat history from server on sidebar open and populate the chat history div
+  - logic:
+    1. If `chatHistory` is null, return
+    2. Call `fetch(CHAT_API_URL + '/chat/history')`
+    3. In `.then(function(res) { return res.json(); })`:
+    4. In `.then(function(messages) { ... })`:
+        - Set `chatHistory.innerHTML = ''`
+        - Loop through `messages` array. For each msg, call `appendChatMessage(msg.role, msg.message, msg.timestamp, false)`
+    5. In `.catch(function(err) { ... })`:
+        - `console.warn('[chat] Failed to load history:', err.message)`
+  - calls: `fetch`, `appendChatMessage`
+  - returns: void
+
+**C. Modify the `init()` function to also initialize chat elements:**
+
+Inside `init()`, after the existing `feedList.addEventListener('scroll', ...)` block (after line 39), add:
 
 ```javascript
-if (sidebarToggle) {
-	sidebarToggle.addEventListener('click', function (e) {
-		e.stopPropagation();
-		if (isMobile()) {
-			// On mobile, hamburger toggles bottom panel drawer
-			if (leftPanel && leftPanel.classList.contains('drawer-open')) {
-				closeDrawer();
-			} else {
-				openDrawer();
-			}
-		} else {
-			// On desktop, hamburger toggles activity sidebar
-			if (typeof CaretakerSidebar !== 'undefined') {
-				var isOpen = CaretakerSidebar.toggle();
-				var actBtn = document.getElementById('activityToggle');
-				if (actBtn) actBtn.classList.toggle('active', isOpen);
-			}
-		}
-	});
-}
+    chatHistory = document.getElementById('chat-history');
+    chatInput = document.getElementById('chat-input');
+    chatSendBtn = document.getElementById('chat-send-btn');
+
+    if (chatSendBtn) {
+      chatSendBtn.addEventListener('click', sendChatMessage);
+    }
+    if (chatInput) {
+      chatInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendChatMessage();
+        }
+      });
+    }
+
+    loadChatHistory();
+```
+
+**D. Add `loadChatHistory` to the exported `window.CaretakerSidebar` object:**
+
+- anchor: `window.CaretakerSidebar = {`
+
+Add `loadChatHistory: loadChatHistory` to the object so it becomes:
+```javascript
+  window.CaretakerSidebar = {
+    init: init,
+    onAction: onAction,
+    onIncident: onIncident,
+    onHistory: onHistory,
+    toggle: toggle,
+    isOpen: isOpen,
+    loadChatHistory: loadChatHistory
+  };
+```
+
+### 7. MODIFY example.env (or CREATE if it does not exist)
+- operation: CREATE (only if the file does not exist; if it exists, MODIFY to add the key)
+- reason: Document the ANTHROPIC_API_KEY requirement
+
+Check if `/Users/name/homelab/flybrain/example.env` exists. If not, create it. If it does, append to it.
+
+Add this line:
+```
+ANTHROPIC_API_KEY=sk-ant-your-key-here
 ```
 
 ## Verification
-- build: no build step (vanilla JS served statically)
-- lint: no linter configured
+- build: `cd /Users/name/homelab/flybrain && npm install`
+- lint: no linter configured (vanilla JS project)
 - test: no existing tests
 - smoke:
-  1. Start the server: `cd /Users/name/homelab/flybrain && node server/caretaker.js`
-  2. Verify server starts without errors (look for `[caretaker] WebSocket server on port 7600`)
-  3. Open `index.html` in a browser served via HTTP (not file://)
-  4. Verify the "Activity" button appears in the toolbar on desktop
-  5. Click "Activity" -- sidebar should slide in from the left
-  6. Click "Activity" again or the X button -- sidebar should slide out
-  7. When connected to the caretaker server, send a command via stdin (e.g., `{"action":"place_food","params":{"x":300,"y":300},"reasoning":"fly was hungry"}`) and verify an entry appears in the activity feed with green left border and icon "F"
-  8. Verify that on page load, historical entries appear (if any exist in the DB)
-  9. Click an entry with reasoning text -- verify the detail row expands below
-  10. Verify on mobile viewport (<=768px): the Activity button is hidden, the hamburger button still opens the bottom panel drawer
+  1. Start server: `cd /Users/name/homelab/flybrain && ANTHROPIC_API_KEY=test node server/caretaker.js` -- verify it starts without errors on port 7600
+  2. Test chat history endpoint: `curl -s http://localhost:7600/chat/history` -- expect `[]` (empty JSON array)
+  3. Test chat endpoint rejects missing message: `curl -s -X POST http://localhost:7600/chat -H 'Content-Type: application/json' -d '{}'` -- expect `{"error":"message field is required"}`
+  4. Verify the sidebar HTML has the chat-section div: `grep 'chat-section' index.html` -- expect a match
+  5. Verify the CSS has chat styles: `grep 'chat-input-row' css/main.css` -- expect a match
+  6. Verify agent/chat-policy.md exists and is non-empty: `test -s agent/chat-policy.md && echo OK`
+  7. Kill the test server after smoke tests
 
 ## Constraints
-- Do NOT modify SPEC.md, TASKS.md, or CLAUDE.md
-- Do NOT add any npm dependencies
-- Do NOT use emojis in the icon mapping (use single ASCII characters)
-- Do NOT push the canvas layout when opening the sidebar -- use overlay (transform: translateX) pattern
-- Do NOT break the existing mobile hamburger behavior (bottom panel drawer)
-- Do NOT change the z-index of existing elements (#left-panel=20, education-panel=25, toolbar=20)
-- The sidebar z-index MUST be 22
-- The sidebar bottom MUST be 180px on desktop (to avoid overlapping the bottom panel)
-- All colors MUST come from CSS custom properties defined in :root (no hardcoded hex values in component styles)
-- The `caretaker-sidebar.js` script tag MUST appear BEFORE `caretaker-bridge.js` in index.html
+- Do NOT modify SPEC.md, TASKS.md, CLAUDE.md, or any files in .buildloop/ other than current-plan.md
+- Do NOT add a WebSocket-based chat channel -- use HTTP POST for chat (request/response pattern fits better than streaming for this use case, and avoids multiplexing complexity on the single browserSocket)
+- Do NOT install express or any HTTP framework -- use the existing `http.createServer` in caretaker.js
+- Do NOT modify the caretaker-bridge.js WebSocket message routing -- chat goes over HTTP, not WS
+- Do NOT change the existing activity feed behavior or CSS
+- The `chat_messages` table and `insertChatMessage` method already exist in db.js -- do NOT recreate them
+- Use `claude-sonnet-4-20250514` as the model for chat responses (fast, cost-effective for conversational Q&A)
+- The `@anthropic-ai/sdk` constructor reads ANTHROPIC_API_KEY from process.env automatically -- do NOT hardcode any API keys
+- Persist both user and assistant messages to DB only AFTER successful API response (pattern #5 from known patterns -- never persist before API success)
+- Do NOT add error retry logic or exponential backoff -- a simple try/catch with error message display is sufficient
+- The activity feed `flex: 1` must remain so it fills remaining space above the chat section
+- Chat section `max-height: 45%` prevents it from consuming the entire sidebar

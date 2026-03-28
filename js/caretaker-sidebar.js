@@ -2,6 +2,11 @@
   var feedList = null;
   var sidebar = null;
   var userScrolled = false;
+  var chatHistory = null;
+  var chatInput = null;
+  var chatSendBtn = null;
+  var chatLoading = false;
+  var CHAT_API_URL = 'http://' + (location.hostname || 'localhost') + ':7600';
 
   var iconMap = {
     place_food: 'F',
@@ -37,6 +42,24 @@
         userScrolled = false;
       }
     });
+
+    chatHistory = document.getElementById('chat-history');
+    chatInput = document.getElementById('chat-input');
+    chatSendBtn = document.getElementById('chat-send-btn');
+
+    if (chatSendBtn) {
+      chatSendBtn.addEventListener('click', sendChatMessage);
+    }
+    if (chatInput) {
+      chatInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendChatMessage();
+        }
+      });
+    }
+
+    loadChatHistory();
   }
 
   function formatTime(isoString) {
@@ -148,6 +171,76 @@
     return sidebar !== null && sidebar.classList.contains('sidebar-open');
   }
 
+  function formatChatTime(isoString) {
+    var d = new Date(isoString);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function escapeHtml(str) {
+    var d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  function appendChatMessage(role, message, timestamp, isError) {
+    if (chatHistory === null) return;
+    var el = document.createElement('div');
+    el.className = 'chat-msg chat-msg-' + (isError ? 'error' : role);
+    el.innerHTML = '<div class="chat-msg-time">' + (role === 'user' ? 'You' : 'Claude') + ' -- ' + formatChatTime(timestamp) + '</div>' + '<div>' + escapeHtml(message) + '</div>';
+    chatHistory.appendChild(el);
+    chatHistory.scrollTop = chatHistory.scrollHeight;
+  }
+
+  function sendChatMessage() {
+    if (chatInput === null || chatLoading === true) return;
+    var msg = chatInput.value.trim();
+    if (msg === '') return;
+    chatInput.value = '';
+    appendChatMessage('user', msg, new Date().toISOString(), false);
+    chatLoading = true;
+    chatSendBtn.disabled = true;
+    var loadingEl = document.createElement('div');
+    loadingEl.className = 'chat-loading';
+    loadingEl.textContent = 'Thinking';
+    chatHistory.appendChild(loadingEl);
+    chatHistory.scrollTop = chatHistory.scrollHeight;
+    var body = JSON.stringify({ message: msg, context: null });
+    fetch(CHAT_API_URL + '/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body })
+      .then(function(res) { return res.json(); })
+      .then(function(data) {
+        if (loadingEl.parentNode) loadingEl.parentNode.removeChild(loadingEl);
+        if (data.error) {
+          appendChatMessage('assistant', data.error, new Date().toISOString(), true);
+        } else {
+          appendChatMessage('assistant', data.message, data.timestamp, false);
+        }
+        chatLoading = false;
+        chatSendBtn.disabled = false;
+        chatInput.focus();
+      })
+      .catch(function(err) {
+        if (loadingEl.parentNode) loadingEl.parentNode.removeChild(loadingEl);
+        appendChatMessage('assistant', 'Connection error: ' + err.message, new Date().toISOString(), true);
+        chatLoading = false;
+        chatSendBtn.disabled = false;
+      });
+  }
+
+  function loadChatHistory() {
+    if (chatHistory === null) return;
+    fetch(CHAT_API_URL + '/chat/history')
+      .then(function(res) { return res.json(); })
+      .then(function(messages) {
+        chatHistory.innerHTML = '';
+        for (var i = 0; i < messages.length; i++) {
+          appendChatMessage(messages[i].role, messages[i].message, messages[i].timestamp, false);
+        }
+      })
+      .catch(function(err) {
+        console.warn('[chat] Failed to load history:', err.message);
+      });
+  }
+
   init();
 
   window.CaretakerSidebar = {
@@ -156,6 +249,7 @@
     onIncident: onIncident,
     onHistory: onHistory,
     toggle: toggle,
-    isOpen: isOpen
+    isOpen: isOpen,
+    loadChatHistory: loadChatHistory
   };
 })();
