@@ -1,35 +1,43 @@
-# Build Claims -- D68.3
+# Build Claims -- T8.1
 
 ## Files Changed
-- [MODIFY] js/neuro-renderer.js -- Extracted 4 pure functions (computeSectionLayout, needsResize, cssToCanvasCoords, computeLabelMaxWidths) from the IIFE; refactored buildLayout() and handleResize() to call the extracted functions; added _test export block gated on BRAIN._testMode
-- [MODIFY] tests/run-node.js -- Added window global stub for IIFE compatibility; added js/neuro-renderer.js to the moreFiles load list
-- [MODIFY] tests/tests.js -- Added 11 test functions covering all 6 D68.3 checklist items, guarded by NeuroRenderer._test availability
+- [CREATE] package.json -- npm project config with ws@8.18.0 dependency
+- [CREATE] package-lock.json -- auto-generated lockfile from npm install
+- [CREATE] server/caretaker.js -- WebSocket server bridging browser state to Claude Code via stdin/stdout, with JSON Lines logging and incident detection (112 lines)
+- [CREATE] js/caretaker-bridge.js -- Browser-side IIFE that serializes fly state at 1Hz over WebSocket and executes commands from the server (104 lines)
+- [MODIFY] index.html -- Added script tag for caretaker-bridge.js after main.js
+- [MODIFY] .gitignore -- Added node_modules/ and caretaker.log
 
 ## Verification Results
-- Build: PASS (no build step -- vanilla JS)
-- Tests: PASS (node tests/run-node.js -- 99 passed / 0 failed / 99 total)
-- Lint: SKIPPED (no linter configured)
+- Build: PASS (`npm install` -- 0 vulnerabilities)
+- Lint: PASS (`node -c server/caretaker.js` -- no syntax errors)
+- Tests: PASS (`node tests/run-node.js` -- 99 passed / 0 failed / 99 total)
+- Smoke: PASS (server starts on port 7600, stdin commands produce action_ack on stdout, caretaker.log written with timestamped JSON Lines)
 
 ## Claims
-- [ ] computeSectionLayout is a pure function that takes regionCounts array and container dimensions, returns sections with x0/x1/sectionW/pointSize/localRows/neuronCount, canvasWidth, canvasHeight, displayScale, and rowsAvail
-- [ ] computeSectionLayout produces numerically identical layout results to the original inline code in buildLayout() -- same algorithm, same variable names, same computation order
-- [ ] buildLayout() now calls computeSectionLayout() and uses its return value to drive neuron positioning and GL buffer creation
-- [ ] needsResize is a pure function that returns true when height changes OR when width delta >= 2 (accounting for displayScale)
-- [ ] handleResize() now calls needsResize() instead of inlining the check
-- [ ] cssToCanvasCoords is a pure function that converts CSS client coordinates to canvas pixel coordinates, accounting for rect offset, scroll, and CSS stretch ratio
-- [ ] cssToCanvasCoords is standalone (not wired into onMouseMove) -- the existing inline code in onMouseMove is untouched for performance
-- [ ] computeLabelMaxWidths is a pure function that computes max CSS widths for section labels, skipping empty sections and applying displayScale
-- [ ] computeLabelMaxWidths is standalone (not wired into buildLabels) -- existing buildLabels code is untouched
-- [ ] NeuroRenderer._test is only set when BRAIN._testMode is true, exposing all 4 functions and 6 constants
-- [ ] neuro-renderer.js IIFE loads cleanly in Node without DOM/WebGL errors (no DOM calls at module level)
-- [ ] 11 new test functions follow the existing var test_* naming convention and are auto-discovered by runAllTests()
-- [ ] Tests are guarded by if (typeof NeuroRenderer !== 'undefined' && NeuroRenderer._test) so they are skipped if the module fails to load
-- [ ] No changes to vertex shader, fragment shader, or any WebGL rendering code
-- [ ] No changes to the visual output or behavior of neuro-renderer.js in the browser
+- [ ] server/caretaker.js starts a WebSocket server on port 7600 (or CARETAKER_PORT env var)
+- [ ] server/caretaker.js reads JSON commands from stdin and writes JSON responses to stdout
+- [ ] server/caretaker.js validates actions against whitelist: place_food, set_light, set_temp, touch, blow_wind, clear_food
+- [ ] server/caretaker.js forwards commands to connected browser via WebSocket
+- [ ] server/caretaker.js writes all observations, actions, and incidents to caretaker.log as JSON Lines with ISO timestamps
+- [ ] server/caretaker.js detects "scared_the_fly" incident when fear spikes > 0.2 within 5s of a Claude action
+- [ ] server/caretaker.js detects "forgot_to_feed" incident when hunger > 0.9 and food array is empty
+- [ ] server/caretaker.js sends action_ack with success:false and error message when no browser is connected
+- [ ] js/caretaker-bridge.js is wrapped in an IIFE, exposes window.caretakerBridge for debugging
+- [ ] js/caretaker-bridge.js polls for BRAIN initialization before connecting
+- [ ] js/caretaker-bridge.js sends fly state (drives, behavior, position, firingStats, food, environment) at 1Hz
+- [ ] js/caretaker-bridge.js executes all 6 command types: place_food (with coordinate clamping), set_light, set_temp, touch (defaults to fly center), blow_wind, clear_food
+- [ ] js/caretaker-bridge.js auto-reconnects after 3s on disconnect
+- [ ] index.html loads caretaker-bridge.js after main.js
+- [ ] .gitignore includes node_modules/ and caretaker.log
+- [ ] No existing JS files were modified
+- [ ] All 99 existing tests still pass (caretaker-bridge.js is not loaded in Node tests)
+- [ ] server/caretaker.js is under 150 lines (112 lines)
+- [ ] js/caretaker-bridge.js is under 120 lines (104 lines)
 
 ## Gaps and Assumptions
-- computeLabelMaxWidths is not wired into buildLabels() -- it's a standalone pure function for testability only; the existing buildLabels code was not refactored to call it (per plan: "No need to refactor ... purely for testability")
-- cssToCanvasCoords is not wired into onMouseMove -- same rationale as above
-- The test for checklist item 5 (high-DPI crisp points via image-rendering:pixelated) is CSS-only and not tested here -- it requires browser rendering verification
-- The test for checklist item 3 (label truncation with ellipsis) tests the max-width computation but not the actual CSS text-overflow:ellipsis rendering
-- The plan expected 80 total tests (69 + 11) but the actual count is 99 (88 existing + 11 new) -- more tests were added in prior tasks than the plan accounted for
+- Browser-side testing not performed (requires DOM + WebSocket APIs in a real browser)
+- Only one browser connection is supported at a time (last connection wins)
+- "forgot_to_feed" incident fires on every state update while condition holds (no debouncing) -- this matches the plan but could be noisy
+- The bridge assumes globals (fly, food, behavior, BRAIN, facingDir, speed, lightStates, lightStateIndex, lightLabels, tempStates, tempStateIndex, tempLabels, windResetTime, applyTouchTool) are defined by the time BRAIN.drives exists -- reasonable given script load order but not independently verified
+- place_food coordinate clamping uses toolbar height 44 as lower y bound, matching main.js convention

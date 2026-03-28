@@ -1,503 +1,375 @@
-# Plan: D68.3
+# Plan: T8.1
 
-## Summary
-
-D68.3 is a smoke verification task for neuro-renderer.js changes. The renderer's IIFE currently exposes only `{init, destroy, isActive}`. To enable automated testing of layout math, resize detection, coordinate conversion, and label overflow in Node (no WebGL/DOM), we:
-
-1. Extract the pure computation logic into standalone functions inside the IIFE
-2. Expose them via `NeuroRenderer._test` (guarded by `BRAIN._testMode`) following the `BRAIN._bridge` pattern
-3. Add a mock/load block in `run-node.js` for neuro-renderer.js (mocking minimal DOM/WebGL stubs)
-4. Write tests in `tests/tests.js` that exercise each checklist item's underlying logic
-5. Verify CSS correctness by reading the file (no code change needed -- CSS is already correct)
+Build WebSocket bridge and caretaker server. Three new files + one modification.
 
 ## Dependencies
-- list: none (vanilla JS, no packages)
-- commands: none
+- list: [`ws@8.18.0`]
+- commands: [`cd /Users/name/homelab/flybrain && npm init -y && npm install ws@8.18.0`]
 
 ## File Operations (in execution order)
 
-### 1. MODIFY js/neuro-renderer.js
+### 1. CREATE `package.json`
+- operation: CREATE
+- reason: Project has no package.json. Needed for the `ws` npm dependency used by `server/caretaker.js`.
+
+#### Content
+```json
+{
+  "name": "flybrain",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Interactive virtual Drosophila",
+  "scripts": {
+    "caretaker": "node server/caretaker.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
+```
+
+Note: Use `npm init -y` then `npm install ws@8.18.0` to generate the lock file. Then overwrite package.json with the above content (keeping the generated lock file).
+
+---
+
+### 2. CREATE `server/caretaker.js`
+- operation: CREATE
+- reason: WebSocket server bridging browser state to Claude Code via stdin/stdout, plus JSON Lines logging and incident detection.
+
+#### Imports / Dependencies
+```javascript
+var WebSocket = require('ws');
+var http = require('http');
+var fs = require('fs');
+var path = require('path');
+var readline = require('readline');
+```
+
+#### Constants
+```javascript
+var PORT = parseInt(process.env.CARETAKER_PORT, 10) || 7600;
+var LOG_PATH = path.join(__dirname, '..', 'caretaker.log');
+```
+
+#### State Variables
+```javascript
+var logStream = fs.createWriteStream(LOG_PATH, { flags: 'a' });
+var lastState = null;         // most recent fly state from browser
+var lastActionTime = 0;       // timestamp of last Claude action sent
+var lastActionType = null;    // string name of last Claude action
+var preFearLevel = 0;         // fear level before last Claude action
+var browserSocket = null;     // current WebSocket connection (only one browser at a time)
+```
+
+#### Functions
+
+- signature: `function writeLog(entry)`
+  - purpose: Append a JSON Lines entry to caretaker.log
+  - logic:
+    1. Set `entry.timestamp = new Date().toISOString()`
+    2. Call `logStream.write(JSON.stringify(entry) + '\n')`
+  - returns: void
+
+- signature: `function writeStdout(obj)`
+  - purpose: Send a JSON line to stdout for Claude Code to read
+  - logic:
+    1. Call `process.stdout.write(JSON.stringify(obj) + '\n')`
+  - returns: void
+
+- signature: `function detectIncidents(state)`
+  - purpose: Check for incidents based on current state and recent actions
+  - logic:
+    1. Extract `fear = state.drives.fear`, `hunger = state.drives.hunger`, `foodCount = state.food.length`
+    2. **Scared the fly**: If `lastActionTime > 0` AND `Date.now() - lastActionTime < 5000` AND `fear - preFearLevel > 0.2`, create incident `{ type: "incident", incident: "scared_the_fly", action: lastActionType, fearBefore: preFearLevel, fearAfter: fear, flyState: state }`. Call `writeLog(incident)`. Call `writeStdout(incident)`. Reset `lastActionTime = 0`.
+    3. **Forgot to feed**: If `hunger > 0.9` AND `foodCount === 0`, create incident `{ type: "incident", incident: "forgot_to_feed", hunger: hunger, flyState: state }`. Call `writeLog(incident)`. Call `writeStdout(incident)`.
+  - returns: void
+
+- signature: `function handleStateMessage(data)`
+  - purpose: Process a state update from the browser
+  - logic:
+    1. Parse `msg = JSON.parse(data)`. If parse fails, return.
+    2. If `msg.type !== 'state'`, return.
+    3. Set `lastState = msg.data`
+    4. Create log entry `{ type: "observation", data: msg.data }`
+    5. Call `writeLog(logEntry)`
+    6. Call `writeStdout({ type: "state", timestamp: new Date().toISOString(), data: msg.data })`
+    7. Call `detectIncidents(msg.data)`
+  - returns: void
+
+- signature: `function handleStdinCommand(line)`
+  - purpose: Process a command line from stdin (from Claude Code)
+  - logic:
+    1. Parse `cmd = JSON.parse(line)`. If parse fails, write error to stderr and return.
+    2. Validate `cmd.action` is one of: `'place_food'`, `'set_light'`, `'set_temp'`, `'touch'`, `'blow_wind'`, `'clear_food'`. If not, write error to stderr and return.
+    3. Record pre-action state: `preFearLevel = lastState ? lastState.drives.fear : 0`
+    4. Set `lastActionTime = Date.now()`
+    5. Set `lastActionType = cmd.action`
+    6. Create log entry `{ type: "action", action: cmd.action, params: cmd.params || {}, reasoning: cmd.reasoning || "", flyState: lastState }`
+    7. Call `writeLog(logEntry)`
+    8. If `browserSocket` is not null and `browserSocket.readyState === WebSocket.OPEN`:
+       - Send `JSON.stringify({ type: "command", action: cmd.action, params: cmd.params || {} })` to `browserSocket`
+       - Call `writeStdout({ type: "action_ack", action: cmd.action, success: true })`
+    9. Else: call `writeStdout({ type: "action_ack", action: cmd.action, success: false, error: "no browser connected" })`
+  - returns: void
+
+#### Server Setup (top-level wiring after function definitions)
+
+1. Create HTTP server: `var server = http.createServer()` (no routes needed, only WebSocket).
+2. Create WebSocket server: `var wss = new WebSocket.Server({ server: server })`.
+3. On `wss` `'connection'` event with callback `function(ws)`:
+   - Set `browserSocket = ws`
+   - Write to stderr: `'[caretaker] Browser connected\n'`
+   - On `ws` `'message'` event: call `handleStateMessage(data.toString())`
+   - On `ws` `'close'` event: set `browserSocket = null`, write to stderr `'[caretaker] Browser disconnected\n'`
+   - On `ws` `'error'` event: write error to stderr
+4. Set up stdin readline:
+   ```javascript
+   var rl = readline.createInterface({ input: process.stdin, terminal: false });
+   rl.on('line', handleStdinCommand);
+   rl.on('close', function() { process.exit(0); });
+   ```
+5. Start server: `server.listen(PORT, function() { process.stderr.write('[caretaker] WebSocket server on port ' + PORT + '\n'); })`
+6. Handle SIGINT/SIGTERM: close `logStream`, close `wss`, call `process.exit(0)`.
+
+#### Error Handling
+- JSON parse errors in `handleStateMessage`: catch and write to stderr, do not crash.
+- JSON parse errors in `handleStdinCommand`: catch and write to stderr, write error JSON to stdout.
+- WebSocket send errors: catch and write to stderr.
+
+---
+
+### 3. CREATE `js/caretaker-bridge.js`
+- operation: CREATE
+- reason: Browser-side WebSocket client that serializes fly state at ~1Hz and executes commands received from the server.
+
+#### Design Notes
+- All variables referenced (`fly`, `food`, `behavior`, `BRAIN`, `facingDir`, `speed`, `lightStates`, `lightStateIndex`, `lightLabels`, `tempStates`, `tempStateIndex`, `tempLabels`, `windResetTime`, `touchResetTime`, `applyTouchTool`) are globals defined in `main.js` and `connectome.js`. Since all scripts share the global scope, they are accessible directly.
+- Wrap everything in an IIFE `(function() { ... })()` to avoid polluting global scope with bridge internals.
+- Expose `window.caretakerBridge` for debugging (connection status, manual send).
+
+#### Constants
+```javascript
+var WS_URL = 'ws://' + (location.hostname || 'localhost') + ':7600';
+var STATE_INTERVAL = 1000; // 1Hz state broadcast
+var RECONNECT_DELAY = 3000; // retry after 3s on disconnect
+```
+
+#### State Variables
+```javascript
+var ws = null;
+var stateTimer = null;
+var reconnectTimer = null;
+var connected = false;
+```
+
+#### Functions
+
+- signature: `function getState()`
+  - purpose: Serialize current fly state into a plain object
+  - logic:
+    1. Return object:
+       ```javascript
+       {
+         drives: {
+           hunger: BRAIN.drives.hunger,
+           fear: BRAIN.drives.fear,
+           fatigue: BRAIN.drives.fatigue,
+           curiosity: BRAIN.drives.curiosity,
+           groom: BRAIN.drives.groom
+         },
+         behavior: {
+           current: behavior.current,
+           enterTime: behavior.enterTime,
+           groomLocation: behavior.groomLocation
+         },
+         position: {
+           x: fly.x,
+           y: fly.y,
+           facingDir: facingDir,
+           speed: speed
+         },
+         firingStats: {
+           firedNeurons: BRAIN.workerFiredNeurons || 0
+         },
+         food: food.map(function(f) {
+           return { x: f.x, y: f.y, radius: f.radius, eaten: f.eaten };
+         }),
+         environment: {
+           lightLevel: BRAIN.stimulate.lightLevel,
+           temperature: BRAIN.stimulate.temperature
+         }
+       }
+       ```
+  - returns: plain object with the structure above
+
+- signature: `function sendState()`
+  - purpose: Send current fly state to the WebSocket server
+  - logic:
+    1. If `ws === null` or `ws.readyState !== WebSocket.OPEN`, return.
+    2. Call `ws.send(JSON.stringify({ type: 'state', data: getState() }))`
+  - returns: void
+
+- signature: `function executeCommand(msg)`
+  - purpose: Parse and execute a command received from the server
+  - logic:
+    1. Parse `msg` with `JSON.parse`. If parse fails, log to console.warn and return.
+    2. If `msg.type !== 'command'`, return.
+    3. Extract `action = msg.action`, `params = msg.params || {}`.
+    4. Switch on `action`:
+       - **`'place_food'`**: Push `{ x: params.x, y: params.y, radius: 10, feedStart: 0, feedDuration: 0, eaten: 0 }` onto the global `food` array. Clamp `params.x` to `[0, window.innerWidth]` and `params.y` to `[44, window.innerHeight]` before pushing (44 is toolbar height, matching main.js line 650).
+       - **`'set_light'`**: Validate `params.level` is one of `'bright'`, `'dim'`, `'dark'`. Map to index: `bright=0`, `dim=1`, `dark=2`. Set `lightStateIndex = index`. Set `BRAIN.stimulate.lightLevel = lightStates[index]`. Update button text: `document.getElementById('lightBtn').textContent = 'Light: ' + lightLabels[index]`.
+       - **`'set_temp'`**: Validate `params.level` is one of `'neutral'`, `'warm'`, `'cool'`. Map to index: `neutral=0`, `warm=1`, `cool=2`. Set `tempStateIndex = index`. Set `BRAIN.stimulate.temperature = tempStates[index]`. Update button text: `document.getElementById('tempBtn').textContent = 'Temp: ' + tempLabels[index]`.
+       - **`'touch'`**: Call `applyTouchTool(params.x, params.y)`. Default `params.x` to `fly.x` and `params.y` to `fly.y` if not provided (touch the fly center).
+       - **`'blow_wind'`**: Set `BRAIN.stimulate.wind = true`. Set `BRAIN.stimulate.windStrength = Math.min(1, Math.max(0, params.strength || 0.5))`. Set `BRAIN.stimulate.windDirection = params.direction || 0`. Set `windResetTime = Date.now() + 2000`.
+       - **`'clear_food'`**: Set `food.length = 0` (mutates the global array in-place).
+       - **default**: Log unknown action to console.warn.
+  - returns: void
+
+- signature: `function connect()`
+  - purpose: Establish WebSocket connection to the caretaker server
+  - logic:
+    1. If `reconnectTimer !== null`, call `clearTimeout(reconnectTimer)` and set `reconnectTimer = null`.
+    2. Try to create `ws = new WebSocket(WS_URL)`.
+    3. On `ws.onopen`:
+       - Set `connected = true`
+       - Log to console: `'[caretaker] Connected to ' + WS_URL`
+       - Start state interval: `stateTimer = setInterval(sendState, STATE_INTERVAL)`
+       - Send an initial state immediately: call `sendState()`
+    4. On `ws.onmessage`:
+       - Call `executeCommand(event.data)`
+    5. On `ws.onclose`:
+       - Set `connected = false`
+       - If `stateTimer !== null`, call `clearInterval(stateTimer)` and set `stateTimer = null`.
+       - Log to console: `'[caretaker] Disconnected, reconnecting in ' + (RECONNECT_DELAY / 1000) + 's'`
+       - Set `reconnectTimer = setTimeout(connect, RECONNECT_DELAY)`
+    6. On `ws.onerror`:
+       - Do nothing (onclose will fire after onerror). Prevents console spam.
+  - returns: void
+
+- signature: `function init()`
+  - purpose: Wait for BRAIN to be ready, then connect
+  - logic:
+    1. Check if `typeof BRAIN !== 'undefined' && BRAIN.drives`. If true, call `connect()` and return.
+    2. Otherwise, `setTimeout(init, 500)` (poll until BRAIN is initialized).
+  - returns: void
+
+#### IIFE Bottom (wiring)
+1. Call `init()`.
+2. Expose debug handle: `window.caretakerBridge = { getState: getState, connect: connect, isConnected: function() { return connected; } }`.
+
+---
+
+### 4. MODIFY `.gitignore`
 - operation: MODIFY
-- reason: Extract pure layout/resize/coordinate math into named functions; expose via `_test` in test mode; refactor existing code to call the extracted functions
+- reason: Add `node_modules/` and `caretaker.log` to prevent committing npm deps and log output.
+- anchor: `.vscode/`
 
-#### Anchor 1: Constants block (top of IIFE)
+#### Change
+Append these two lines to the end of the existing `.gitignore` file:
+
 ```
-var SECTION_NAMES = ['Sensory', 'Central', 'Drives', 'Motor'];
-```
-
-#### Change 1a: Add `_testMode` guard and test export block at end of IIFE
-
-- anchor: `window.NeuroRenderer = { init: init, destroy: destroy, isActive: isActive };`
-- After this line, before the closing `})();`, add a test-mode export block.
-
-Add the following block immediately before `})();`:
-
-```javascript
-if (typeof BRAIN !== 'undefined' && BRAIN._testMode) {
-    NeuroRenderer._test = {
-        computeSectionLayout: computeSectionLayout,
-        needsResize: needsResize,
-        cssToCanvasCoords: cssToCanvasCoords,
-        computeLabelMaxWidths: computeLabelMaxWidths,
-        POINT_SIZE: POINT_SIZE,
-        MIN_SECTION_W: MIN_SECTION_W,
-        MAX_SMALL_PS: MAX_SMALL_PS,
-        SECTION_GAP: SECTION_GAP,
-        PAD: PAD,
-        PICK_RADIUS_SQ: PICK_RADIUS_SQ
-    };
-}
+node_modules/
+caretaker.log
 ```
 
-#### Change 1b: Extract `computeSectionLayout` pure function
-
-Extract the layout math from `buildLayout()` into a standalone pure function. Place this function definition immediately before the existing `buildLayout` function.
-
-- anchor: `function buildLayout() {`
-
-Add before it:
-
-```javascript
-function computeSectionLayout(regionCounts, containerW, containerH, pointSize, minSectionW, maxSmallPS, sectionGap, pad) {
-    var usableH = containerH - sectionGap - pad;
-    var rowsAvail = Math.max(1, Math.floor(usableH / pointSize));
-
-    var totalNeurons = 0;
-    for (var r = 0; r < regionCounts.length; r++) totalNeurons += regionCounts[r];
-    var availableW = containerW - ((regionCounts.length - 1) * sectionGap);
-    var minRowsForWidth = Math.ceil(totalNeurons * pointSize / Math.max(1, availableW));
-    if (minRowsForWidth > rowsAvail) rowsAvail = minRowsForWidth;
-
-    var sections = [];
-    var cursorX = 0;
-
-    for (var r = 0; r < regionCounts.length; r++) {
-        var count = regionCounts[r];
-        if (count === 0) {
-            sections.push({x0: cursorX, x1: cursorX, sectionW: 0, pointSize: pointSize, localRows: rowsAvail, neuronCount: 0});
-            continue;
-        }
-
-        var naturalW = Math.ceil(count / rowsAvail) * pointSize;
-        var localPS = pointSize;
-        var localRows = rowsAvail;
-        if (naturalW < minSectionW) {
-            localPS = Math.min(maxSmallPS, Math.sqrt(minSectionW * usableH / count));
-            localPS = Math.max(pointSize, localPS);
-            localRows = Math.max(1, Math.floor(usableH / localPS));
-        }
-
-        var sectionX0 = cursorX;
-        var colsNeeded = Math.ceil(count / localRows);
-        var sectionW = colsNeeded * localPS;
-
-        cursorX += sectionW + sectionGap;
-        sections.push({x0: sectionX0, x1: cursorX - sectionGap, sectionW: sectionW, pointSize: localPS, localRows: localRows, neuronCount: count});
-    }
-
-    var canvasWidth = Math.ceil(cursorX);
-    var displayScaleVal = containerW / canvasWidth;
-
-    return {sections: sections, canvasWidth: canvasWidth, canvasHeight: containerH, displayScale: displayScaleVal, rowsAvail: rowsAvail};
-}
+The existing file contains:
+```
+weights.txt
+extract_weights_to_json.py
+.vscode/
 ```
 
-Then refactor `buildLayout()` to call `computeSectionLayout` for the dimension/bounds computation. Specifically, replace lines from `var usableH = H - SECTION_GAP - PAD;` through `cursorX += sectionW + SECTION_GAP;` and `sectionBounds.push(...)` with a call to `computeSectionLayout` that drives the same outputs.
-
-Refactored `buildLayout()`:
-
-```javascript
-function buildLayout() {
-    var regionType = BRAIN.workerRegionType;
-    var regionNeurons = [[], [], [], []];
-    for (var i = 0; i < neuronCount; i++) {
-        regionNeurons[regionType[i]].push(i);
-    }
-
-    var wrap = canvas.parentElement;
-    var wrapRect = wrap.getBoundingClientRect();
-    var H = Math.floor(wrapRect.height) || 140;
-    var W = Math.floor(wrapRect.width) || 800;
-
-    var regionCounts = [regionNeurons[0].length, regionNeurons[1].length, regionNeurons[2].length, regionNeurons[3].length];
-    var layout = computeSectionLayout(regionCounts, W, H, POINT_SIZE, MIN_SECTION_W, MAX_SMALL_PS, SECTION_GAP, PAD);
-
-    neuronPositions = new Float32Array(neuronCount * 2);
-    var posData = new Float32Array(neuronCount * 2);
-    var colorData = new Float32Array(neuronCount * 3);
-    var pointSizeData = new Float32Array(neuronCount);
-    sectionBounds = [];
-
-    for (var r = 0; r < 4; r++) {
-        var neurons = regionNeurons[r];
-        var sec = layout.sections[r];
-
-        if (neurons.length === 0) {
-            sectionBounds.push({x0: sec.x0, x1: sec.x1, y0: 0, y1: H, region: r, neuronIndices: [], pointSize: sec.pointSize, localRows: sec.localRows});
-            continue;
-        }
-
-        var localPS = sec.pointSize;
-        var localRows = sec.localRows;
-
-        for (var j = 0; j < neurons.length; j++) {
-            var nIdx = neurons[j];
-            var col = Math.floor(j / localRows);
-            var row = j % localRows;
-            var px = sec.x0 + col * localPS + localPS * 0.5;
-            var py = SECTION_GAP + row * localPS + localPS * 0.5;
-            posData[nIdx * 2] = px;
-            posData[nIdx * 2 + 1] = py;
-            neuronPositions[nIdx * 2] = px;
-            neuronPositions[nIdx * 2 + 1] = py;
-            pointSizeData[nIdx] = localPS;
-            var rgb = REGION_COLORS[r];
-            colorData[nIdx * 3] = rgb[0];
-            colorData[nIdx * 3 + 1] = rgb[1];
-            colorData[nIdx * 3 + 2] = rgb[2];
-        }
-        sectionBounds.push({x0: sec.x0, x1: sec.x1, y0: 0, y1: H, region: r, neuronIndices: neurons, pointSize: localPS, localRows: localRows});
-    }
-
-    canvas.width = layout.canvasWidth;
-    canvas.height = layout.canvasHeight;
-    displayScale = layout.displayScale;
-    gl.viewport(0, 0, canvas.width, canvas.height);
-
-    canvas.style.width = W + 'px';
-
-    if (posBuffer) gl.deleteBuffer(posBuffer);
-    posBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, posData, gl.STATIC_DRAW);
-
-    if (colorBuffer) gl.deleteBuffer(colorBuffer);
-    colorBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, colorData, gl.STATIC_DRAW);
-
-    brightnessData = new Float32Array(neuronCount);
-    if (brightnessBuffer) gl.deleteBuffer(brightnessBuffer);
-    brightnessBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, brightnessBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, brightnessData, gl.DYNAMIC_DRAW);
-
-    if (pointSizeBuffer) gl.deleteBuffer(pointSizeBuffer);
-    pointSizeBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, pointSizeBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, pointSizeData, gl.STATIC_DRAW);
-}
+After modification:
+```
+weights.txt
+extract_weights_to_json.py
+.vscode/
+node_modules/
+caretaker.log
 ```
 
-#### Change 1c: Extract `needsResize` pure function
+---
 
-Place immediately before `handleResize`:
-
-```javascript
-function needsResize(canvasW, canvasH, curDisplayScale, newW, newH) {
-    var oldDisplayW = Math.round(canvasW * curDisplayScale);
-    if (newH !== canvasH) return true;
-    if (Math.abs(newW - oldDisplayW) >= 2) return true;
-    return false;
-}
-```
-
-Then refactor `handleResize` to use it:
-
-- anchor: `function handleResize() {`
-
-Replace the function body to:
-
-```javascript
-function handleResize() {
-    if (!gl || !canvas || neuronCount === 0) return;
-    var wrap = canvas.parentElement;
-    if (!wrap) return;
-    var rect = wrap.getBoundingClientRect();
-    var newH = Math.floor(rect.height) || 140;
-    var newW = Math.floor(rect.width) || 800;
-    if (!needsResize(canvas.width, canvas.height, displayScale, newW, newH)) return;
-    if (posBuffer) gl.deleteBuffer(posBuffer);
-    if (colorBuffer) gl.deleteBuffer(colorBuffer);
-    if (brightnessBuffer) gl.deleteBuffer(brightnessBuffer);
-    if (pointSizeBuffer) gl.deleteBuffer(pointSizeBuffer);
-    buildLayout();
-    buildLabels();
-}
-```
-
-#### Change 1d: Extract `cssToCanvasCoords` pure function
-
-Place immediately before `onMouseMove`:
-
-```javascript
-function cssToCanvasCoords(clientX, clientY, rectLeft, rectTop, rectWidth, rectHeight, canvasWidth, canvasHeight, scrollLeft) {
-    var canvasX = ((clientX - rectLeft) + scrollLeft) * (canvasWidth / rectWidth);
-    var canvasY = (clientY - rectTop) * (canvasHeight / rectHeight);
-    return {x: canvasX, y: canvasY};
-}
-```
-
-No need to refactor `onMouseMove` to call this (it's inlined for performance in the hot path). The extracted function is purely for testability.
-
-#### Change 1e: Extract `computeLabelMaxWidths` pure function
-
-Place immediately before `buildLabels`:
-
-```javascript
-function computeLabelMaxWidths(sectionBoundsArr, displayScaleVal) {
-    var visible = [];
-    for (var r = 0; r < sectionBoundsArr.length; r++) {
-        if (sectionBoundsArr[r].neuronIndices ? sectionBoundsArr[r].neuronIndices.length > 0 : sectionBoundsArr[r].neuronCount > 0) {
-            visible.push(r);
-        }
-    }
-    var widths = [];
-    for (var vi = 0; vi < visible.length; vi++) {
-        var r = visible[vi];
-        var leftPx = sectionBoundsArr[r].x0 * displayScaleVal;
-        if (vi < visible.length - 1) {
-            var nextLeft = sectionBoundsArr[visible[vi + 1]].x0 * displayScaleVal;
-            widths.push({region: r, leftPx: leftPx, maxWidth: Math.max(20, nextLeft - leftPx - 4)});
-        } else {
-            widths.push({region: r, leftPx: leftPx, maxWidth: -1}); // -1 means uncapped
-        }
-    }
-    return widths;
-}
-```
-
-### 2. MODIFY tests/run-node.js
+### 5. MODIFY `index.html`
 - operation: MODIFY
-- reason: Load neuro-renderer.js in test mode with minimal DOM/WebGL stubs so `_test` exports are available
-- anchor: `'tests/tests.js',`
+- reason: Load `caretaker-bridge.js` after `main.js` so all globals are available.
+- anchor: `<script type="text/javascript" src="./js/main.js?v=7"></script>`
 
-#### Changes
+#### Change
+Insert ONE new script tag immediately after the `main.js` script tag:
 
-After the existing `moreFiles` array definition (line 28-32) and before the loop that loads them (line 33), add neuro-renderer.js to the load list. But first, set up minimal stubs for DOM/WebGL APIs that the IIFE's top-level code references. Since the IIFE only defines functions and assigns to `window.NeuroRenderer` at the module level (no DOM calls at load time), the only globals needed are `window` (already `globalThis` in Node) and `BRAIN` (already loaded).
-
-Insert the following AFTER the `BRAIN._testMode = true;` line (line 25) and BEFORE the Phase 3 comment (line 27):
-
-```javascript
-// Stub window for neuro-renderer.js IIFE (assigns to window.NeuroRenderer)
-if (typeof window === 'undefined') global.window = global;
+**Before:**
+```html
+    <script type="text/javascript" src="./js/main.js?v=7"></script>
+</body>
 ```
 
-Add `'js/neuro-renderer.js'` to the `moreFiles` array, inserting it before `'tests/tests.js'`:
-
-Change:
-```javascript
-var moreFiles = [
-	'js/brain-worker-bridge.js',
-	'js/fly-logic.js',
-	'tests/tests.js',
-];
+**After:**
+```html
+    <script type="text/javascript" src="./js/main.js?v=7"></script>
+    <script type="text/javascript" src="./js/caretaker-bridge.js?v=7"></script>
+</body>
 ```
 
-To:
-```javascript
-var moreFiles = [
-	'js/brain-worker-bridge.js',
-	'js/fly-logic.js',
-	'js/neuro-renderer.js',
-	'tests/tests.js',
-];
+No other changes to `index.html`.
+
+---
+
+## Protocol Reference (for builder context)
+
+### Browser → Server (WebSocket)
+```json
+{"type":"state","data":{"drives":{"hunger":0.3,"fear":0,"fatigue":0,"curiosity":0.5,"groom":0.1},"behavior":{"current":"idle","enterTime":1711540800000,"groomLocation":null},"position":{"x":500,"y":300,"facingDir":0,"speed":0},"firingStats":{"firedNeurons":0},"food":[],"environment":{"lightLevel":1,"temperature":0.5}}}
 ```
 
-### 3. MODIFY tests/tests.js
-- operation: MODIFY
-- reason: Add test functions for each D68.3 checklist item using the extracted pure functions
-- anchor: end of file, after `} // end bridge tests guard` (line 1389-1390)
-
-Append the following test functions at the end of the file (after line 1390):
-
-```javascript
-// ============================================================
-// Section: Neuro-renderer smoke tests (D68.3)
-// ============================================================
-
-if (typeof NeuroRenderer !== 'undefined' && NeuroRenderer._test) {
-
-var test_neuro_resize_width_only_triggers_rebuild = function () {
-    // Checklist item 1: width-only resize must trigger relayout
-    var nr = NeuroRenderer._test;
-    // Same height, different width (delta >= 2) => needs resize
-    assertTrue(nr.needsResize(800, 140, 1.0, 850, 140),
-        'width-only change (800->850) triggers resize');
-    // Same height, same width => no resize
-    assertTrue(!nr.needsResize(800, 140, 1.0, 800, 140),
-        'no change does not trigger resize');
-    // Same height, tiny width change (delta < 2) => no resize
-    assertTrue(!nr.needsResize(800, 140, 1.0, 801, 140),
-        'sub-threshold width change (1px) does not trigger resize');
-    // Height change, same width => needs resize
-    assertTrue(nr.needsResize(800, 140, 1.0, 800, 160),
-        'height-only change triggers resize');
-};
-
-var test_neuro_resize_with_displayScale = function () {
-    // When displayScale != 1, oldDisplayW = canvas.width * displayScale
-    var nr = NeuroRenderer._test;
-    // canvas.width=600, displayScale=1.5 => oldDisplayW=900
-    // newW=900 => no resize needed
-    assertTrue(!nr.needsResize(600, 140, 1.5, 900, 140),
-        'displayScale-adjusted width matches => no resize');
-    // newW=920 => delta=20 >= 2 => resize needed
-    assertTrue(nr.needsResize(600, 140, 1.5, 920, 140),
-        'displayScale-adjusted width mismatch => resize');
-};
-
-var test_neuro_cssToCanvasCoords_stretch = function () {
-    // Checklist item 2: tooltip hover coords convert correctly with CSS stretch
-    var nr = NeuroRenderer._test;
-    // Canvas is 600px wide internally, CSS-stretched to 900px (rect.width=900)
-    // Click at CSS x=450 (center of stretched canvas) should map to canvas x=300
-    var coords = nr.cssToCanvasCoords(450, 70, 0, 0, 900, 140, 600, 140, 0);
-    assertClose(coords.x, 300, 0.01, 'CSS center maps to canvas center with stretch');
-    assertClose(coords.y, 70, 0.01, 'Y unchanged when no vertical stretch');
-};
-
-var test_neuro_cssToCanvasCoords_with_scroll = function () {
-    var nr = NeuroRenderer._test;
-    // scrollLeft=50, click at CSS x=100, rect.left=0, rect.width=800, canvas.width=800
-    var coords = nr.cssToCanvasCoords(100, 50, 0, 0, 800, 140, 800, 140, 50);
-    assertClose(coords.x, 150, 0.01, 'scrollLeft offset added to canvasX');
-};
-
-var test_neuro_cssToCanvasCoords_with_rect_offset = function () {
-    var nr = NeuroRenderer._test;
-    // Panel starts at x=200 in viewport. Click at clientX=300 => local x=100
-    var coords = nr.cssToCanvasCoords(300, 80, 200, 10, 600, 140, 600, 140, 0);
-    assertClose(coords.x, 100, 0.01, 'rect.left offset subtracted');
-    assertClose(coords.y, 70, 0.01, 'rect.top offset subtracted');
-};
-
-var test_neuro_layout_small_sections_get_min_width = function () {
-    // Checklist item 4: DRIVES/MOTOR render as visible grids, not 1px slivers
-    var nr = NeuroRenderer._test;
-    // Simulate: Sensory=100000, Central=35000, Drives=80, Motor=76
-    var layout = nr.computeSectionLayout([100000, 35000, 80, 76], 800, 140, nr.POINT_SIZE, nr.MIN_SECTION_W, nr.MAX_SMALL_PS, nr.SECTION_GAP, nr.PAD);
-
-    // Drives (index 2) and Motor (index 3) must have sectionW >= MIN_SECTION_W
-    assertTrue(layout.sections[2].sectionW >= nr.MIN_SECTION_W,
-        'Drives section width >= MIN_SECTION_W (' + layout.sections[2].sectionW + ' >= ' + nr.MIN_SECTION_W + ')');
-    assertTrue(layout.sections[3].sectionW >= nr.MIN_SECTION_W,
-        'Motor section width >= MIN_SECTION_W (' + layout.sections[3].sectionW + ' >= ' + nr.MIN_SECTION_W + ')');
-
-    // Small sections must have enlarged point sizes (> base POINT_SIZE)
-    assertTrue(layout.sections[2].pointSize > nr.POINT_SIZE,
-        'Drives gets enlarged pointSize (' + layout.sections[2].pointSize + ' > ' + nr.POINT_SIZE + ')');
-    assertTrue(layout.sections[3].pointSize > nr.POINT_SIZE,
-        'Motor gets enlarged pointSize (' + layout.sections[3].pointSize + ' > ' + nr.POINT_SIZE + ')');
-};
-
-var test_neuro_layout_empty_section_zero_width = function () {
-    var nr = NeuroRenderer._test;
-    // Section with 0 neurons should have zero width
-    var layout = nr.computeSectionLayout([100, 0, 50, 30], 800, 140, nr.POINT_SIZE, nr.MIN_SECTION_W, nr.MAX_SMALL_PS, nr.SECTION_GAP, nr.PAD);
-    assertEqual(layout.sections[1].sectionW, 0, 'empty section has zero width');
-    assertEqual(layout.sections[1].neuronCount, 0, 'empty section neuronCount is 0');
-};
-
-var test_neuro_layout_displayScale_shrinks_to_fit = function () {
-    // Checklist item 6: Motor not clipped -- canvas shrinks via displayScale < 1
-    var nr = NeuroRenderer._test;
-    // With very large neuron counts, canvasWidth may exceed containerW
-    // displayScale = containerW / canvasWidth < 1 means CSS shrinks canvas to fit
-    var layout = nr.computeSectionLayout([100000, 35000, 80, 76], 400, 140, nr.POINT_SIZE, nr.MIN_SECTION_W, nr.MAX_SMALL_PS, nr.SECTION_GAP, nr.PAD);
-    // With 135K+ neurons at POINT_SIZE=1 in 400px container, canvas will be wider than 400
-    if (layout.canvasWidth > 400) {
-        assertTrue(layout.displayScale < 1.0,
-            'displayScale < 1 when canvas exceeds container (' + layout.displayScale + ')');
-    }
-    // All 4 sections must have valid bounds (Motor is last, must not be clipped)
-    assertTrue(layout.sections[3].x1 <= layout.canvasWidth,
-        'Motor section x1 fits within canvasWidth');
-};
-
-var test_neuro_label_maxwidths_prevent_overlap = function () {
-    // Checklist item 3: labels truncate with ellipsis (max-width prevents overflow)
-    var nr = NeuroRenderer._test;
-    // Create mock sectionBounds with known positions
-    var bounds = [
-        {x0: 0, x1: 200, neuronIndices: [1], neuronCount: 1},
-        {x0: 216, x1: 400, neuronIndices: [2], neuronCount: 1},
-        {x0: 416, x1: 476, neuronIndices: [3], neuronCount: 1},
-        {x0: 492, x1: 552, neuronIndices: [4], neuronCount: 1}
-    ];
-    var dScale = 1.0;
-    var widths = nr.computeLabelMaxWidths(bounds, dScale);
-
-    // 4 visible sections => 4 entries
-    assertEqual(widths.length, 4, 'all 4 sections get label width entries');
-
-    // First label: maxWidth = next.x0 * dScale - this.x0 * dScale - 4
-    // = 216 - 0 - 4 = 212
-    assertClose(widths[0].maxWidth, 212, 0.01, 'first label maxWidth capped before second section');
-
-    // Third label (Drives at x0=416): maxWidth = 492 - 416 - 4 = 72
-    assertClose(widths[2].maxWidth, 72, 0.01, 'narrow section label maxWidth prevents overflow');
-
-    // Last label (Motor): maxWidth = -1 (uncapped)
-    assertEqual(widths[3].maxWidth, -1, 'last label has no maxWidth cap');
-};
-
-var test_neuro_label_maxwidths_with_displayScale = function () {
-    var nr = NeuroRenderer._test;
-    // displayScale=0.5 means CSS positions are halved
-    var bounds = [
-        {x0: 0, x1: 400, neuronIndices: [1], neuronCount: 1},
-        {x0: 416, x1: 800, neuronIndices: [2], neuronCount: 1}
-    ];
-    var widths = nr.computeLabelMaxWidths(bounds, 0.5);
-    // First label: leftPx = 0*0.5 = 0, nextLeft = 416*0.5 = 208, maxWidth = max(20, 208-0-4) = 204
-    assertClose(widths[0].maxWidth, 204, 0.01, 'displayScale applied to label maxWidth calc');
-};
-
-var test_neuro_label_skip_empty_sections = function () {
-    var nr = NeuroRenderer._test;
-    // Section 1 is empty (0 neurons)
-    var bounds = [
-        {x0: 0, x1: 200, neuronIndices: [1], neuronCount: 1},
-        {x0: 200, x1: 200, neuronIndices: [], neuronCount: 0},
-        {x0: 216, x1: 400, neuronIndices: [3], neuronCount: 1},
-        {x0: 416, x1: 500, neuronIndices: [4], neuronCount: 1}
-    ];
-    var widths = nr.computeLabelMaxWidths(bounds, 1.0);
-    // Only 3 visible sections (indices 0, 2, 3)
-    assertEqual(widths.length, 3, 'empty section skipped in label widths');
-    assertEqual(widths[0].region, 0, 'first visible is region 0');
-    assertEqual(widths[1].region, 2, 'second visible is region 2');
-    assertEqual(widths[2].region, 3, 'third visible is region 3');
-};
-
-var test_neuro_layout_point_size_capped_at_max = function () {
-    var nr = NeuroRenderer._test;
-    // Very few neurons (e.g. 2) in a section -- pointSize should not exceed MAX_SMALL_PS
-    var layout = nr.computeSectionLayout([1000, 500, 2, 3], 800, 140, nr.POINT_SIZE, nr.MIN_SECTION_W, nr.MAX_SMALL_PS, nr.SECTION_GAP, nr.PAD);
-    assertTrue(layout.sections[2].pointSize <= nr.MAX_SMALL_PS,
-        'Drives pointSize capped at MAX_SMALL_PS (' + layout.sections[2].pointSize + ' <= ' + nr.MAX_SMALL_PS + ')');
-    assertTrue(layout.sections[3].pointSize <= nr.MAX_SMALL_PS,
-        'Motor pointSize capped at MAX_SMALL_PS (' + layout.sections[3].pointSize + ' <= ' + nr.MAX_SMALL_PS + ')');
-};
-
-} // end neuro-renderer tests guard
+### Server → Browser (WebSocket)
+```json
+{"type":"command","action":"place_food","params":{"x":100,"y":200}}
 ```
+
+### stdin → Server (from Claude Code, one JSON object per line)
+```json
+{"action":"place_food","params":{"x":100,"y":200},"reasoning":"Fly hunger at 0.7, placing food nearby"}
+```
+
+### Server → stdout (to Claude Code, one JSON object per line)
+State update:
+```json
+{"type":"state","timestamp":"2026-03-27T12:00:00.000Z","data":{...same as browser state...}}
+```
+Action acknowledgment:
+```json
+{"type":"action_ack","action":"place_food","success":true}
+```
+Incident:
+```json
+{"type":"incident","timestamp":"2026-03-27T12:00:01.000Z","incident":"scared_the_fly","action":"touch","fearBefore":0.1,"fearAfter":0.6,"flyState":{...}}
+```
+
+### caretaker.log (JSON Lines, all events)
+Each line is a JSON object with `timestamp` (ISO 8601) and `type` (`"observation"`, `"action"`, or `"incident"`).
+
+---
 
 ## Verification
-- build: N/A (vanilla JS, no build step)
-- lint: N/A (no linter configured)
-- test: `node tests/run-node.js`
-- Expected: all existing 69 tests pass, plus 11 new neuro-renderer tests pass (80 total)
-- smoke: Run `node tests/run-node.js` and verify output shows 80 tests passing with 0 failures. Specifically verify no errors loading neuro-renderer.js in Node (the IIFE must not crash at load time since it only assigns functions to `window.NeuroRenderer` without calling DOM APIs).
+
+- build: `cd /Users/name/homelab/flybrain && npm install`
+- lint: No linter configured in this project. Verify no syntax errors: `node -c server/caretaker.js`
+- test: `node tests/run-node.js` (existing 69 tests must still pass -- caretaker-bridge.js is NOT loaded in tests, so no impact)
+- smoke:
+  1. Start the server: `node server/caretaker.js` -- verify stderr output: `[caretaker] WebSocket server on port 7600`
+  2. Open `index.html` in a browser -- verify console logs `[caretaker] Connected to ws://localhost:7600` (or `Disconnected, reconnecting in 3s` if server is not running -- no errors either way)
+  3. With both running, type into server stdin: `{"action":"place_food","params":{"x":300,"y":300},"reasoning":"test"}` -- verify stdout outputs an `action_ack` line and a food item appears in the browser
+  4. Verify `caretaker.log` contains JSON Lines with observation and action entries
+  5. Kill server with Ctrl+C -- verify browser logs reconnect message, no errors
 
 ## Constraints
-- Do NOT modify SPEC.md, CLAUDE.md, TASKS.md, or any .buildloop/ files other than current-plan.md
-- Do NOT add any npm dependencies
-- Do NOT change the vertex shader, fragment shader, or any WebGL rendering code
-- Do NOT change the visual output or behavior of neuro-renderer.js in the browser -- only extract pure functions and add the `_test` export
-- The `computeSectionLayout` function must produce identical numerical results to the current inline code in `buildLayout()` -- do not change the layout algorithm
-- The `window` global stub in run-node.js must be minimal -- only set it if `typeof window === 'undefined'` to avoid breaking other tests
-- Keep all new functions inside the existing IIFE -- do not create new files for neuro-renderer logic
-- All tests must follow the existing `var test_*` naming convention for auto-discovery by `runAllTests()`
-- Guard the neuro-renderer tests with `if (typeof NeuroRenderer !== 'undefined' && NeuroRenderer._test)` so they are skipped if the module fails to load
+
+- Do NOT modify any existing JS files (`main.js`, `connectome.js`, `fly-logic.js`, `brain-worker-bridge.js`, etc.) -- the bridge reads globals but changes nothing.
+- Do NOT modify CSS -- no UI changes.
+- Do NOT add caretaker-bridge.js to `tests/run-node.js` -- it depends on DOM/WebSocket APIs not available in Node.
+- Do NOT use ES modules (`import`/`export`) -- the project is vanilla ES5 with `var` declarations and no build step. Server file uses `require()` (CommonJS).
+- The `ws` package is the ONLY new npm dependency. Do not add express, socket.io, or any other packages.
+- Do NOT add `.gitignore` entries -- `node_modules/` is already likely gitignored or untracked.
+- `caretaker.log` should NOT be committed. Add `caretaker.log` to `.gitignore` if a `.gitignore` exists, otherwise note it for the user.
+- Keep the server file under 150 lines. Keep the browser bridge under 120 lines. This is a lightweight bridge, not a framework.
