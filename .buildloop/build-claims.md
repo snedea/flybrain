@@ -1,45 +1,47 @@
-# Build Claims -- T8.5
+# Build Claims -- T8.6
 
 ## Files Changed
-- [CREATE] server/db.js -- SQLite schema (5 tables, indexes), prepared statements, openDb() API with insert/query/computeDailyScore methods
-- [MODIFY] server/caretaker.js -- Replaced file-stream logging with SQLite via caretakerDb, added observation rate-limiting (10s), HTTP /state endpoint, daily_scores interval (5min), forgot_to_feed incident rate-limiting (60s)
-- [MODIFY] agent/run.sh -- Replaced grep-based get_latest_state() with HTTP curl to /state endpoint, removed LOG variable
-- [CREATE] server/migrate-logs.js -- One-time migration script reads caretaker.log, inserts into SQLite in a transaction, computes historical daily_scores
-- [MODIFY] package.json -- Added better-sqlite3 dependency (^12.8.0, plan said ^11.0.0 but Node 25 required v12), added migrate-logs script
-- [MODIFY] .gitignore -- Added data/ to prevent committing database files
+- [MODIFY] server/db.js -- Added `getRecentActivity(limit)` function that does a UNION ALL of actions + incidents tables, sorted by timestamp DESC, returns combined rows
+- [MODIFY] server/caretaker.js -- Added `broadcastActivity(obj)` helper; wired it to broadcast `activity_action` after insertAction, `activity_incident` after each insertIncident (scared_the_fly and forgot_to_feed), and `activity_history` on new WebSocket connection
+- [CREATE] js/caretaker-sidebar.js -- New IIFE module exposing `window.CaretakerSidebar` with init, onAction, onIncident, onHistory, toggle, isOpen methods. Renders color-coded activity feed entries, click-to-expand reasoning, auto-scroll management, 200-entry cap
+- [MODIFY] js/caretaker-bridge.js -- Replaced `ws.onmessage` handler to route `activity_action`, `activity_incident`, `activity_history` message types to CaretakerSidebar; `command` type still goes to executeCommand
+- [MODIFY] index.html -- Added `#caretaker-sidebar` div (before drawer-backdrop), `<script>` for caretaker-sidebar.js (between caretaker-renderer.js and caretaker-bridge.js), and "Activity" toolbar button (before Learn button)
+- [MODIFY] css/main.css -- Added full sidebar styles: fixed left overlay with translateX animation, activity-entry styles with color-coded left borders (green=feed, blue=comfort, yellow=warning, red=incident), expand/collapse detail, scrollbar styling, #activityToggle button styles, mobile overrides (full-width, hidden toggle), landscape overrides (240px width)
+- [MODIFY] js/main.js -- Wired #activityToggle click to toggle sidebar; wired #caretaker-sidebar-close to close; updated sidebarToggle (hamburger) to use isMobile() check: mobile opens bottom drawer, desktop toggles activity sidebar
 
 ## Verification Results
-- Build: PASS (npm install)
+- Build: PASS (no build step -- vanilla JS)
 - Tests: SKIPPED (no test suite configured)
 - Lint: SKIPPED (no linter configured)
-- Smoke 1: PASS (node -e "..." -- db.js insert/query/computeDailyScore all returned expected values)
-- Smoke 2: PASS (node server/migrate-logs.js -- migrated 3161 observations, 17 actions, 1943 incidents, 0 parse errors, computed 1 day of scores)
-- Smoke 3: PASS (caretaker.js server started, curl /state returned "null" as expected with no browser connected)
-- Smoke 4: PASS (ls -la data/caretaker.db -- 3.0MB file exists after migration)
+- Syntax: PASS (`node --check js/caretaker-sidebar.js` and `node --check js/caretaker-bridge.js`)
+- DB query: PASS (`node -e` test of getRecentActivity(10) returned 10 rows)
+- Server startup: PASS (server starts on port 7600 without errors)
 
 ## Claims
-- [ ] server/db.js exports openDb() which creates 5 tables: observations, actions, incidents, chat_messages, daily_scores
-- [ ] Each table has a timestamp index; daily_scores has a unique date index
-- [ ] observations table stores denormalized drive/behavior/position/firing/environment columns plus raw_data JSON blob
-- [ ] insertObservation safely handles null/missing nested properties (drives, behavior, position, firingStats, environment)
-- [ ] computeDailyScore calculates composite score (0-100) with penalties for hunger, fear incidents, and forgot_to_feed incidents, upserts into daily_scores
-- [ ] server/caretaker.js rate-limits observations to one insert per 10 seconds (OBSERVATION_INTERVAL_MS = 10000)
-- [ ] All state messages are still forwarded to stdout regardless of observation sampling
-- [ ] forgot_to_feed incidents are rate-limited to one per 60 seconds via getLastIncidentTime query
-- [ ] scared_the_fly incidents are logged with severity 'high', forgot_to_feed with 'medium'
-- [ ] HTTP GET /state returns lastState JSON from memory (not database), returns "null" string when no state available
-- [ ] daily_scores are computed every 5 minutes via setInterval
-- [ ] shutdown() calls caretakerDb.close() instead of logStream.end()
-- [ ] writeLog function is fully removed; all call sites replaced with direct caretakerDb method calls
-- [ ] agent/run.sh get_latest_state() uses curl to HTTP /state endpoint instead of grepping caretaker.log
-- [ ] server/migrate-logs.js reads caretaker.log, wraps all inserts in a single transaction, then computes daily_scores for each distinct day
-- [ ] migrate-logs.js classifies entries by type field: observation, action, incident; skips unknown types
-- [ ] data/ directory is gitignored
+- [ ] `getRecentActivity(limit)` in server/db.js returns a UNION ALL of actions and incidents sorted by timestamp DESC, limited to `limit` rows (default 50)
+- [ ] Server broadcasts `activity_action` message to browser WebSocket after every insertAction call in handleStdinCommand
+- [ ] Server broadcasts `activity_incident` message after `scared_the_fly` (high severity) and `forgot_to_feed` (medium severity) incidents
+- [ ] Server sends `activity_history` with last 50 entries on new WebSocket connection
+- [ ] `broadcastActivity` is guarded by browserSocket null/readyState check and try/catch
+- [ ] caretaker-sidebar.js loads before caretaker-bridge.js (script order in index.html)
+- [ ] caretaker-bridge.js routes activity_action/activity_incident/activity_history to CaretakerSidebar, and command to executeCommand
+- [ ] Feed entries are color-coded: green (place_food/clear_food), blue (set_light/set_temp), yellow (medium incidents), red (high incidents), gray (neutral)
+- [ ] Icons are single ASCII characters: F, X, L, T, H, W for actions, ! for incidents, * for unknown
+- [ ] Click on feed entry toggles expanded class showing reasoning detail
+- [ ] Feed auto-scrolls to top (newest first) unless user has scrolled away (scrollTop > 20)
+- [ ] Feed is capped at 200 entries (oldest removed when exceeded)
+- [ ] Sidebar uses CSS transform overlay (translateX) -- does not push canvas layout
+- [ ] Sidebar z-index is 22 (between left-panel=20 and education-panel=25)
+- [ ] Sidebar bottom is 180px on desktop to avoid bottom panel overlap
+- [ ] "Activity" toolbar button visible on desktop, hidden on mobile (display: none in @media max-width: 768px)
+- [ ] Mobile hamburger still opens bottom panel drawer (isMobile() check in sidebarToggle handler)
+- [ ] Desktop hamburger toggles activity sidebar (else branch in sidebarToggle handler)
+- [ ] X close button in sidebar header closes the sidebar and deactivates the toggle button
 
 ## Gaps and Assumptions
-- better-sqlite3 version is ^12.8.0 instead of plan's ^11.0.0 -- Node 25.1.0 has V8 API changes incompatible with v11; v12 compiles and works correctly
-- caretaker.log is not deleted by migration (per plan constraints)
-- The `fs` module import on line 3 of caretaker.js is no longer used for logging but may be used elsewhere or by future code; left in place to avoid unintended breakage
-- Migration was tested against actual caretaker.log data (3161 obs, 17 actions, 1943 incidents) but edge cases in log format (malformed JSON, missing fields) were not exhaustively tested beyond the 0-error result
-- The daily_scores interval starts immediately on server boot; no initial computation on startup (first computation happens after 5 minutes)
-- chat_messages table is created but no code path currently inserts into it (per plan -- insertChatMessage is exposed on the API for future use)
+- No browser-based smoke test was performed (no HTTP server to serve index.html locally)
+- The `onHistory` handler iterates entries in server order (newest-first) and appends, so visual order is newest-at-top
+- `--surface-hover` CSS variable is assumed to exist in :root (used for entry hover background)
+- The `forgot_to_feed` broadcastActivity call is inside the `if (shouldLog)` block, so it respects the 60-second cooldown
+- XSS: feed descriptions are built from action params that originate from the AI agent (stdin), not from user input; innerHTML is used but content is from trusted internal sources
+- Landscape mobile override sets sidebar width to 240px and bottom to 0, which may overlap bottom panel in landscape -- matches plan specification

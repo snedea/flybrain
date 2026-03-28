@@ -16,6 +16,7 @@
             <button class="tool-btn" data-tool="light" id="lightBtn">Light: Bright</button>
             <button class="tool-btn" data-tool="temp" id="tempBtn">Temp: Neutral</button>
             <button class="tool-btn" id="brain3dBtn" aria-pressed="false">Brain 3D</button>
+            <button class="tool-btn" id="activityToggle">Activity</button>
             <button class="tool-btn" id="learnBtn">Learn</button>
             <button class="tool-btn" id="helpBtn">?</button>
             <button class="tool-btn" id="liteBtn">Lite</button>
@@ -82,6 +83,13 @@
             </div>
         </div>
     </div>
+    <div id="caretaker-sidebar" class="caretaker-sidebar">
+        <div class="caretaker-sidebar-header">
+            <span class="caretaker-sidebar-title">Activity</span>
+            <button class="caretaker-sidebar-close" id="caretaker-sidebar-close">&times;</button>
+        </div>
+        <div class="activity-feed" id="activity-feed-list"></div>
+    </div>
     <div id="drawer-backdrop" class="drawer-backdrop"></div>
     <canvas id='canvas'></canvas>
     <div id="zoom-controls" class="zoom-controls">
@@ -109,6 +117,7 @@
     <script type="text/javascript" src="./js/education.js?v=17"></script>
     <script type="text/javascript" src="./js/main.js?v=17"></script>
     <script type="text/javascript" src="./js/caretaker-renderer.js?v=17"></script>
+    <script type="text/javascript" src="./js/caretaker-sidebar.js?v=17"></script>
     <script type="text/javascript" src="./js/caretaker-bridge.js?v=17"></script>
 </body>
 

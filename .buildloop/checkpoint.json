@@ -1,6 +1,6 @@
 {
-  "task_id": "T8.5",
-  "task_desc": "SQLite database and data pipeline. Replace JSON Lines logging with SQLite (better-sqlite3). Schema: observations (sampled at 0.1Hz -- drives, behavior, position, firing stats), actions (action, params JSON, reasoning, fly state at time of action), incidents (type, severity, description, state snapshot), chat_messages (role, message), daily_scores (composite score, total feeds, avg hunger, fear incidents, avg response time). Server writes to DB on each event. Compute daily_scores on a 5-minute interval. Add migration script for existing caretaker.log data. Files: `server/caretaker.js` (replace file logging with SQLite), new `server/db.js` (schema, queries), new `server/migrate-logs.js`.",
+  "task_id": "T8.6",
+  "task_desc": "Left sidebar -- Activity Feed. Add a collapsible left sidebar to the UI with a real-time scrolling activity feed. Feed shows Claude's actions and notable events: \"Placed food at (320, 280) -- hunger was 0.82\", \"Set light to Dim -- fatigue rising\", \"WARNING: fly fear spiked to 0.7\". Each entry: timestamp, action icon, description, reasoning. Color-coded: green = feeding, blue = comfort, yellow = warning, red = incident. Data pulled from actions/incidents tables via WebSocket channel from server. Auto-scrolls, click to expand reasoning. Files: new `js/caretaker-sidebar.js`, `css/main.css` (sidebar layout), `index.html` (sidebar HTML), `server/caretaker.js` (broadcast actions/incidents to sidebar).",
   "completed_stage": "builder",
-  "timestamp": "2026-03-28T02:42:48.526871+00:00"
+  "timestamp": "2026-03-28T02:52:52.355956+00:00"
 }

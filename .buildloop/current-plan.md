@@ -1,537 +1,636 @@
-# Plan: T8.5
+# Plan: T8.6
 
 ## Dependencies
-- list: ["better-sqlite3@^11.0.0"]
-- commands: ["cd /Users/name/homelab/flybrain && npm install better-sqlite3"]
+- list: none (all dependencies already present: ws, better-sqlite3, vanilla JS)
+- commands: none
 
 ## File Operations (in execution order)
 
-### 1. MODIFY package.json
+### 1. MODIFY server/db.js
 - operation: MODIFY
-- reason: Add better-sqlite3 dependency and migrate-logs script
-- anchor: `"ws": "^8.18.0"`
-
-#### Changes
-- Add `"better-sqlite3": "^11.0.0"` to the `dependencies` object after the `ws` entry
-- Add `"migrate-logs": "node server/migrate-logs.js"` to the `scripts` object after the `query-log` entry
-
-### 2. CREATE server/db.js
-- operation: CREATE
-- reason: SQLite schema definition, prepared statements, and query module
-
-#### Imports / Dependencies
-```js
-var Database = require('better-sqlite3');
-var path = require('path');
-```
-
-#### Module-level constants
-- `var DB_PATH = path.join(__dirname, '..', 'data', 'caretaker.db');`
+- reason: Add `getRecentActivity(limit)` query that merges actions + incidents tables for initial history load
+- anchor: `getLastIncidentTime: function(type) {`
 
 #### Functions
-
-- signature: `function openDb(dbPath)`
-  - purpose: Open (or create) the SQLite database, enable WAL mode, create all tables, prepare statements, return an API object
+- signature: `getRecentActivity: function(limit)`
+  - purpose: Return the most recent N activity entries (actions + incidents combined), sorted newest-first
   - logic:
-    1. If `dbPath` is undefined, use `DB_PATH`
-    2. Create parent directory: `var fs = require('fs'); fs.mkdirSync(path.dirname(dbPath), { recursive: true });`
-    3. Open database: `var db = new Database(dbPath);`
-    4. Run `db.pragma('journal_mode = WAL');`
-    5. Run `db.pragma('foreign_keys = ON');`
-    6. Call `createSchema(db)` (defined below)
-    7. Prepare all statements (defined below)
-    8. Return the API object (defined below)
-  - returns: API object (see "Exported API object" section below)
-  - error handling: Let better-sqlite3 throw on open failure (caller handles)
-
-- signature: `function createSchema(db)`
-  - purpose: Create all 5 tables if they don't exist
-  - logic: Run `db.exec()` with the following SQL (one exec call with all statements concatenated):
-
-```sql
-CREATE TABLE IF NOT EXISTS observations (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  timestamp TEXT NOT NULL,
-  hunger REAL,
-  fear REAL,
-  fatigue REAL,
-  curiosity REAL,
-  groom REAL,
-  behavior TEXT,
-  pos_x REAL,
-  pos_y REAL,
-  facing_dir REAL,
-  speed REAL,
-  fired_neurons INTEGER,
-  food_count INTEGER,
-  light_level REAL,
-  temperature REAL,
-  raw_data TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS actions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  timestamp TEXT NOT NULL,
-  action TEXT NOT NULL,
-  params TEXT NOT NULL DEFAULT '{}',
-  reasoning TEXT NOT NULL DEFAULT '',
-  fly_state TEXT
-);
-
-CREATE TABLE IF NOT EXISTS incidents (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  timestamp TEXT NOT NULL,
-  type TEXT NOT NULL,
-  severity TEXT NOT NULL DEFAULT 'medium',
-  description TEXT NOT NULL DEFAULT '',
-  state_snapshot TEXT
-);
-
-CREATE TABLE IF NOT EXISTS chat_messages (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  timestamp TEXT NOT NULL,
-  role TEXT NOT NULL,
-  message TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS daily_scores (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  date TEXT NOT NULL UNIQUE,
-  composite_score REAL,
-  total_feeds INTEGER NOT NULL DEFAULT 0,
-  avg_hunger REAL,
-  fear_incidents INTEGER NOT NULL DEFAULT 0,
-  avg_response_time REAL,
-  updated_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_observations_timestamp ON observations(timestamp);
-CREATE INDEX IF NOT EXISTS idx_actions_timestamp ON actions(timestamp);
-CREATE INDEX IF NOT EXISTS idx_incidents_timestamp ON incidents(timestamp);
-CREATE INDEX IF NOT EXISTS idx_chat_messages_timestamp ON chat_messages(timestamp);
-CREATE INDEX IF NOT EXISTS idx_daily_scores_date ON daily_scores(date);
-```
-
-  - returns: nothing
-
-**Prepared statements** (created inside `openDb` after `createSchema`):
-
-```js
-var stmtInsertObservation = db.prepare(
-  'INSERT INTO observations (timestamp, hunger, fear, fatigue, curiosity, groom, behavior, pos_x, pos_y, facing_dir, speed, fired_neurons, food_count, light_level, temperature, raw_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-);
-
-var stmtInsertAction = db.prepare(
-  'INSERT INTO actions (timestamp, action, params, reasoning, fly_state) VALUES (?, ?, ?, ?, ?)'
-);
-
-var stmtInsertIncident = db.prepare(
-  'INSERT INTO incidents (timestamp, type, severity, description, state_snapshot) VALUES (?, ?, ?, ?, ?)'
-);
-
-var stmtInsertChatMessage = db.prepare(
-  'INSERT INTO chat_messages (timestamp, role, message) VALUES (?, ?, ?)'
-);
-
-var stmtUpsertDailyScore = db.prepare(
-  'INSERT INTO daily_scores (date, composite_score, total_feeds, avg_hunger, fear_incidents, avg_response_time, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(date) DO UPDATE SET composite_score=excluded.composite_score, total_feeds=excluded.total_feeds, avg_hunger=excluded.avg_hunger, fear_incidents=excluded.fear_incidents, avg_response_time=excluded.avg_response_time, updated_at=excluded.updated_at'
-);
-
-var stmtGetLatestObservation = db.prepare(
-  'SELECT raw_data FROM observations ORDER BY id DESC LIMIT 1'
-);
-
-var stmtGetLastIncidentByType = db.prepare(
-  'SELECT timestamp FROM incidents WHERE type = ? ORDER BY id DESC LIMIT 1'
-);
-```
-
-**Exported API object** (returned from `openDb`):
-
-```js
-return {
-  insertObservation: function(timestamp, data) {
-    var d = data.drives || {};
-    var b = data.behavior || {};
-    var p = data.position || {};
-    var f = data.firingStats || {};
-    var e = data.environment || {};
-    stmtInsertObservation.run(
-      timestamp,
-      d.hunger != null ? d.hunger : null,
-      d.fear != null ? d.fear : null,
-      d.fatigue != null ? d.fatigue : null,
-      d.curiosity != null ? d.curiosity : null,
-      d.groom != null ? d.groom : null,
-      b.current || null,
-      p.x != null ? p.x : null,
-      p.y != null ? p.y : null,
-      p.facingDir != null ? p.facingDir : null,
-      p.speed != null ? p.speed : null,
-      f.firedNeurons != null ? f.firedNeurons : null,
-      data.food ? data.food.length : 0,
-      e.lightLevel != null ? e.lightLevel : null,
-      e.temperature != null ? e.temperature : null,
-      JSON.stringify(data)
-    );
-  },
-
-  insertAction: function(timestamp, action, params, reasoning, flyState) {
-    stmtInsertAction.run(
-      timestamp,
-      action,
-      JSON.stringify(params),
-      reasoning,
-      flyState ? JSON.stringify(flyState) : null
-    );
-  },
-
-  insertIncident: function(timestamp, type, severity, description, stateSnapshot) {
-    stmtInsertIncident.run(
-      timestamp,
-      type,
-      severity,
-      description,
-      stateSnapshot ? JSON.stringify(stateSnapshot) : null
-    );
-  },
-
-  insertChatMessage: function(timestamp, role, message) {
-    stmtInsertChatMessage.run(timestamp, role, message);
-  },
-
-  getLatestObservation: function() {
-    var row = stmtGetLatestObservation.get();
-    return row ? JSON.parse(row.raw_data) : null;
-  },
-
-  getLastIncidentTime: function(type) {
-    var row = stmtGetLastIncidentByType.get(type);
-    return row ? row.timestamp : null;
-  },
-
-  computeDailyScore: function(dateStr) {
-    // dateStr format: "YYYY-MM-DD"
-    var dayStart = dateStr + 'T00:00:00.000Z';
-    var dayEnd = dateStr + 'T23:59:59.999Z';
-
-    var obsStats = db.prepare(
-      'SELECT AVG(hunger) as avg_hunger FROM observations WHERE timestamp >= ? AND timestamp <= ?'
-    ).get(dayStart, dayEnd);
-
-    var feedCount = db.prepare(
-      'SELECT COUNT(*) as cnt FROM actions WHERE action = ? AND timestamp >= ? AND timestamp <= ?'
-    ).get('place_food', dayStart, dayEnd);
-
-    var fearCount = db.prepare(
-      'SELECT COUNT(*) as cnt FROM incidents WHERE type = ? AND timestamp >= ? AND timestamp <= ?'
-    ).get('scared_the_fly', dayStart, dayEnd);
-
-    // Avg response time: for each forgot_to_feed incident, find the next place_food action.
-    // Simplified: count forgot_to_feed incidents as a proxy (lower is better).
-    var forgotCount = db.prepare(
-      'SELECT COUNT(*) as cnt FROM incidents WHERE type = ? AND timestamp >= ? AND timestamp <= ?'
-    ).get('forgot_to_feed', dayStart, dayEnd);
-
-    var avgHunger = obsStats && obsStats.avg_hunger != null ? obsStats.avg_hunger : 0.5;
-    var totalFeeds = feedCount ? feedCount.cnt : 0;
-    var fearIncidents = fearCount ? fearCount.cnt : 0;
-    var forgotIncidents = forgotCount ? forgotCount.cnt : 0;
-
-    // Composite: start at 100, penalize for avg hunger, fear, and forgot-to-feed
-    // avgHunger of 0.5 is neutral (expected), penalize above that
-    var hungerPenalty = Math.max(0, (avgHunger - 0.3)) * 40;
-    var fearPenalty = Math.min(fearIncidents * 5, 30);
-    var forgotPenalty = Math.min(forgotIncidents * 0.5, 20);
-    var composite = Math.max(0, Math.min(100, 100 - hungerPenalty - fearPenalty - forgotPenalty));
-    composite = Math.round(composite * 10) / 10;
-
-    // avg_response_time stored as forgot_to_feed count (proxy; real response time requires pairing incidents with actions)
-    var avgResponseTime = forgotIncidents;
-
-    var now = new Date().toISOString();
-    stmtUpsertDailyScore.run(dateStr, composite, totalFeeds, avgHunger, fearIncidents, avgResponseTime, now);
-
-    return { date: dateStr, composite_score: composite, total_feeds: totalFeeds, avg_hunger: avgHunger, fear_incidents: fearIncidents, avg_response_time: avgResponseTime };
-  },
-
-  close: function() {
-    db.close();
-  },
-
-  db: db
-};
-```
-
-- signature: `module.exports = { openDb: openDb };`
-
-### 3. MODIFY server/caretaker.js
-- operation: MODIFY
-- reason: Replace file-stream logging with SQLite calls, add observation rate-limiting, add daily_scores interval, add HTTP /state endpoint, add incident rate-limiting
-
-#### Imports / Dependencies
-- Add after line 5 (`var readline = require('readline');`): `var dbModule = require('./db');`
-
-#### Changes (in order)
-
-**Change A: Remove logStream, add db handle and observation timing**
-- anchor: `var LOG_PATH = path.join(__dirname, '..', 'caretaker.log');`
-- Remove these two lines:
-  ```
-  var LOG_PATH = path.join(__dirname, '..', 'caretaker.log');
-  var logStream = fs.createWriteStream(LOG_PATH, { flags: 'a' });
-  ```
-- Replace with:
-  ```js
-  var caretakerDb = dbModule.openDb();
-  var lastObservationTime = 0;
-  var OBSERVATION_INTERVAL_MS = 10000;
-  ```
-
-**Change B: Replace writeLog function**
-- anchor: `function writeLog(entry) {`
-- Remove the entire `writeLog` function (lines 17-20)
-- Do NOT add a replacement function. Calls to `writeLog` will be replaced with direct `caretakerDb` method calls at each call site.
-
-**Change C: Modify detectIncidents to use db and add rate-limiting**
-- anchor: `function detectIncidents(state) {`
-- Replace the entire `detectIncidents` function with:
-```js
-function detectIncidents(state) {
-  var now = new Date().toISOString();
-  var fear = state.drives.fear;
-  var hunger = state.drives.hunger;
-  var foodCount = state.food.length;
-  if (lastActionTime > 0 && Date.now() - lastActionTime < 5000 && fear - preFearLevel > 0.2) {
-    caretakerDb.insertIncident(now, 'scared_the_fly', 'high',
-      'Fear spiked from ' + preFearLevel.toFixed(2) + ' to ' + fear.toFixed(2) + ' after ' + lastActionType,
-      state);
-    writeStdout({ type: 'incident', incident: 'scared_the_fly', action: lastActionType,
-      fearBefore: preFearLevel, fearAfter: fear, flyState: state, timestamp: now });
-    lastActionTime = 0;
-  }
-  if (hunger > 0.9 && foodCount === 0) {
-    var lastForgot = caretakerDb.getLastIncidentTime('forgot_to_feed');
-    var shouldLog = true;
-    if (lastForgot) {
-      var elapsed = Date.now() - new Date(lastForgot).getTime();
-      if (elapsed < 60000) shouldLog = false;
-    }
-    if (shouldLog) {
-      caretakerDb.insertIncident(now, 'forgot_to_feed', 'medium',
-        'Hunger at ' + hunger.toFixed(2) + ' with no food available',
-        state);
-      writeStdout({ type: 'incident', incident: 'forgot_to_feed', hunger: hunger, flyState: state, timestamp: now });
-    }
-  }
-}
-```
-
-**Change D: Modify handleStateMessage to rate-limit observations**
-- anchor: `function handleStateMessage(data) {`
-- Replace the entire `handleStateMessage` function with:
-```js
-function handleStateMessage(data) {
-  var msg;
-  try { msg = JSON.parse(data); } catch (e) {
-    process.stderr.write('[caretaker] Bad JSON from browser: ' + e.message + '\n');
-    return;
-  }
-  if (msg.type !== 'state') return;
-  lastState = msg.data;
-  var now = Date.now();
-  if (now - lastObservationTime >= OBSERVATION_INTERVAL_MS) {
-    lastObservationTime = now;
-    var ts = new Date().toISOString();
-    caretakerDb.insertObservation(ts, msg.data);
-  }
-  writeStdout({ type: 'state', timestamp: new Date().toISOString(), data: msg.data });
-  detectIncidents(msg.data);
-}
-```
-
-**Change E: Modify handleStdinCommand to use db**
-- anchor: `function handleStdinCommand(line) {`
-- Replace the `writeLog(...)` call at line 72-73 with:
-```js
-  var ts = new Date().toISOString();
-  caretakerDb.insertAction(ts, cmd.action, cmd.params || {}, cmd.reasoning || '', lastState);
-```
-- The rest of the function remains unchanged. Full replacement of `handleStdinCommand`:
-```js
-function handleStdinCommand(line) {
-  var cmd;
-  try { cmd = JSON.parse(line); } catch (e) {
-    process.stderr.write('[caretaker] Bad JSON from stdin: ' + e.message + '\n');
-    writeStdout({ type: 'error', message: 'Invalid JSON: ' + e.message });
-    return;
-  }
-  if (VALID_ACTIONS.indexOf(cmd.action) === -1) {
-    process.stderr.write('[caretaker] Unknown action: ' + cmd.action + '\n');
-    writeStdout({ type: 'error', message: 'Unknown action: ' + cmd.action });
-    return;
-  }
-  preFearLevel = lastState ? lastState.drives.fear : 0;
-  lastActionTime = Date.now();
-  lastActionType = cmd.action;
-  var ts = new Date().toISOString();
-  caretakerDb.insertAction(ts, cmd.action, cmd.params || {}, cmd.reasoning || '', lastState);
-  if (browserSocket !== null && browserSocket.readyState === WebSocket.OPEN) {
-    try {
-      browserSocket.send(JSON.stringify({ type: 'command', action: cmd.action, params: cmd.params || {} }));
-    } catch (e) {
-      process.stderr.write('[caretaker] WebSocket send error: ' + e.message + '\n');
-    }
-    writeStdout({ type: 'action_ack', action: cmd.action, success: true });
-  } else {
-    writeStdout({ type: 'action_ack', action: cmd.action, success: false, error: 'no browser connected' });
-  }
-}
-```
-
-**Change F: Add HTTP /state endpoint to the http server**
-- anchor: `var server = http.createServer();`
-- Replace with:
-```js
-var server = http.createServer(function(req, res) {
-  if (req.method === 'GET' && req.url === '/state') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    if (lastState) {
-      res.end(JSON.stringify(lastState));
-    } else {
-      res.end('null');
-    }
-    return;
-  }
-  res.writeHead(404);
-  res.end('Not found');
-});
-```
-
-**Change G: Add daily_scores computation interval**
-- anchor: `server.listen(PORT, function() {`
-- After the `server.listen(...)` block (after line 108), add:
-```js
-var DAILY_SCORE_INTERVAL_MS = 5 * 60 * 1000;
-setInterval(function() {
-  try {
-    var today = new Date().toISOString().slice(0, 10);
-    caretakerDb.computeDailyScore(today);
-  } catch (e) {
-    process.stderr.write('[caretaker] daily_scores error: ' + e.message + '\n');
-  }
-}, DAILY_SCORE_INTERVAL_MS);
-```
-
-**Change H: Replace shutdown function**
-- anchor: `function shutdown() { logStream.end(); wss.close(); process.exit(0); }`
-- Replace with:
-```js
-function shutdown() { caretakerDb.close(); wss.close(); process.exit(0); }
-```
-
-### 4. MODIFY agent/run.sh
-- operation: MODIFY
-- reason: Replace grep-based state reading with HTTP call to /state endpoint
-
-**Change A: Remove LOG variable**
-- anchor: `LOG="$PROJECT_DIR/caretaker.log"`
-- Remove the line `LOG="$PROJECT_DIR/caretaker.log"`
-
-**Change B: Replace get_latest_state function**
-- anchor: `get_latest_state() {`
-- Replace the entire `get_latest_state` function (lines 60-72) with:
-```bash
-get_latest_state() {
-  local PORT="${CARETAKER_PORT:-7600}"
-  local RESULT
-  RESULT=$(curl -sf "http://localhost:${PORT}/state" 2>/dev/null) || true
-  if [[ -z "$RESULT" || "$RESULT" == "null" ]]; then
-    echo ""
-    return 1
-  fi
-  echo "$RESULT"
-  return 0
-}
-```
-
-### 5. CREATE server/migrate-logs.js
-- operation: CREATE
-- reason: One-time migration script to import existing caretaker.log into SQLite
-
-#### Imports / Dependencies
-```js
-var fs = require('fs');
-var path = require('path');
-var readline = require('readline');
-var dbModule = require('./db');
-```
-
-#### Module-level constants
-```js
-var LOG_PATH = process.argv[2] || path.join(__dirname, '..', 'caretaker.log');
-var DB_PATH = process.argv[3] || undefined;
-```
-
-#### Functions
-
-- signature: `function migrate()`
-  - purpose: Read caretaker.log line by line, parse JSON, insert into appropriate table, then compute historical daily_scores
-  - logic:
-    1. Check `LOG_PATH` exists with `fs.existsSync(LOG_PATH)`. If not, print `'No log file found at ' + LOG_PATH` to stderr and `process.exit(1)`.
-    2. Open database: `var caretakerDb = dbModule.openDb(DB_PATH);`
-    3. Read file contents: `var content = fs.readFileSync(LOG_PATH, 'utf8');`
-    4. Split into lines: `var lines = content.split('\n');`
-    5. Start a transaction: `var insertMany = caretakerDb.db.transaction(function(lines) { ... });`
-    6. Inside the transaction, loop over each line:
-       - Skip empty lines (`if (!line.trim()) continue;`)
-       - Parse JSON: `try { var entry = JSON.parse(line); } catch (e) { errCount++; continue; }`
-       - Read `entry.timestamp` (already an ISO string)
-       - If `entry.type === 'observation'`:
-         - Call `caretakerDb.insertObservation(entry.timestamp, entry.data)`
-         - Increment `obsCount`
-       - If `entry.type === 'action'`:
-         - Call `caretakerDb.insertAction(entry.timestamp, entry.action, entry.params || {}, entry.reasoning || '', entry.flyState || null)`
-         - Increment `actCount`
-       - If `entry.type === 'incident'`:
-         - Determine severity: if `entry.incident === 'scared_the_fly'` then `'high'`, else `'medium'`
-         - Build description: `entry.incident + (entry.hunger != null ? ' (hunger: ' + entry.hunger + ')' : '') + (entry.fearBefore != null ? ' (fear: ' + entry.fearBefore + ' -> ' + entry.fearAfter + ')' : '')`
-         - Call `caretakerDb.insertIncident(entry.timestamp, entry.incident, severity, description, entry.flyState || null)`
-         - Increment `incCount`
-       - Else: increment `skipCount`
-    7. Call `insertMany(lines)` to execute the transaction
-    8. Print summary to stderr: `'Migration complete: ' + obsCount + ' observations, ' + actCount + ' actions, ' + incCount + ' incidents, ' + errCount + ' parse errors, ' + skipCount + ' skipped'`
-    9. Compute historical daily_scores:
-       - Query `SELECT DISTINCT substr(timestamp, 1, 10) as day FROM observations ORDER BY day` from `caretakerDb.db`
-       - For each `day`, call `caretakerDb.computeDailyScore(day)`
-       - Print `'Computed daily scores for ' + days.length + ' days'` to stderr
-    10. Call `caretakerDb.close()`
-    11. Print `'Done.'` to stderr
-  - returns: nothing (exits process)
-  - error handling: Wrap entire function body in try/catch. On error, print `e.message` to stderr and `process.exit(1)`.
+    1. If `limit` is undefined, default to 50
+    2. Execute a SQL query using `db.prepare(...)` that does a UNION ALL of two SELECTs:
+       - SELECT from `actions`: `id, timestamp, 'action' AS kind, action AS name, params, reasoning, fly_state AS state_snapshot`
+       - SELECT from `incidents`: `id, timestamp, 'incident' AS kind, type AS name, NULL AS params, description AS reasoning, state_snapshot`
+    3. ORDER BY `timestamp DESC` LIMIT the given `limit`
+    4. Return the array of rows from `.all(limit)`
+  - calls: `db.prepare().all(limit)`
+  - returns: `Array<{id: number, timestamp: string, kind: 'action'|'incident', name: string, params: string|null, reasoning: string, state_snapshot: string|null}>`
+  - error handling: none needed -- empty tables return empty array
 
 #### Wiring / Integration
-- Run as: `node server/migrate-logs.js` (default paths) or `node server/migrate-logs.js /path/to/caretaker.log /path/to/db`
-- npm script: `npm run migrate-logs`
+- Add the `getRecentActivity` function to the returned object from `openDb()`, placed after the `getLastIncidentTime` function and before the `computeDailyScore` function
+
+### 2. MODIFY server/caretaker.js
+- operation: MODIFY
+- reason: Broadcast activity_action and activity_incident messages to the browser via WebSocket; send activity_history on new connection
+
+#### Functions
+- signature: `function broadcastActivity(obj)` (new module-level function)
+  - purpose: Send a JSON message to the browser WebSocket if connected
+  - logic:
+    1. Check `browserSocket !== null && browserSocket.readyState === WebSocket.OPEN`
+    2. If true, call `browserSocket.send(JSON.stringify(obj))`
+    3. Wrap in try/catch, log errors to stderr
+  - returns: void
+  - error handling: catch send errors, write to `process.stderr`
+
+#### Wiring / Integration
+
+**Anchor 1** -- after `insertAction` call in `handleStdinCommand`:
+- anchor: `caretakerDb.insertAction(ts, cmd.action, cmd.params || {}, cmd.reasoning || '', lastState);`
+- After that line, before the `if (browserSocket !== null` block, add:
+  ```
+  broadcastActivity({ type: 'activity_action', timestamp: ts, action: cmd.action, params: cmd.params || {}, reasoning: cmd.reasoning || '', flyState: lastState });
+  ```
+
+**Anchor 2** -- after `insertIncident` for `scared_the_fly` in `detectIncidents`:
+- anchor: `caretakerDb.insertIncident(now, 'scared_the_fly', 'high',`
+- After the `writeStdout({ type: 'incident', incident: 'scared_the_fly'...` line (after the insertIncident + writeStdout pair), add:
+  ```
+  broadcastActivity({ type: 'activity_incident', timestamp: now, incidentType: 'scared_the_fly', severity: 'high', description: 'Fear spiked from ' + preFearLevel.toFixed(2) + ' to ' + fear.toFixed(2) + ' after ' + lastActionType });
+  ```
+
+**Anchor 3** -- after `insertIncident` for `forgot_to_feed` in `detectIncidents`:
+- anchor: `caretakerDb.insertIncident(now, 'forgot_to_feed', 'medium',`
+- After the `writeStdout({ type: 'incident', incident: 'forgot_to_feed'...` line (after the insertIncident + writeStdout pair), add:
+  ```
+  broadcastActivity({ type: 'activity_incident', timestamp: now, incidentType: 'forgot_to_feed', severity: 'medium', description: 'Hunger at ' + hunger.toFixed(2) + ' with no food available' });
+  ```
+
+**Anchor 4** -- inside `wss.on('connection')` callback, send history:
+- anchor: `process.stderr.write('[caretaker] Browser connected\n');`
+- After that line, add:
+  ```
+  var history = caretakerDb.getRecentActivity(50);
+  broadcastActivity({ type: 'activity_history', entries: history });
+  ```
+
+### 3. CREATE js/caretaker-sidebar.js
+- operation: CREATE
+- reason: New file -- browser-side module for receiving, rendering, and managing the activity feed sidebar
+
+#### Imports / Dependencies
+- none (vanilla JS IIFE, reads from global DOM)
+
+#### Structs / Types
+- Feed entry DOM structure (created dynamically):
+  ```
+  <div class="activity-entry activity-{colorClass}" data-expanded="false">
+    <div class="activity-entry-header">
+      <span class="activity-icon">{icon}</span>
+      <span class="activity-time">{HH:MM:SS}</span>
+      <span class="activity-desc">{description text}</span>
+    </div>
+    <div class="activity-entry-detail">{reasoning text}</div>
+  </div>
+  ```
+- colorClass mapping:
+  - `'feed'` (green) when `action === 'place_food'` or `action === 'clear_food'`
+  - `'comfort'` (blue) when `action === 'set_light'` or `action === 'set_temp'`
+  - `'warning'` (yellow) when `kind === 'incident' && severity === 'medium'`
+  - `'incident'` (red) when `kind === 'incident' && severity === 'high'`
+  - `'neutral'` (default, --text-muted) for everything else (touch, blow_wind)
+- icon mapping (plain text, no emojis per project convention):
+  - `'place_food'` -> `'F'`
+  - `'clear_food'` -> `'X'`
+  - `'set_light'` -> `'L'`
+  - `'set_temp'` -> `'T'`
+  - `'touch'` -> `'H'`
+  - `'blow_wind'` -> `'W'`
+  - incident (any) -> `'!'`
+
+#### Functions
+- The file is an IIFE `(function() { ... })();` that exposes `window.CaretakerSidebar`
+
+- signature: `function init()`
+  - purpose: Cache DOM references, set up click-to-expand delegation
+  - logic:
+    1. Set `feedList = document.getElementById('activity-feed-list')`
+    2. Set `sidebar = document.getElementById('caretaker-sidebar')`
+    3. If `feedList` is null, return early (graceful no-op for file:// context)
+    4. Add click event listener on `feedList` using event delegation:
+       - `var entry = e.target.closest('.activity-entry')`
+       - If entry exists, toggle its `data-expanded` attribute between `'true'` and `'false'`
+       - Toggle class `expanded` on the entry
+    5. Set `userScrolled = false`
+    6. Add scroll event listener on `feedList`:
+       - If `feedList.scrollTop > 20`, set `userScrolled = true`
+       - If `feedList.scrollTop <= 5`, set `userScrolled = false`
+  - returns: void
+
+- signature: `function formatTime(isoString)`
+  - purpose: Format an ISO timestamp to HH:MM:SS local time
+  - logic:
+    1. Create `var d = new Date(isoString)`
+    2. Return `d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })`
+  - returns: string
+
+- signature: `function getColorClass(kind, action, severity)`
+  - purpose: Determine the CSS color class for a feed entry
+  - logic:
+    1. If `kind === 'incident'` and `severity === 'high'`, return `'incident'`
+    2. If `kind === 'incident'`, return `'warning'`
+    3. If `action === 'place_food' || action === 'clear_food'`, return `'feed'`
+    4. If `action === 'set_light' || action === 'set_temp'`, return `'comfort'`
+    5. Return `'neutral'`
+  - returns: string
+
+- signature: `function getIcon(kind, action)`
+  - purpose: Return a single-character icon for the entry type
+  - logic:
+    1. If `kind === 'incident'`, return `'!'`
+    2. Map: `{ place_food: 'F', clear_food: 'X', set_light: 'L', set_temp: 'T', touch: 'H', blow_wind: 'W' }`
+    3. Return the mapped value or `'*'` as default
+  - returns: string
+
+- signature: `function buildDescription(kind, action, params, reasoning)`
+  - purpose: Build a human-readable one-line description for the feed entry
+  - logic:
+    1. If `kind === 'incident'`, return `reasoning` directly (the description field is already human-readable)
+    2. Parse `params` if it is a string: `var p = typeof params === 'string' ? JSON.parse(params) : (params || {})`
+    3. Switch on `action`:
+       - `'place_food'`: return `'Placed food at (' + Math.round(p.x) + ', ' + Math.round(p.y) + ')'`
+       - `'clear_food'`: return `'Cleared all food'`
+       - `'set_light'`: return `'Set light to ' + (p.level || 'unknown')`
+       - `'set_temp'`: return `'Set temp to ' + (p.level || 'unknown')`
+       - `'touch'`: return `'Touched fly at (' + Math.round(p.x || 0) + ', ' + Math.round(p.y || 0) + ')'`
+       - `'blow_wind'`: return `'Blew wind (strength ' + (p.strength || 0.5).toFixed(1) + ')'`
+       - default: return `action`
+    4. Catch JSON.parse errors: if parse fails, return `action` as fallback
+  - returns: string
+
+- signature: `function createEntryEl(kind, action, params, reasoning, severity, timestamp)`
+  - purpose: Create and return a DOM element for one feed entry
+  - logic:
+    1. Call `var colorClass = getColorClass(kind, action, severity)`
+    2. Call `var icon = getIcon(kind, action)`
+    3. Call `var desc = buildDescription(kind, action, params, reasoning)`
+    4. Call `var time = formatTime(timestamp)`
+    5. Create `var el = document.createElement('div')`
+    6. Set `el.className = 'activity-entry activity-' + colorClass`
+    7. Set `el.setAttribute('data-expanded', 'false')`
+    8. Build a `reasoningText` variable: if `kind === 'incident'`, use empty string (description is already the main text). If `kind === 'action'`, use `reasoning || ''`.
+    9. Set `el.innerHTML` to:
+       ```
+       '<div class="activity-entry-header">' +
+         '<span class="activity-icon">' + icon + '</span>' +
+         '<span class="activity-time">' + time + '</span>' +
+         '<span class="activity-desc">' + desc + '</span>' +
+       '</div>' +
+       (reasoningText ? '<div class="activity-entry-detail">' + reasoningText + '</div>' : '')
+       ```
+    10. Return `el`
+  - returns: HTMLDivElement
+
+- signature: `function addEntry(kind, action, params, reasoning, severity, timestamp)`
+  - purpose: Create an entry element and prepend it to the feed list (newest on top)
+  - logic:
+    1. If `feedList` is null, return
+    2. Call `var el = createEntryEl(kind, action, params, reasoning, severity, timestamp)`
+    3. Prepend: `feedList.insertBefore(el, feedList.firstChild)`
+    4. Cap total entries: if `feedList.children.length > 200`, remove `feedList.lastChild`
+    5. If `userScrolled` is false, set `feedList.scrollTop = 0` (keep scrolled to top = newest)
+  - returns: void
+
+- signature: `function onAction(msg)`
+  - purpose: Handle an `activity_action` WebSocket message
+  - logic:
+    1. Call `addEntry('action', msg.action, msg.params, msg.reasoning, null, msg.timestamp)`
+  - returns: void
+
+- signature: `function onIncident(msg)`
+  - purpose: Handle an `activity_incident` WebSocket message
+  - logic:
+    1. Call `addEntry('incident', msg.incidentType, null, msg.description, msg.severity, msg.timestamp)`
+  - returns: void
+
+- signature: `function onHistory(msg)`
+  - purpose: Handle an `activity_history` WebSocket message (initial load of recent entries)
+  - logic:
+    1. If `feedList` is null, return
+    2. Set `feedList.innerHTML = ''` (clear any existing entries)
+    3. Iterate `msg.entries` in forward order (they are sorted timestamp DESC from server, so index 0 is newest)
+    4. For each entry `e`:
+       - If `e.kind === 'action'`: call `createEntryEl('action', e.name, e.params, e.reasoning, null, e.timestamp)` and append to feedList
+       - If `e.kind === 'incident'`: call `createEntryEl('incident', e.name, null, e.reasoning, null, e.timestamp)` and append to feedList
+       - Note: append (not prepend) because we iterate newest-first and want newest at top
+    5. Set `feedList.scrollTop = 0`
+  - returns: void
+
+- signature: `function toggle()`
+  - purpose: Toggle sidebar visibility
+  - logic:
+    1. If `sidebar` is null, return
+    2. Toggle class `sidebar-open` on `sidebar`: `sidebar.classList.toggle('sidebar-open')`
+    3. Return the current open state: `return sidebar.classList.contains('sidebar-open')`
+  - returns: boolean
+
+- signature: `function isOpen()`
+  - purpose: Check if sidebar is currently open
+  - logic:
+    1. Return `sidebar !== null && sidebar.classList.contains('sidebar-open')`
+  - returns: boolean
+
+#### Wiring / Integration
+- Expose as: `window.CaretakerSidebar = { init: init, onAction: onAction, onIncident: onIncident, onHistory: onHistory, toggle: toggle, isOpen: isOpen }`
+- Call `init()` at the end of the IIFE (self-initializing, like caretaker-bridge.js)
+- Module-level variables: `var feedList = null, sidebar = null, userScrolled = false`
+
+### 4. MODIFY js/caretaker-bridge.js
+- operation: MODIFY
+- reason: Route activity_action, activity_incident, and activity_history WebSocket message types to CaretakerSidebar instead of only handling 'command' type
+- anchor: `ws.onmessage = function(event) { executeCommand(event.data); };`
+
+#### Functions
+- Replace the `ws.onmessage` handler:
+  - Old line: `ws.onmessage = function(event) { executeCommand(event.data); };`
+  - New logic:
+    ```javascript
+    ws.onmessage = function(event) {
+      var msg;
+      try { msg = JSON.parse(event.data); } catch (e) { return; }
+      if (msg.type === 'command') {
+        executeCommand(event.data);
+      } else if (typeof CaretakerSidebar !== 'undefined') {
+        if (msg.type === 'activity_action') {
+          CaretakerSidebar.onAction(msg);
+        } else if (msg.type === 'activity_incident') {
+          CaretakerSidebar.onIncident(msg);
+        } else if (msg.type === 'activity_history') {
+          CaretakerSidebar.onHistory(msg);
+        }
+      }
+    };
+    ```
+  - Note: `executeCommand` already does its own `JSON.parse`, so passing `event.data` (the raw string) to it is correct -- it re-parses internally. The outer parse is only to check `msg.type` for routing.
+
+### 5. MODIFY index.html
+- operation: MODIFY
+- reason: Add sidebar HTML structure and load the new caretaker-sidebar.js script
+
+#### Wiring / Integration
+
+**Anchor 1** -- Insert sidebar HTML. Place it right before the `<div id="drawer-backdrop"` line:
+- anchor: `<div id="drawer-backdrop" class="drawer-backdrop"></div>`
+- Insert BEFORE that line:
+  ```html
+  <div id="caretaker-sidebar" class="caretaker-sidebar">
+      <div class="caretaker-sidebar-header">
+          <span class="caretaker-sidebar-title">Activity</span>
+          <button class="caretaker-sidebar-close" id="caretaker-sidebar-close">&times;</button>
+      </div>
+      <div class="activity-feed" id="activity-feed-list"></div>
+  </div>
+  ```
+
+**Anchor 2** -- Add script tag. Place it after `caretaker-renderer.js` and before `caretaker-bridge.js`:
+- anchor: `<script type="text/javascript" src="./js/caretaker-renderer.js?v=17"></script>`
+- Insert AFTER that line:
+  ```html
+  <script type="text/javascript" src="./js/caretaker-sidebar.js?v=17"></script>
+  ```
+- caretaker-sidebar.js MUST load before caretaker-bridge.js so that `CaretakerSidebar` is defined when the bridge's `onmessage` handler fires.
+
+### 6. MODIFY css/main.css
+- operation: MODIFY
+- reason: Add all styles for the caretaker sidebar, activity feed entries, color coding, and a desktop-visible activity toggle button
+
+#### Wiring / Integration
+
+**Anchor 1** -- Add sidebar styles. Insert a new block AFTER the education panel section (after the `.edu-links a:hover` rule):
+- anchor: `.edu-links a:hover {`
+- Insert AFTER that closing `}` block:
+
+```css
+/* --- Caretaker Activity Sidebar --- */
+.caretaker-sidebar {
+    position: fixed;
+    top: 44px;
+    left: 0;
+    bottom: 180px;
+    width: 280px;
+    max-width: 85vw;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    z-index: 22;
+    font-family: system-ui, -apple-system, sans-serif;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+}
+
+.caretaker-sidebar.sidebar-open {
+    transform: translateX(0);
+}
+
+.caretaker-sidebar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.caretaker-sidebar-title {
+    color: var(--text);
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.caretaker-sidebar-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 0 0.25rem;
+    line-height: 1;
+}
+
+.caretaker-sidebar-close:hover {
+    color: var(--text);
+}
+
+.activity-feed {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.5rem;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(136, 146, 164, 0.3) transparent;
+}
+
+.activity-feed::-webkit-scrollbar {
+    width: 6px;
+}
+
+.activity-feed::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.activity-feed::-webkit-scrollbar-thumb {
+    background: rgba(136, 146, 164, 0.3);
+    border-radius: 3px;
+}
+
+.activity-feed::-webkit-scrollbar-thumb:hover {
+    background: rgba(136, 146, 164, 0.5);
+}
+
+.activity-entry {
+    padding: 0.4rem 0.5rem;
+    border-radius: var(--radius);
+    margin-bottom: 0.25rem;
+    cursor: pointer;
+    border-left: 3px solid var(--text-muted);
+    background: transparent;
+    transition: background 0.2s ease;
+}
+
+.activity-entry:hover {
+    background: var(--surface-hover);
+}
+
+.activity-entry-header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    font-size: 0.8rem;
+    color: var(--text);
+    line-height: 1.3;
+}
+
+.activity-icon {
+    font-weight: 700;
+    font-size: 0.7rem;
+    width: 1rem;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.activity-time {
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+}
+
+.activity-desc {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.activity-entry-detail {
+    display: none;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    padding-top: 0.3rem;
+    padding-left: 1.4rem;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.activity-entry.expanded .activity-entry-detail {
+    display: block;
+}
+
+.activity-entry.expanded .activity-desc {
+    white-space: normal;
+}
+
+/* Color-coded left borders and icon colors */
+.activity-feed .activity-entry.activity-feed {
+    border-left-color: var(--success);
+}
+
+.activity-feed .activity-entry.activity-feed .activity-icon {
+    color: var(--success);
+}
+
+.activity-feed .activity-entry.activity-comfort {
+    border-left-color: var(--neuron-sensory);
+}
+
+.activity-feed .activity-entry.activity-comfort .activity-icon {
+    color: var(--neuron-sensory);
+}
+
+.activity-feed .activity-entry.activity-warning {
+    border-left-color: var(--warning);
+}
+
+.activity-feed .activity-entry.activity-warning .activity-icon {
+    color: var(--warning);
+}
+
+.activity-feed .activity-entry.activity-incident {
+    border-left-color: var(--error);
+}
+
+.activity-feed .activity-entry.activity-incident .activity-icon {
+    color: var(--error);
+}
+
+.activity-feed .activity-entry.activity-neutral {
+    border-left-color: var(--text-muted);
+}
+
+.activity-feed .activity-entry.activity-neutral .activity-icon {
+    color: var(--text-muted);
+}
+
+/* Activity toggle button (desktop) */
+#activityToggle {
+    display: inline-block;
+}
+
+#activityToggle.active {
+    border-color: var(--accent);
+    background: var(--accent-subtle);
+    color: var(--accent);
+}
+```
+
+**Anchor 2** -- Mobile overrides inside `@media (max-width: 768px)`. Add after the education panel mobile override:
+- anchor: `.education-panel {` (inside the `@media (max-width: 768px)` block, around line 1099)
+- After the `.education-panel { ... }` mobile override block, add:
+
+```css
+    .caretaker-sidebar {
+        top: calc(36px + env(safe-area-inset-top, 0px));
+        bottom: 120px;
+        width: 100%;
+        max-width: 100vw;
+        z-index: 23;
+    }
+
+    #activityToggle {
+        display: none;
+    }
+```
+
+**Anchor 3** -- Add landscape mobile override. Find the landscape media query section:
+- anchor: `/* In landscape, neuron panel sits beside canvas on right side */`
+- After the existing landscape `#left-panel` rules (after the `#left-panel::before { display: none; }` block around line 1148), add:
+
+```css
+    .caretaker-sidebar {
+        top: calc(32px + env(safe-area-inset-top, 0px));
+        bottom: 0;
+        width: 240px;
+    }
+```
+
+### 7. MODIFY index.html (second pass -- add Activity toggle button)
+- operation: MODIFY
+- reason: Add a new "Activity" toolbar button visible on desktop, placed next to the Learn button
+- anchor: `<button class="tool-btn" id="learnBtn">Learn</button>`
+- Insert BEFORE that line:
+  ```html
+  <button class="tool-btn" id="activityToggle">Activity</button>
+  ```
+
+### 8. MODIFY js/main.js
+- operation: MODIFY
+- reason: Wire the Activity toggle button and sidebar close button click handlers
+
+#### Wiring / Integration
+
+**Anchor** -- Add the activity toggle handler. Insert after the existing `sidebarToggle` event listener block:
+- anchor: `if (drawerBackdrop) {`
+- Insert BEFORE that line:
+
+```javascript
+// --- Activity sidebar toggle (desktop) ---
+var activityToggle = document.getElementById('activityToggle');
+var activityCloseBtn = document.getElementById('caretaker-sidebar-close');
+
+if (activityToggle) {
+	activityToggle.addEventListener('click', function(e) {
+		e.stopPropagation();
+		if (typeof CaretakerSidebar !== 'undefined') {
+			var isOpen = CaretakerSidebar.toggle();
+			activityToggle.classList.toggle('active', isOpen);
+		}
+	});
+}
+
+if (activityCloseBtn) {
+	activityCloseBtn.addEventListener('click', function() {
+		if (typeof CaretakerSidebar !== 'undefined') {
+			var sidebar = document.getElementById('caretaker-sidebar');
+			if (sidebar) sidebar.classList.remove('sidebar-open');
+			if (activityToggle) activityToggle.classList.remove('active');
+		}
+	});
+}
+```
+
+**Anchor 2** -- Update the mobile `sidebarToggle` handler to also toggle the activity sidebar on mobile:
+- anchor: `if (sidebarToggle) {`
+- Replace the entire `if (sidebarToggle) { ... }` block (lines 508-517) with:
+
+```javascript
+if (sidebarToggle) {
+	sidebarToggle.addEventListener('click', function (e) {
+		e.stopPropagation();
+		if (isMobile()) {
+			// On mobile, hamburger toggles bottom panel drawer
+			if (leftPanel && leftPanel.classList.contains('drawer-open')) {
+				closeDrawer();
+			} else {
+				openDrawer();
+			}
+		} else {
+			// On desktop, hamburger toggles activity sidebar
+			if (typeof CaretakerSidebar !== 'undefined') {
+				var isOpen = CaretakerSidebar.toggle();
+				var actBtn = document.getElementById('activityToggle');
+				if (actBtn) actBtn.classList.toggle('active', isOpen);
+			}
+		}
+	});
+}
+```
 
 ## Verification
-- build: `cd /Users/name/homelab/flybrain && npm install`
-- lint: no linter configured -- skip
-- test: no existing tests -- skip
+- build: no build step (vanilla JS served statically)
+- lint: no linter configured
+- test: no existing tests
 - smoke:
-  1. Run `node -e "var db = require('./server/db'); var d = db.openDb('/tmp/test-caretaker.db'); d.insertObservation(new Date().toISOString(), {drives:{hunger:0.5,fear:0.1,fatigue:0.2,curiosity:0.3,groom:0}, behavior:{current:'walk'}, position:{x:100,y:200,facingDir:0,speed:1}, firingStats:{firedNeurons:10}, food:[], environment:{lightLevel:1,temperature:0.5}}); console.log(d.getLatestObservation()); d.insertAction(new Date().toISOString(), 'place_food', {x:100,y:200}, 'test', null); d.insertIncident(new Date().toISOString(), 'forgot_to_feed', 'medium', 'test', null); d.insertChatMessage(new Date().toISOString(), 'user', 'hello'); var s = d.computeDailyScore(new Date().toISOString().slice(0,10)); console.log(s); d.close(); console.log('All db operations OK');"` -- expect JSON output and "All db operations OK"
-  2. Run `node server/migrate-logs.js` -- expect migration summary with observation/action/incident counts and "Done."
-  3. Run `node server/caretaker.js &` then `curl -sf http://localhost:7600/state` -- expect "null" (no browser connected yet). Kill the server after.
-  4. Verify `data/caretaker.db` exists after migration: `ls -la data/caretaker.db`
+  1. Start the server: `cd /Users/name/homelab/flybrain && node server/caretaker.js`
+  2. Verify server starts without errors (look for `[caretaker] WebSocket server on port 7600`)
+  3. Open `index.html` in a browser served via HTTP (not file://)
+  4. Verify the "Activity" button appears in the toolbar on desktop
+  5. Click "Activity" -- sidebar should slide in from the left
+  6. Click "Activity" again or the X button -- sidebar should slide out
+  7. When connected to the caretaker server, send a command via stdin (e.g., `{"action":"place_food","params":{"x":300,"y":300},"reasoning":"fly was hungry"}`) and verify an entry appears in the activity feed with green left border and icon "F"
+  8. Verify that on page load, historical entries appear (if any exist in the DB)
+  9. Click an entry with reasoning text -- verify the detail row expands below
+  10. Verify on mobile viewport (<=768px): the Activity button is hidden, the hamburger button still opens the bottom panel drawer
 
 ## Constraints
 - Do NOT modify SPEC.md, TASKS.md, or CLAUDE.md
-- Do NOT modify or remove `caretaker.log` -- migration reads it but does not delete it
-- Do NOT modify `tools/query-log.sh` -- it will be updated in a later task
-- Do NOT modify `js/caretaker-bridge.js` or any browser-side JS files
-- Do NOT add any npm dependencies beyond `better-sqlite3`
-- Keep the CommonJS `var` style consistent with existing code -- no `const`, `let`, arrow functions, or ES module syntax
-- Keep `writeStdout()` unchanged -- the agent loop reads stdout, not the database
-- The `/state` HTTP endpoint returns `lastState` from memory (not from the database) for zero-latency agent reads
-- The `forgot_to_feed` incident rate limit is 60 seconds between consecutive inserts of the same type
-- Observation downsampling: only insert when `Date.now() - lastObservationTime >= 10000` (0.1Hz). All state messages are still forwarded to stdout regardless of sampling.
+- Do NOT add any npm dependencies
+- Do NOT use emojis in the icon mapping (use single ASCII characters)
+- Do NOT push the canvas layout when opening the sidebar -- use overlay (transform: translateX) pattern
+- Do NOT break the existing mobile hamburger behavior (bottom panel drawer)
+- Do NOT change the z-index of existing elements (#left-panel=20, education-panel=25, toolbar=20)
+- The sidebar z-index MUST be 22
+- The sidebar bottom MUST be 180px on desktop (to avoid overlapping the bottom panel)
+- All colors MUST come from CSS custom properties defined in :root (no hardcoded hex values in component styles)
+- The `caretaker-sidebar.js` script tag MUST appear BEFORE `caretaker-bridge.js` in index.html

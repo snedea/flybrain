@@ -20,6 +20,16 @@ function writeStdout(obj) {
   process.stdout.write(JSON.stringify(obj) + '\n');
 }
 
+function broadcastActivity(obj) {
+  if (browserSocket !== null && browserSocket.readyState === WebSocket.OPEN) {
+    try {
+      browserSocket.send(JSON.stringify(obj));
+    } catch (e) {
+      process.stderr.write('[caretaker] broadcastActivity error: ' + e.message + '\n');
+    }
+  }
+}
+
 function detectIncidents(state) {
   var now = new Date().toISOString();
   var fear = state.drives.fear;
@@ -31,6 +41,7 @@ function detectIncidents(state) {
       state);
     writeStdout({ type: 'incident', incident: 'scared_the_fly', action: lastActionType,
       fearBefore: preFearLevel, fearAfter: fear, flyState: state, timestamp: now });
+    broadcastActivity({ type: 'activity_incident', timestamp: now, incidentType: 'scared_the_fly', severity: 'high', description: 'Fear spiked from ' + preFearLevel.toFixed(2) + ' to ' + fear.toFixed(2) + ' after ' + lastActionType });
     lastActionTime = 0;
   }
   if (hunger > 0.9 && foodCount === 0) {
@@ -45,6 +56,7 @@ function detectIncidents(state) {
         'Hunger at ' + hunger.toFixed(2) + ' with no food available',
         state);
       writeStdout({ type: 'incident', incident: 'forgot_to_feed', hunger: hunger, flyState: state, timestamp: now });
+      broadcastActivity({ type: 'activity_incident', timestamp: now, incidentType: 'forgot_to_feed', severity: 'medium', description: 'Hunger at ' + hunger.toFixed(2) + ' with no food available' });
     }
   }
 }
@@ -84,6 +96,7 @@ function handleStdinCommand(line) {
   lastActionType = cmd.action;
   var ts = new Date().toISOString();
   caretakerDb.insertAction(ts, cmd.action, cmd.params || {}, cmd.reasoning || '', lastState);
+  broadcastActivity({ type: 'activity_action', timestamp: ts, action: cmd.action, params: cmd.params || {}, reasoning: cmd.reasoning || '', flyState: lastState });
   if (browserSocket !== null && browserSocket.readyState === WebSocket.OPEN) {
     try {
       browserSocket.send(JSON.stringify({ type: 'command', action: cmd.action, params: cmd.params || {} }));
@@ -114,6 +127,8 @@ var wss = new WebSocket.Server({ server: server });
 wss.on('connection', function(ws) {
   browserSocket = ws;
   process.stderr.write('[caretaker] Browser connected\n');
+  var history = caretakerDb.getRecentActivity(50);
+  broadcastActivity({ type: 'activity_history', entries: history });
   ws.on('message', function(data) { handleStateMessage(data.toString()); });
   ws.on('close', function() {
     browserSocket = null;

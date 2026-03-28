@@ -948,6 +948,200 @@ canvas {
     color: var(--accent-hover);
 }
 
+/* --- Caretaker Activity Sidebar --- */
+.caretaker-sidebar {
+    position: fixed;
+    top: 44px;
+    left: 0;
+    bottom: 180px;
+    width: 280px;
+    max-width: 85vw;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    z-index: 22;
+    font-family: system-ui, -apple-system, sans-serif;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+}
+
+.caretaker-sidebar.sidebar-open {
+    transform: translateX(0);
+}
+
+.caretaker-sidebar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.caretaker-sidebar-title {
+    color: var(--text);
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.caretaker-sidebar-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 0 0.25rem;
+    line-height: 1;
+}
+
+.caretaker-sidebar-close:hover {
+    color: var(--text);
+}
+
+.activity-feed {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.5rem;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(136, 146, 164, 0.3) transparent;
+}
+
+.activity-feed::-webkit-scrollbar {
+    width: 6px;
+}
+
+.activity-feed::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.activity-feed::-webkit-scrollbar-thumb {
+    background: rgba(136, 146, 164, 0.3);
+    border-radius: 3px;
+}
+
+.activity-feed::-webkit-scrollbar-thumb:hover {
+    background: rgba(136, 146, 164, 0.5);
+}
+
+.activity-entry {
+    padding: 0.4rem 0.5rem;
+    border-radius: var(--radius);
+    margin-bottom: 0.25rem;
+    cursor: pointer;
+    border-left: 3px solid var(--text-muted);
+    background: transparent;
+    transition: background 0.2s ease;
+}
+
+.activity-entry:hover {
+    background: var(--surface-hover);
+}
+
+.activity-entry-header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    font-size: 0.8rem;
+    color: var(--text);
+    line-height: 1.3;
+}
+
+.activity-icon {
+    font-weight: 700;
+    font-size: 0.7rem;
+    width: 1rem;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.activity-time {
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+}
+
+.activity-desc {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.activity-entry-detail {
+    display: none;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    padding-top: 0.3rem;
+    padding-left: 1.4rem;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.activity-entry.expanded .activity-entry-detail {
+    display: block;
+}
+
+.activity-entry.expanded .activity-desc {
+    white-space: normal;
+}
+
+/* Color-coded left borders and icon colors */
+.activity-feed .activity-entry.activity-feed {
+    border-left-color: var(--success);
+}
+
+.activity-feed .activity-entry.activity-feed .activity-icon {
+    color: var(--success);
+}
+
+.activity-feed .activity-entry.activity-comfort {
+    border-left-color: var(--neuron-sensory);
+}
+
+.activity-feed .activity-entry.activity-comfort .activity-icon {
+    color: var(--neuron-sensory);
+}
+
+.activity-feed .activity-entry.activity-warning {
+    border-left-color: var(--warning);
+}
+
+.activity-feed .activity-entry.activity-warning .activity-icon {
+    color: var(--warning);
+}
+
+.activity-feed .activity-entry.activity-incident {
+    border-left-color: var(--error);
+}
+
+.activity-feed .activity-entry.activity-incident .activity-icon {
+    color: var(--error);
+}
+
+.activity-feed .activity-entry.activity-neutral {
+    border-left-color: var(--text-muted);
+}
+
+.activity-feed .activity-entry.activity-neutral .activity-icon {
+    color: var(--text-muted);
+}
+
+/* Activity toggle button (desktop) */
+#activityToggle {
+    display: inline-block;
+}
+
+#activityToggle.active {
+    border-color: var(--accent);
+    background: var(--accent-subtle);
+    color: var(--accent);
+}
+
 /* --- Hamburger toggle (hidden on desktop) --- */
 #sidebarToggle {
     display: none;
@@ -1102,6 +1296,18 @@ canvas {
         top: calc(36px + env(safe-area-inset-top, 0px));
     }
 
+    .caretaker-sidebar {
+        top: calc(36px + env(safe-area-inset-top, 0px));
+        bottom: 120px;
+        width: 100%;
+        max-width: 100vw;
+        z-index: 23;
+    }
+
+    #activityToggle {
+        display: none;
+    }
+
     /* --- Help overlay repositioned for compact toolbar --- */
     .help-overlay {
         top: calc(46px + env(safe-area-inset-top, 0px));
@@ -1145,6 +1351,12 @@ canvas {
 
     #left-panel::before {
         display: none;
+    }
+
+    .caretaker-sidebar {
+        top: calc(32px + env(safe-area-inset-top, 0px));
+        bottom: 0;
+        width: 240px;
     }
 
     #drive-meters {

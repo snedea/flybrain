@@ -162,6 +162,17 @@ function openDb(dbPath) {
       return row ? row.timestamp : null;
     },
 
+    getRecentActivity: function(limit) {
+      if (limit === undefined) limit = 50;
+      return db.prepare(
+        'SELECT id, timestamp, kind, name, params, reasoning, state_snapshot FROM (' +
+        '  SELECT id, timestamp, \'action\' AS kind, action AS name, params, reasoning, fly_state AS state_snapshot FROM actions' +
+        '  UNION ALL' +
+        '  SELECT id, timestamp, \'incident\' AS kind, type AS name, NULL AS params, description AS reasoning, state_snapshot FROM incidents' +
+        ') ORDER BY timestamp DESC LIMIT ?'
+      ).all(limit);
+    },
+
     computeDailyScore: function(dateStr) {
       var dayStart = dateStr + 'T00:00:00.000Z';
       var dayEnd = dateStr + 'T23:59:59.999Z';

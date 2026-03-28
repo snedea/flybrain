@@ -99,7 +99,21 @@
       stateTimer = setInterval(sendState, STATE_INTERVAL);
       sendState();
     };
-    ws.onmessage = function(event) { executeCommand(event.data); };
+    ws.onmessage = function(event) {
+      var msg;
+      try { msg = JSON.parse(event.data); } catch (e) { return; }
+      if (msg.type === 'command') {
+        executeCommand(event.data);
+      } else if (typeof CaretakerSidebar !== 'undefined') {
+        if (msg.type === 'activity_action') {
+          CaretakerSidebar.onAction(msg);
+        } else if (msg.type === 'activity_incident') {
+          CaretakerSidebar.onIncident(msg);
+        } else if (msg.type === 'activity_history') {
+          CaretakerSidebar.onHistory(msg);
+        }
+      }
+    };
     ws.onclose = function() {
       connected = false;
       if (typeof CaretakerRenderer !== 'undefined') { CaretakerRenderer.setConnected(false); }
