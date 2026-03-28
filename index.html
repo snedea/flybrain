@@ -3,7 +3,7 @@
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>FlyBrain</title>
-    <link rel="stylesheet" type="text/css" href="./css/main.css?v=10">
+    <link rel="stylesheet" type="text/css" href="./css/main.css?v=12">
 </head>
 
 <body>
@@ -84,6 +84,10 @@
     </div>
     <div id="drawer-backdrop" class="drawer-backdrop"></div>
     <canvas id='canvas'></canvas>
+    <div id="zoom-controls" class="zoom-controls">
+        <button class="zoom-btn" id="zoomIn">+</button>
+        <button class="zoom-btn" id="zoomOut">&minus;</button>
+    </div>
     <div id="education-panel" class="education-panel" style="display:none;">
         <div class="education-panel-header">
             <span class="education-panel-title">Brain Guide</span>
@@ -96,16 +100,16 @@
     <!-- Three.js v0.128.0 (vendored) -- do NOT upgrade one without the other -->
     <script src="./js/vendor/three.min.js"></script>
     <script src="./js/vendor/OrbitControls.js"></script>
-    <script type="text/javascript" src="./js/constants.js?v=10"></script>
-    <script type="text/javascript" src="./js/connectome.js?v=10"></script>
-    <script type="text/javascript" src="./js/brain-worker-bridge.js?v=10"></script>
-    <script type="text/javascript" src="./js/neuro-renderer.js?v=10"></script>
-    <script type="text/javascript" src="./js/fly-logic.js?v=10"></script>
-    <script type="text/javascript" src="./js/brain3d.js?v=10"></script>
-    <script type="text/javascript" src="./js/education.js?v=10"></script>
-    <script type="text/javascript" src="./js/main.js?v=10"></script>
-    <script type="text/javascript" src="./js/caretaker-renderer.js?v=10"></script>
-    <script type="text/javascript" src="./js/caretaker-bridge.js?v=10"></script>
+    <script type="text/javascript" src="./js/constants.js?v=12"></script>
+    <script type="text/javascript" src="./js/connectome.js?v=12"></script>
+    <script type="text/javascript" src="./js/brain-worker-bridge.js?v=12"></script>
+    <script type="text/javascript" src="./js/neuro-renderer.js?v=12"></script>
+    <script type="text/javascript" src="./js/fly-logic.js?v=12"></script>
+    <script type="text/javascript" src="./js/brain3d.js?v=12"></script>
+    <script type="text/javascript" src="./js/education.js?v=12"></script>
+    <script type="text/javascript" src="./js/main.js?v=12"></script>
+    <script type="text/javascript" src="./js/caretaker-renderer.js?v=12"></script>
+    <script type="text/javascript" src="./js/caretaker-bridge.js?v=12"></script>
 </body>
 
 </html>

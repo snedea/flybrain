@@ -13,7 +13,14 @@ document.getElementById('clearButton').onclick = function () {
 document.getElementById('centerButton').onclick = function () {
 	fly.x = window.innerWidth / 2;
 	fly.y = window.innerHeight / 2;
+	zoomLevel = 1;
+	panX = 0;
+	panY = 0;
 };
+
+// --- Zoom controls ---
+document.getElementById('zoomIn').onclick = function () { setZoom(zoomLevel * 1.3); };
+document.getElementById('zoomOut').onclick = function () { setZoom(zoomLevel / 1.3); };
 
 // --- State ---
 var facingDir = 0;
@@ -26,6 +33,40 @@ var touchResetTime = 0;
 var windResetTime = 0;
 var dragToolOrigin = null;
 var currentDtScale = 1;
+
+// --- Zoom / Pan ---
+var zoomLevel = 1;
+var panX = 0;
+var panY = 0;
+var MIN_ZOOM = 0.5;
+var MAX_ZOOM = 5;
+var pinchStartDist = 0;
+var pinchStartZoom = 1;
+var isPanning = false;
+var panStart = { x: 0, y: 0 };
+var panStartOffset = { x: 0, y: 0 };
+
+function screenToWorld(sx, sy) {
+	var cx = window.innerWidth / 2;
+	var cy = window.innerHeight / 2;
+	return {
+		x: (sx - cx - panX) / zoomLevel + cx,
+		y: (sy - cy - panY) / zoomLevel + cy
+	};
+}
+
+function setZoom(newZoom, focusX, focusY) {
+	if (focusX === undefined) focusX = window.innerWidth / 2;
+	if (focusY === undefined) focusY = window.innerHeight / 2;
+	var cx = window.innerWidth / 2;
+	var cy = window.innerHeight / 2;
+	// Adjust pan so the point under focus stays fixed
+	var worldBefore = screenToWorld(focusX, focusY);
+	zoomLevel = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoom));
+	var worldAfter = screenToWorld(focusX, focusY);
+	panX += (worldAfter.x - worldBefore.x) * zoomLevel;
+	panY += (worldAfter.y - worldBefore.y) * zoomLevel;
+}
 
 // --- Layout helpers (mobile-aware) ---
 function isMobile() {
