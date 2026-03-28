@@ -1387,3 +1387,174 @@ var test_bridge_workerUpdate_drives_throttled = function () {
 };
 
 } // end bridge tests guard
+
+// ============================================================
+// Section: Neuro-renderer smoke tests (D68.3)
+// ============================================================
+
+if (typeof NeuroRenderer !== 'undefined' && NeuroRenderer._test) {
+
+var test_neuro_resize_width_only_triggers_rebuild = function () {
+    // Checklist item 1: width-only resize must trigger relayout
+    var nr = NeuroRenderer._test;
+    // Same height, different width (delta >= 2) => needs resize
+    assertTrue(nr.needsResize(800, 140, 1.0, 850, 140),
+        'width-only change (800->850) triggers resize');
+    // Same height, same width => no resize
+    assertTrue(!nr.needsResize(800, 140, 1.0, 800, 140),
+        'no change does not trigger resize');
+    // Same height, tiny width change (delta < 2) => no resize
+    assertTrue(!nr.needsResize(800, 140, 1.0, 801, 140),
+        'sub-threshold width change (1px) does not trigger resize');
+    // Height change, same width => needs resize
+    assertTrue(nr.needsResize(800, 140, 1.0, 800, 160),
+        'height-only change triggers resize');
+};
+
+var test_neuro_resize_with_displayScale = function () {
+    // When displayScale != 1, oldDisplayW = canvas.width * displayScale
+    var nr = NeuroRenderer._test;
+    // canvas.width=600, displayScale=1.5 => oldDisplayW=900
+    // newW=900 => no resize needed
+    assertTrue(!nr.needsResize(600, 140, 1.5, 900, 140),
+        'displayScale-adjusted width matches => no resize');
+    // newW=920 => delta=20 >= 2 => resize needed
+    assertTrue(nr.needsResize(600, 140, 1.5, 920, 140),
+        'displayScale-adjusted width mismatch => resize');
+};
+
+var test_neuro_cssToCanvasCoords_stretch = function () {
+    // Checklist item 2: tooltip hover coords convert correctly with CSS stretch
+    var nr = NeuroRenderer._test;
+    // Canvas is 600px wide internally, CSS-stretched to 900px (rect.width=900)
+    // Click at CSS x=450 (center of stretched canvas) should map to canvas x=300
+    var coords = nr.cssToCanvasCoords(450, 70, 0, 0, 900, 140, 600, 140, 0);
+    assertClose(coords.x, 300, 0.01, 'CSS center maps to canvas center with stretch');
+    assertClose(coords.y, 70, 0.01, 'Y unchanged when no vertical stretch');
+};
+
+var test_neuro_cssToCanvasCoords_with_scroll = function () {
+    var nr = NeuroRenderer._test;
+    // scrollLeft=50, click at CSS x=100, rect.left=0, rect.width=800, canvas.width=800
+    var coords = nr.cssToCanvasCoords(100, 50, 0, 0, 800, 140, 800, 140, 50);
+    assertClose(coords.x, 150, 0.01, 'scrollLeft offset added to canvasX');
+};
+
+var test_neuro_cssToCanvasCoords_with_rect_offset = function () {
+    var nr = NeuroRenderer._test;
+    // Panel starts at x=200 in viewport. Click at clientX=300 => local x=100
+    var coords = nr.cssToCanvasCoords(300, 80, 200, 10, 600, 140, 600, 140, 0);
+    assertClose(coords.x, 100, 0.01, 'rect.left offset subtracted');
+    assertClose(coords.y, 70, 0.01, 'rect.top offset subtracted');
+};
+
+var test_neuro_layout_small_sections_get_min_width = function () {
+    // Checklist item 4: DRIVES/MOTOR render as visible grids, not 1px slivers
+    var nr = NeuroRenderer._test;
+    // Simulate: Sensory=100000, Central=35000, Drives=80, Motor=76
+    var layout = nr.computeSectionLayout([100000, 35000, 80, 76], 800, 140, nr.POINT_SIZE, nr.MIN_SECTION_W, nr.MAX_SMALL_PS, nr.SECTION_GAP, nr.PAD);
+
+    // Drives (index 2) and Motor (index 3) must have sectionW >= MIN_SECTION_W
+    assertTrue(layout.sections[2].sectionW >= nr.MIN_SECTION_W,
+        'Drives section width >= MIN_SECTION_W (' + layout.sections[2].sectionW + ' >= ' + nr.MIN_SECTION_W + ')');
+    assertTrue(layout.sections[3].sectionW >= nr.MIN_SECTION_W,
+        'Motor section width >= MIN_SECTION_W (' + layout.sections[3].sectionW + ' >= ' + nr.MIN_SECTION_W + ')');
+
+    // Small sections must have enlarged point sizes (> base POINT_SIZE)
+    assertTrue(layout.sections[2].pointSize > nr.POINT_SIZE,
+        'Drives gets enlarged pointSize (' + layout.sections[2].pointSize + ' > ' + nr.POINT_SIZE + ')');
+    assertTrue(layout.sections[3].pointSize > nr.POINT_SIZE,
+        'Motor gets enlarged pointSize (' + layout.sections[3].pointSize + ' > ' + nr.POINT_SIZE + ')');
+};
+
+var test_neuro_layout_empty_section_zero_width = function () {
+    var nr = NeuroRenderer._test;
+    // Section with 0 neurons should have zero width
+    var layout = nr.computeSectionLayout([100, 0, 50, 30], 800, 140, nr.POINT_SIZE, nr.MIN_SECTION_W, nr.MAX_SMALL_PS, nr.SECTION_GAP, nr.PAD);
+    assertEqual(layout.sections[1].sectionW, 0, 'empty section has zero width');
+    assertEqual(layout.sections[1].neuronCount, 0, 'empty section neuronCount is 0');
+};
+
+var test_neuro_layout_displayScale_shrinks_to_fit = function () {
+    // Checklist item 6: Motor not clipped -- canvas shrinks via displayScale < 1
+    var nr = NeuroRenderer._test;
+    // With very large neuron counts, canvasWidth may exceed containerW
+    // displayScale = containerW / canvasWidth < 1 means CSS shrinks canvas to fit
+    var layout = nr.computeSectionLayout([100000, 35000, 80, 76], 400, 140, nr.POINT_SIZE, nr.MIN_SECTION_W, nr.MAX_SMALL_PS, nr.SECTION_GAP, nr.PAD);
+    // With 135K+ neurons at POINT_SIZE=1 in 400px container, canvas will be wider than 400
+    if (layout.canvasWidth > 400) {
+        assertTrue(layout.displayScale < 1.0,
+            'displayScale < 1 when canvas exceeds container (' + layout.displayScale + ')');
+    }
+    // All 4 sections must have valid bounds (Motor is last, must not be clipped)
+    assertTrue(layout.sections[3].x1 <= layout.canvasWidth,
+        'Motor section x1 fits within canvasWidth');
+};
+
+var test_neuro_label_maxwidths_prevent_overlap = function () {
+    // Checklist item 3: labels truncate with ellipsis (max-width prevents overflow)
+    var nr = NeuroRenderer._test;
+    // Create mock sectionBounds with known positions
+    var bounds = [
+        {x0: 0, x1: 200, neuronIndices: [1], neuronCount: 1},
+        {x0: 216, x1: 400, neuronIndices: [2], neuronCount: 1},
+        {x0: 416, x1: 476, neuronIndices: [3], neuronCount: 1},
+        {x0: 492, x1: 552, neuronIndices: [4], neuronCount: 1}
+    ];
+    var dScale = 1.0;
+    var widths = nr.computeLabelMaxWidths(bounds, dScale);
+
+    // 4 visible sections => 4 entries
+    assertEqual(widths.length, 4, 'all 4 sections get label width entries');
+
+    // First label: maxWidth = next.x0 * dScale - this.x0 * dScale - 4
+    // = 216 - 0 - 4 = 212
+    assertClose(widths[0].maxWidth, 212, 0.01, 'first label maxWidth capped before second section');
+
+    // Third label (Drives at x0=416): maxWidth = 492 - 416 - 4 = 72
+    assertClose(widths[2].maxWidth, 72, 0.01, 'narrow section label maxWidth prevents overflow');
+
+    // Last label (Motor): maxWidth = -1 (uncapped)
+    assertEqual(widths[3].maxWidth, -1, 'last label has no maxWidth cap');
+};
+
+var test_neuro_label_maxwidths_with_displayScale = function () {
+    var nr = NeuroRenderer._test;
+    // displayScale=0.5 means CSS positions are halved
+    var bounds = [
+        {x0: 0, x1: 400, neuronIndices: [1], neuronCount: 1},
+        {x0: 416, x1: 800, neuronIndices: [2], neuronCount: 1}
+    ];
+    var widths = nr.computeLabelMaxWidths(bounds, 0.5);
+    // First label: leftPx = 0*0.5 = 0, nextLeft = 416*0.5 = 208, maxWidth = max(20, 208-0-4) = 204
+    assertClose(widths[0].maxWidth, 204, 0.01, 'displayScale applied to label maxWidth calc');
+};
+
+var test_neuro_label_skip_empty_sections = function () {
+    var nr = NeuroRenderer._test;
+    // Section 1 is empty (0 neurons)
+    var bounds = [
+        {x0: 0, x1: 200, neuronIndices: [1], neuronCount: 1},
+        {x0: 200, x1: 200, neuronIndices: [], neuronCount: 0},
+        {x0: 216, x1: 400, neuronIndices: [3], neuronCount: 1},
+        {x0: 416, x1: 500, neuronIndices: [4], neuronCount: 1}
+    ];
+    var widths = nr.computeLabelMaxWidths(bounds, 1.0);
+    // Only 3 visible sections (indices 0, 2, 3)
+    assertEqual(widths.length, 3, 'empty section skipped in label widths');
+    assertEqual(widths[0].region, 0, 'first visible is region 0');
+    assertEqual(widths[1].region, 2, 'second visible is region 2');
+    assertEqual(widths[2].region, 3, 'third visible is region 3');
+};
+
+var test_neuro_layout_point_size_capped_at_max = function () {
+    var nr = NeuroRenderer._test;
+    // Very few neurons (e.g. 2) in a section -- pointSize should not exceed MAX_SMALL_PS
+    var layout = nr.computeSectionLayout([1000, 500, 2, 3], 800, 140, nr.POINT_SIZE, nr.MIN_SECTION_W, nr.MAX_SMALL_PS, nr.SECTION_GAP, nr.PAD);
+    assertTrue(layout.sections[2].pointSize <= nr.MAX_SMALL_PS,
+        'Drives pointSize capped at MAX_SMALL_PS (' + layout.sections[2].pointSize + ' <= ' + nr.MAX_SMALL_PS + ')');
+    assertTrue(layout.sections[3].pointSize <= nr.MAX_SMALL_PS,
+        'Motor pointSize capped at MAX_SMALL_PS (' + layout.sections[3].pointSize + ' <= ' + nr.MAX_SMALL_PS + ')');
+};
+
+} // end neuro-renderer tests guard

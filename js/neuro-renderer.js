@@ -219,6 +219,49 @@
 		program.u_resolution = gl.getUniformLocation(program, 'u_resolution');
 	}
 
+	function computeSectionLayout(regionCounts, containerW, containerH, pointSize, minSectionW, maxSmallPS, sectionGap, pad) {
+		var usableH = containerH - sectionGap - pad;
+		var rowsAvail = Math.max(1, Math.floor(usableH / pointSize));
+
+		var totalNeurons = 0;
+		for (var r = 0; r < regionCounts.length; r++) totalNeurons += regionCounts[r];
+		var availableW = containerW - ((regionCounts.length - 1) * sectionGap);
+		var minRowsForWidth = Math.ceil(totalNeurons * pointSize / Math.max(1, availableW));
+		if (minRowsForWidth > rowsAvail) rowsAvail = minRowsForWidth;
+
+		var sections = [];
+		var cursorX = 0;
+
+		for (var r = 0; r < regionCounts.length; r++) {
+			var count = regionCounts[r];
+			if (count === 0) {
+				sections.push({x0: cursorX, x1: cursorX, sectionW: 0, pointSize: pointSize, localRows: rowsAvail, neuronCount: 0});
+				continue;
+			}
+
+			var naturalW = Math.ceil(count / rowsAvail) * pointSize;
+			var localPS = pointSize;
+			var localRows = rowsAvail;
+			if (naturalW < minSectionW) {
+				localPS = Math.min(maxSmallPS, Math.sqrt(minSectionW * usableH / count));
+				localPS = Math.max(pointSize, localPS);
+				localRows = Math.max(1, Math.floor(usableH / localPS));
+			}
+
+			var sectionX0 = cursorX;
+			var colsNeeded = Math.ceil(count / localRows);
+			var sectionW = colsNeeded * localPS;
+
+			cursorX += sectionW + sectionGap;
+			sections.push({x0: sectionX0, x1: cursorX - sectionGap, sectionW: sectionW, pointSize: localPS, localRows: localRows, neuronCount: count});
+		}
+
+		var canvasWidth = Math.ceil(cursorX);
+		var displayScaleVal = containerW / canvasWidth;
+
+		return {sections: sections, canvasWidth: canvasWidth, canvasHeight: containerH, displayScale: displayScaleVal, rowsAvail: rowsAvail};
+	}
+
 	function buildLayout() {
 		var regionType = BRAIN.workerRegionType;
 		var regionNeurons = [[], [], [], []];
@@ -226,52 +269,37 @@
 			regionNeurons[regionType[i]].push(i);
 		}
 
-		// Horizontal layout: 4 region columns side by side
 		var wrap = canvas.parentElement;
 		var wrapRect = wrap.getBoundingClientRect();
 		var H = Math.floor(wrapRect.height) || 140;
 		var W = Math.floor(wrapRect.width) || 800;
-		var usableH = H - SECTION_GAP - PAD;
-		var rowsAvail = Math.max(1, Math.floor(usableH / POINT_SIZE));
 
-		// Ensure total width fits container: increase rows if needed
-		var availableW = W - (3 * SECTION_GAP);
-		var minRowsForWidth = Math.ceil(neuronCount * POINT_SIZE / Math.max(1, availableW));
-		if (minRowsForWidth > rowsAvail) rowsAvail = minRowsForWidth;
+		var regionCounts = [regionNeurons[0].length, regionNeurons[1].length, regionNeurons[2].length, regionNeurons[3].length];
+		var layout = computeSectionLayout(regionCounts, W, H, POINT_SIZE, MIN_SECTION_W, MAX_SMALL_PS, SECTION_GAP, PAD);
 
 		neuronPositions = new Float32Array(neuronCount * 2);
 		var posData = new Float32Array(neuronCount * 2);
 		var colorData = new Float32Array(neuronCount * 3);
 		var pointSizeData = new Float32Array(neuronCount);
-		var cursorX = 0;
 		sectionBounds = [];
 
 		for (var r = 0; r < 4; r++) {
 			var neurons = regionNeurons[r];
+			var sec = layout.sections[r];
+
 			if (neurons.length === 0) {
-				sectionBounds.push({x0: cursorX, x1: cursorX, y0: 0, y1: H, region: r, neuronIndices: [], pointSize: POINT_SIZE, localRows: rowsAvail});
+				sectionBounds.push({x0: sec.x0, x1: sec.x1, y0: 0, y1: H, region: r, neuronIndices: [], pointSize: sec.pointSize, localRows: sec.localRows});
 				continue;
 			}
 
-			// For tiny sections, enlarge point size so they fill MIN_SECTION_W
-			var naturalW = Math.ceil(neurons.length / rowsAvail) * POINT_SIZE;
-			var localPS = POINT_SIZE;
-			var localRows = rowsAvail;
-			if (naturalW < MIN_SECTION_W && neurons.length > 0) {
-				localPS = Math.min(MAX_SMALL_PS, Math.sqrt(MIN_SECTION_W * usableH / neurons.length));
-				localPS = Math.max(POINT_SIZE, localPS);
-				localRows = Math.max(1, Math.floor(usableH / localPS));
-			}
-
-			var sectionX0 = cursorX;
-			var colsNeeded = Math.ceil(neurons.length / localRows);
-			var sectionW = colsNeeded * localPS;
+			var localPS = sec.pointSize;
+			var localRows = sec.localRows;
 
 			for (var j = 0; j < neurons.length; j++) {
 				var nIdx = neurons[j];
 				var col = Math.floor(j / localRows);
 				var row = j % localRows;
-				var px = cursorX + col * localPS + localPS * 0.5;
+				var px = sec.x0 + col * localPS + localPS * 0.5;
 				var py = SECTION_GAP + row * localPS + localPS * 0.5;
 				posData[nIdx * 2] = px;
 				posData[nIdx * 2 + 1] = py;
@@ -283,17 +311,15 @@
 				colorData[nIdx * 3 + 1] = rgb[1];
 				colorData[nIdx * 3 + 2] = rgb[2];
 			}
-			cursorX += sectionW + SECTION_GAP;
-			sectionBounds.push({x0: sectionX0, x1: cursorX - SECTION_GAP, y0: 0, y1: H, region: r, neuronIndices: neurons, pointSize: localPS, localRows: localRows});
+			sectionBounds.push({x0: sec.x0, x1: sec.x1, y0: 0, y1: H, region: r, neuronIndices: neurons, pointSize: localPS, localRows: localRows});
 		}
 
-		canvas.width = Math.ceil(cursorX);
-		canvas.height = H;
+		canvas.width = layout.canvasWidth;
+		canvas.height = layout.canvasHeight;
+		displayScale = layout.displayScale;
 		gl.viewport(0, 0, canvas.width, canvas.height);
 
-		// Scale canvas CSS to always fill container width (stretch or shrink)
 		canvas.style.width = W + 'px';
-		displayScale = W / canvas.width;
 
 		if (posBuffer) gl.deleteBuffer(posBuffer);
 		posBuffer = gl.createBuffer();
@@ -315,6 +341,27 @@
 		pointSizeBuffer = gl.createBuffer();
 		gl.bindBuffer(gl.ARRAY_BUFFER, pointSizeBuffer);
 		gl.bufferData(gl.ARRAY_BUFFER, pointSizeData, gl.STATIC_DRAW);
+	}
+
+	function computeLabelMaxWidths(sectionBoundsArr, displayScaleVal) {
+		var visible = [];
+		for (var r = 0; r < sectionBoundsArr.length; r++) {
+			if (sectionBoundsArr[r].neuronIndices ? sectionBoundsArr[r].neuronIndices.length > 0 : sectionBoundsArr[r].neuronCount > 0) {
+				visible.push(r);
+			}
+		}
+		var widths = [];
+		for (var vi = 0; vi < visible.length; vi++) {
+			var r = visible[vi];
+			var leftPx = sectionBoundsArr[r].x0 * displayScaleVal;
+			if (vi < visible.length - 1) {
+				var nextLeft = sectionBoundsArr[visible[vi + 1]].x0 * displayScaleVal;
+				widths.push({region: r, leftPx: leftPx, maxWidth: Math.max(20, nextLeft - leftPx - 4)});
+			} else {
+				widths.push({region: r, leftPx: leftPx, maxWidth: -1}); // -1 means uncapped
+			}
+		}
+		return widths;
 	}
 
 	function buildLabels() {
@@ -341,6 +388,13 @@
 		}
 	}
 
+	function needsResize(canvasW, canvasH, curDisplayScale, newW, newH) {
+		var oldDisplayW = Math.round(canvasW * curDisplayScale);
+		if (newH !== canvasH) return true;
+		if (Math.abs(newW - oldDisplayW) >= 2) return true;
+		return false;
+	}
+
 	function handleResize() {
 		if (!gl || !canvas || neuronCount === 0) return;
 		var wrap = canvas.parentElement;
@@ -348,9 +402,7 @@
 		var rect = wrap.getBoundingClientRect();
 		var newH = Math.floor(rect.height) || 140;
 		var newW = Math.floor(rect.width) || 800;
-		// Rebuild on height OR width change
-		var oldDisplayW = Math.round(canvas.width * displayScale);
-		if (newH === canvas.height && Math.abs(newW - oldDisplayW) < 2) return;
+		if (!needsResize(canvas.width, canvas.height, displayScale, newW, newH)) return;
 		if (posBuffer) gl.deleteBuffer(posBuffer);
 		if (colorBuffer) gl.deleteBuffer(colorBuffer);
 		if (brightnessBuffer) gl.deleteBuffer(brightnessBuffer);
@@ -408,6 +460,12 @@
 		gl.drawArrays(gl.POINTS, 0, neuronCount);
 
 		animFrameId = requestAnimationFrame(renderLoop);
+	}
+
+	function cssToCanvasCoords(clientX, clientY, rectLeft, rectTop, rectWidth, rectHeight, canvasWidth, canvasHeight, scrollLeft) {
+		var canvasX = ((clientX - rectLeft) + scrollLeft) * (canvasWidth / rectWidth);
+		var canvasY = (clientY - rectTop) * (canvasHeight / rectHeight);
+		return {x: canvasX, y: canvasY};
 	}
 
 	function onMouseMove(e) {
@@ -477,4 +535,19 @@
 	}
 
 	window.NeuroRenderer = { init: init, destroy: destroy, isActive: isActive };
+
+	if (typeof BRAIN !== 'undefined' && BRAIN._testMode) {
+		NeuroRenderer._test = {
+			computeSectionLayout: computeSectionLayout,
+			needsResize: needsResize,
+			cssToCanvasCoords: cssToCanvasCoords,
+			computeLabelMaxWidths: computeLabelMaxWidths,
+			POINT_SIZE: POINT_SIZE,
+			MIN_SECTION_W: MIN_SECTION_W,
+			MAX_SMALL_PS: MAX_SMALL_PS,
+			SECTION_GAP: SECTION_GAP,
+			PAD: PAD,
+			PICK_RADIUS_SQ: PICK_RADIUS_SQ
+		};
+	}
 })();

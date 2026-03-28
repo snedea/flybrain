@@ -24,10 +24,14 @@ for (var i = 0; i < baseFiles.length; i++) {
 // and exposes internal functions via BRAIN._bridge for testing.
 BRAIN._testMode = true;
 
+// Stub window for neuro-renderer.js IIFE (assigns to window.NeuroRenderer)
+if (typeof window === 'undefined') global.window = global;
+
 // Phase 3: Load bridge, logic, and tests
 var moreFiles = [
 	'js/brain-worker-bridge.js',
 	'js/fly-logic.js',
+	'js/neuro-renderer.js',
 	'tests/tests.js',
 ];
 for (var i = 0; i < moreFiles.length; i++) {
