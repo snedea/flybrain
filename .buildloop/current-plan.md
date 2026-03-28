@@ -1,398 +1,254 @@
-# Plan: T8.3
-
-Canvas rendering of Claude's visual presence -- cursor, interaction indicators, attention trail, idle pulse, toolbar highlights.
+# Plan: T8.4
 
 ## Dependencies
-- list: none (vanilla JS, no packages)
-- commands: none
+- list: [duckdb (already installed at /opt/homebrew/bin/duckdb v1.5.1), jq (already required by agent/run.sh), claude CLI (already required by agent/run.sh)]
+- commands: [] (no new installs needed)
 
 ## File Operations (in execution order)
 
-### 1. CREATE svg/claude-cursor.svg
+### 1. CREATE tools/query-log.sh
 - operation: CREATE
-- reason: Claude logo silhouette SVG used as the caretaker cursor on canvas. Rendered as a small (20x20) orange icon.
+- reason: New shell script that loads caretaker.log into DuckDB, uses Claude Code to generate SQL from natural language questions, runs the SQL, and presents interpreted results
 
-#### Content
-Create a minimal SVG file (viewBox="0 0 20 20") containing the Claude logo silhouette. Use a simplified "spark" or "asterisk" shape that is recognizable at small size. The shape is a stylized 6-pointed star/spark with rounded tips, filled solid (no stroke). Use `fill="#E3734B"` for the orange color. Keep the SVG under 1KB.
+#### Structure
 
-Exact SVG content:
-```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" width="20" height="20">
-  <path d="M10 0 C10.5 4, 12 6, 16 7 C12 8, 10.5 10, 10 14 C9.5 10, 8 8, 4 7 C8 6, 9.5 4, 10 0Z" fill="#E3734B"/>
-  <circle cx="10" cy="16.5" r="2" fill="#E3734B"/>
-</svg>
-```
-This produces a 4-pointed spark with a small dot below it -- a recognizable simplified Claude "spark" logo.
+The script has these sections in order: shebang + set flags, constants, dependency checks, argument validation, DuckDB schema setup, schema extraction, SQL generation via Claude, SQL execution, result interpretation via Claude, output.
 
-### 2. CREATE js/caretaker-renderer.js
-- operation: CREATE
-- reason: Canvas overlay module that draws all Claude visual presence indicators. Called from the main draw loop and fed events from caretaker-bridge.js.
-
-#### Module Structure
-The file is an IIFE that exposes `window.CaretakerRenderer` with methods called from other files.
-
-#### State Variables (module-scoped)
-```javascript
-var cursorImg = null;            // HTMLImageElement for claude-cursor.svg
-var cursorLoaded = false;        // true once SVG image is decoded
-var attentionX = -1;             // current Claude attention point X (-1 = not active)
-var attentionY = -1;             // current Claude attention point Y
-var attentionTargetX = -1;       // target attention point X (lerps toward this)
-var attentionTargetY = -1;       // target attention point Y
-var trail = [];                  // array of {x, y, time} for attention trail
-var TRAIL_MAX = 40;              // max trail points
-var TRAIL_LIFETIME = 2000;       // trail point lifetime in ms
-
-var activeEffects = [];          // array of {type, x, y, startTime, params}
-                                 // type: 'ripple' | 'ring' | 'arrow' | 'toolbar'
-
-var idleStart = 0;               // Date.now() when Claude entered idle/observing
-var lastCommandTime = 0;         // Date.now() of last command received
-var caretakerConnected = false;  // whether caretaker WS is connected
-
-var CURSOR_SIZE = 20;            // px, rendered size of Claude cursor icon
-var CLAUDE_ORANGE = 'rgba(227, 115, 75, ';  // base color prefix for rgba
-var CLAUDE_ORANGE_HEX = '#E3734B';
+#### Constants
+```bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+LOG_FILE="$PROJECT_DIR/caretaker.log"
+DUCKDB_SETUP=""  # will hold the SQL that creates views, built in build_schema()
 ```
 
 #### Functions
 
-- signature: `function init()`
-  - purpose: Load the Claude cursor SVG into an Image element for canvas drawing
+- signature: `check_deps()`
+  - purpose: Verify required CLI tools are available
   - logic:
-    1. Create `new Image()`
-    2. Set `cursorImg.src = './svg/claude-cursor.svg'`
-    3. On `cursorImg.onload`, set `cursorLoaded = true`
-    4. Call `init()` at module load time (bottom of IIFE)
+    1. Check `command -v duckdb` exists, if not print `"Error: duckdb is required but not found. Install with: brew install duckdb"` to stderr and exit 1
+    2. Check `command -v claude` exists, if not print `"Error: claude CLI is required but not found."` to stderr and exit 1
+    3. Check `command -v jq` exists, if not print `"Error: jq is required but not found. Install with: brew install jq"` to stderr and exit 1
   - calls: none
-  - returns: void
-  - error handling: On `cursorImg.onerror`, log warning `'[caretaker-renderer] Failed to load cursor SVG'` and leave `cursorLoaded = false`
+  - returns: nothing (exits on failure)
+  - error handling: exit 1 with descriptive message for each missing tool
 
-- signature: `function onCommand(action, params)`
-  - purpose: Called by caretaker-bridge.js when a command is received from the agent. Records the command as a visual effect and updates attention point.
+- signature: `validate_args()`
+  - purpose: Check that a question argument was provided and log file exists
   - logic:
-    1. Set `lastCommandTime = Date.now()`
-    2. Switch on `action`:
-       - `'place_food'`: Set `attentionTargetX = params.x`, `attentionTargetY = params.y`. Push `{type: 'ripple', x: params.x, y: params.y, startTime: Date.now()}` to `activeEffects`. Call `highlightToolbar('feed')`.
-       - `'touch'`: Compute `tx = params.x !== undefined ? params.x : fly.x`, `ty = params.y !== undefined ? params.y : fly.y`. Set `attentionTargetX = tx`, `attentionTargetY = ty`. Push `{type: 'ring', x: tx, y: ty, startTime: Date.now()}` to `activeEffects`. Call `highlightToolbar('touch')`.
-       - `'blow_wind'`: Set `attentionTargetX = fly.x`, `attentionTargetY = fly.y`. Push `{type: 'arrow', x: fly.x, y: fly.y, startTime: Date.now(), params: {strength: params.strength || 0.5, direction: params.direction || 0}}` to `activeEffects`. Call `highlightToolbar('air')`.
-       - `'set_light'`: Call `highlightToolbar('light')`. Set `attentionTargetX = fly.x`, `attentionTargetY = fly.y`.
-       - `'set_temp'`: Call `highlightToolbar('temp')`. Set `attentionTargetX = fly.x`, `attentionTargetY = fly.y`.
-       - `'clear_food'`: Call `highlightToolbar('feed')`. Set `attentionTargetX = fly.x`, `attentionTargetY = fly.y`.
-       - default: Set `attentionTargetX = fly.x`, `attentionTargetY = fly.y`.
-    3. If `attentionX < 0` (first command, cursor not yet placed), snap directly: `attentionX = attentionTargetX`, `attentionY = attentionTargetY`.
-  - calls: `highlightToolbar(toolName)`
-  - returns: void
-  - error handling: none
-
-- signature: `function setConnected(isConnected)`
-  - purpose: Track caretaker connection status. When connected, start idle timer. When disconnected, hide cursor.
-  - logic:
-    1. Set `caretakerConnected = isConnected`
-    2. If `isConnected` and `idleStart === 0`, set `idleStart = Date.now()`
-    3. If `!isConnected`, set `attentionX = -1`, `attentionY = -1`, clear `trail` array, clear `activeEffects` array
+    1. If `$#` is 0, print usage message to stderr: `"Usage: tools/query-log.sh \"your question about the caretaker log\""` followed by example queries (one per line): `"  Examples:"`, `"    tools/query-log.sh \"how many times did Claude forget to feed the fly?\""`, `"    tools/query-log.sh \"what was the fly's average hunger today?\""`, `"    tools/query-log.sh \"show me all incidents\""`, `"    tools/query-log.sh \"how many times did Claude scare the fly?\""`. Then exit 1.
+    2. If `$LOG_FILE` does not exist or is empty (test with `[[ ! -s "$LOG_FILE" ]]`), print `"Error: No caretaker log found at $LOG_FILE"` followed by `"Run the caretaker agent first: bash agent/run.sh"` to stderr and exit 1.
   - calls: none
-  - returns: void
-  - error handling: none
+  - returns: nothing (exits on failure)
+  - error handling: exit 1 with usage or missing-log message
 
-- signature: `function highlightToolbar(toolName)`
-  - purpose: Add temporary orange glow CSS class to a toolbar button when Claude uses that tool
+- signature: `build_schema()`
+  - purpose: Build the DuckDB SQL preamble that creates views from the JSON Lines log
   - logic:
-    1. Find button: `var btn = document.querySelector('.tool-btn[data-tool="' + toolName + '"]')`
-    2. If `btn === null`, return
-    3. Add class: `btn.classList.add('claude-highlight')`
-    4. Remove after 1500ms: `setTimeout(function() { btn.classList.remove('claude-highlight'); }, 1500)`
+    1. Set the variable `DUCKDB_SETUP` to the following multi-line SQL string (use a heredoc assigned to the variable):
+    ```sql
+    CREATE VIEW raw_log AS
+    SELECT * FROM read_json_auto('${LOG_FILE}', format='newline_delimited', union_by_name=true);
+
+    CREATE VIEW observations AS
+    SELECT
+      timestamp::TIMESTAMP AS ts,
+      data.drives.hunger AS hunger,
+      data.drives.fear AS fear,
+      data.drives.fatigue AS fatigue,
+      data.drives.curiosity AS curiosity,
+      data.drives.groom AS groom,
+      data.behavior.current AS behavior,
+      data.position.x AS pos_x,
+      data.position.y AS pos_y,
+      data.position.speed AS speed,
+      data.environment.lightLevel AS light_level,
+      data.environment.temperature AS temperature,
+      len(data.food) AS food_count
+    FROM raw_log
+    WHERE type = 'observation';
+
+    CREATE VIEW actions AS
+    SELECT
+      timestamp::TIMESTAMP AS ts,
+      action,
+      params,
+      reasoning
+    FROM raw_log
+    WHERE type = 'action';
+
+    CREATE VIEW incidents AS
+    SELECT
+      timestamp::TIMESTAMP AS ts,
+      incident,
+      action,
+      fearBefore AS fear_before,
+      fearAfter AS fear_after,
+      hunger
+    FROM raw_log
+    WHERE type = 'incident';
+    ```
+    Note: `${LOG_FILE}` must be interpolated into the SQL string (it is a shell variable holding the absolute path). Use double quotes around the heredoc delimiter to allow variable expansion (i.e., `DUCKDB_SETUP=$(cat <<EOF` not `<<'EOF'`).
   - calls: none
-  - returns: void
-  - error handling: If button not found, return silently
+  - returns: nothing (sets DUCKDB_SETUP variable)
+  - error handling: none needed (static SQL construction)
 
-- signature: `function update(dt)`
-  - purpose: Update attention point position (lerp), prune expired trail points and effects. Called every frame from main update loop.
+- signature: `get_schema_info()`
+  - purpose: Run DuckDB to extract view schemas and sample data for Claude's context
   - logic:
-    1. If `!caretakerConnected` or `attentionX < 0`, return
-    2. Lerp attention position toward target:
-       - `var lerpSpeed = 0.08`
-       - `attentionX += (attentionTargetX - attentionX) * lerpSpeed`
-       - `attentionY += (attentionTargetY - attentionY) * lerpSpeed`
-    3. Snap if close: if `Math.abs(attentionX - attentionTargetX) < 0.5 && Math.abs(attentionY - attentionTargetY) < 0.5`, snap `attentionX = attentionTargetX`, `attentionY = attentionTargetY`
-    4. Add trail point: If `trail.length === 0` or distance from last trail point > 3px (`Math.hypot(attentionX - trail[trail.length-1].x, attentionY - trail[trail.length-1].y) > 3`), push `{x: attentionX, y: attentionY, time: Date.now()}`
-    5. Prune trail: Remove entries older than `TRAIL_LIFETIME` from front of array. Use while loop: `while (trail.length > 0 && Date.now() - trail[0].time > TRAIL_LIFETIME) trail.shift()`
-    6. Cap trail length: `while (trail.length > TRAIL_MAX) trail.shift()`
-    7. Prune expired effects: Loop `activeEffects` from end to start. Remove if:
-       - type `'ripple'`: elapsed > 800ms
-       - type `'ring'`: elapsed > 600ms
-       - type `'arrow'`: elapsed > 1200ms
-  - calls: none
-  - returns: void
-  - error handling: none
+    1. Build a SQL string that consists of `$DUCKDB_SETUP` followed by these queries separated by newlines:
+       ```sql
+       SELECT 'OBSERVATIONS_SCHEMA' AS label;
+       DESCRIBE observations;
+       SELECT 'OBSERVATIONS_SAMPLE' AS label;
+       SELECT * FROM observations LIMIT 3;
+       SELECT 'OBSERVATIONS_COUNT' AS label;
+       SELECT count(*) AS total_observations FROM observations;
+       SELECT 'ACTIONS_SCHEMA' AS label;
+       DESCRIBE actions;
+       SELECT 'ACTIONS_SAMPLE' AS label;
+       SELECT * FROM actions LIMIT 3;
+       SELECT 'ACTIONS_COUNT' AS label;
+       SELECT count(*) AS total_actions FROM actions;
+       SELECT 'INCIDENTS_SCHEMA' AS label;
+       DESCRIBE incidents;
+       SELECT 'INCIDENTS_SAMPLE' AS label;
+       SELECT * FROM incidents LIMIT 5;
+       SELECT 'INCIDENTS_COUNT' AS label;
+       SELECT count(*) AS total_incidents FROM incidents;
+       SELECT 'TIME_RANGE' AS label;
+       SELECT min(timestamp::TIMESTAMP) AS earliest, max(timestamp::TIMESTAMP) AS latest FROM raw_log;
+       ```
+    2. Run `duckdb -markdown -c "$FULL_SQL"` (in-memory mode, no database file argument) and capture stdout into a variable `SCHEMA_INFO`
+    3. If duckdb exits non-zero, print `"Error: Failed to read caretaker log with DuckDB. The log file may be malformed."` to stderr and exit 1
+  - calls: `duckdb` CLI
+  - returns: nothing (sets SCHEMA_INFO variable)
+  - error handling: check duckdb exit code, exit 1 on failure
 
-- signature: `function drawOverlay(ctx)`
-  - purpose: Draw all Claude visual indicators on the main canvas. Called from main `draw()` after fly is rendered.
+- signature: `generate_sql(question, schema_info)`
+  - purpose: Call Claude Code to generate a DuckDB SQL query from the natural language question
   - logic:
-    1. If `!caretakerConnected`, return immediately
-    2. Call `drawTrail(ctx)`
-    3. Call `drawEffects(ctx)`
-    4. Call `drawCursor(ctx)`
-    5. Call `drawIdlePulse(ctx)`
-  - calls: `drawTrail(ctx)`, `drawEffects(ctx)`, `drawCursor(ctx)`, `drawIdlePulse(ctx)`
-  - returns: void
-  - error handling: none
+    1. Build a prompt string (store in variable `GEN_PROMPT`) using a heredoc with the following exact content:
+       ```
+       You are a DuckDB SQL expert. Generate a single DuckDB SQL query to answer the user's question about a virtual fly caretaker log.
 
-- signature: `function drawTrail(ctx)`
-  - purpose: Draw faint orange line showing Claude's recent attention path
+       Available views (created from a JSON Lines log file):
+
+       ${SCHEMA_INFO}
+
+       Key domain knowledge:
+       - "observations" has one row per ~1-second state snapshot of the fly (drives, behavior, position)
+       - "actions" has one row per caretaker action (place_food, set_light, set_temp, touch, blow_wind, clear_food)
+       - "incidents" has one row per detected incident (scared_the_fly, forgot_to_feed)
+       - "forgot to feed" = incident type 'forgot_to_feed' (hunger > 0.9 with no food present)
+       - "scared the fly" = incident type 'scared_the_fly' (fear spike after a Claude action)
+       - Drives (hunger, fear, fatigue, curiosity, groom) range from 0.0 to 1.0
+       - light_level: 0=bright, 1=dim, 2=dark
+       - temperature: 0=neutral, 1=warm, 2=cool
+       - All timestamps are ISO 8601
+
+       User's question: ${QUESTION}
+
+       Output ONLY the SQL query. No explanation, no markdown fences, no comments. Just the SQL.
+       ```
+    2. Call: `GENERATED_SQL=$(command claude -p --no-session-persistence --model haiku --max-budget-usd 0.01 "$GEN_PROMPT" 2>/dev/null)`
+    3. If the exit code is non-zero or `GENERATED_SQL` is empty, print `"Error: Failed to generate SQL query from Claude."` to stderr and exit 1
+    4. Strip markdown code fences if present: pipe `GENERATED_SQL` through `sed` to remove lines matching `^\`\`\`.*` (i.e., `GENERATED_SQL=$(echo "$GENERATED_SQL" | sed '/^```/d')`)
+    5. Trim leading/trailing whitespace: `GENERATED_SQL=$(echo "$GENERATED_SQL" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | sed '/^$/d')`
+  - calls: `command claude -p`, `sed`
+  - returns: nothing (sets GENERATED_SQL variable)
+  - error handling: check claude exit code and empty output, exit 1 on failure
+
+- signature: `run_query(sql)`
+  - purpose: Execute the generated SQL against the DuckDB views and capture results
   - logic:
-    1. If `trail.length < 2`, return
-    2. `var now = Date.now()`
-    3. Loop `i = 1` to `trail.length - 1`:
-       - Compute `age = now - trail[i].time`
-       - Compute `alpha = (1 - age / TRAIL_LIFETIME) * 0.25` (faint, max 0.25 opacity)
-       - If `alpha <= 0`, continue
-       - `ctx.beginPath()`
-       - `ctx.moveTo(trail[i-1].x, trail[i-1].y)`
-       - `ctx.lineTo(trail[i].x, trail[i].y)`
-       - `ctx.strokeStyle = CLAUDE_ORANGE + alpha.toFixed(3) + ')'`
-       - `ctx.lineWidth = 1.5`
-       - `ctx.stroke()`
-  - calls: none
-  - returns: void
-  - error handling: none
+    1. Build the full SQL: `FULL_QUERY="${DUCKDB_SETUP}\n${GENERATED_SQL}"`
+    2. Run: `QUERY_RESULTS=$(echo -e "$FULL_QUERY" | duckdb -markdown 2>&1)`
+    3. Store the exit code: `QUERY_EXIT=$?`
+    4. If `QUERY_EXIT` is non-zero, print to stderr: `"Error: SQL query failed. Generated SQL was:"` followed by `"$GENERATED_SQL"` followed by `"DuckDB output:"` followed by `"$QUERY_RESULTS"`. Then exit 1.
+  - calls: `duckdb` CLI
+  - returns: nothing (sets QUERY_RESULTS variable)
+  - error handling: check duckdb exit code, print the failed SQL and error output for debugging, exit 1
 
-- signature: `function drawCursor(ctx)`
-  - purpose: Draw the Claude logo cursor at the current attention point
+- signature: `interpret_results(question, sql, results)`
+  - purpose: Call Claude Code to produce a natural language answer from the SQL results
   - logic:
-    1. If `attentionX < 0`, return
-    2. If `cursorLoaded`:
-       - `ctx.globalAlpha = 0.85`
-       - `ctx.drawImage(cursorImg, attentionX - CURSOR_SIZE / 2, attentionY - CURSOR_SIZE / 2, CURSOR_SIZE, CURSOR_SIZE)`
-       - `ctx.globalAlpha = 1.0`
-    3. If `!cursorLoaded` (fallback -- draw a small orange diamond):
-       - `ctx.beginPath()`
-       - `ctx.moveTo(attentionX, attentionY - 8)`
-       - `ctx.lineTo(attentionX + 6, attentionY)`
-       - `ctx.lineTo(attentionX, attentionY + 8)`
-       - `ctx.lineTo(attentionX - 6, attentionY)`
-       - `ctx.closePath()`
-       - `ctx.fillStyle = CLAUDE_ORANGE + '0.85)'`
-       - `ctx.fill()`
-  - calls: none
-  - returns: void
-  - error handling: none
+    1. Build prompt (store in `INTERP_PROMPT`):
+       ```
+       Answer the user's question based on these query results from a virtual fly caretaker log.
 
-- signature: `function drawEffects(ctx)`
-  - purpose: Draw active interaction indicators (ripples, rings, arrows)
-  - logic:
-    1. `var now = Date.now()`
-    2. Loop over `activeEffects` array (forward loop, no removal here -- update() handles pruning):
-       - `var e = activeEffects[i]`
-       - `var elapsed = now - e.startTime`
-       - If `e.type === 'ripple'`: Draw orange expanding ripple/pulse for place_food
-         - Draw 2 concentric expanding rings
-         - Ring 1: `var p1 = elapsed / 800; var r1 = p1 * 35; var a1 = (1 - p1) * 0.6`
-         - Ring 2 (delayed 200ms): `var p2 = Math.max(0, (elapsed - 200)) / 800; var r2 = p2 * 35; var a2 = (1 - p2) * 0.4`
-         - For each ring (if progress <= 1): `ctx.beginPath(); ctx.arc(e.x, e.y, r, 0, Math.PI * 2); ctx.strokeStyle = CLAUDE_ORANGE + a.toFixed(3) + ')'; ctx.lineWidth = 2 * (1 - p); ctx.stroke()`
-       - If `e.type === 'ring'`: Draw orange ring for touch
-         - `var p = elapsed / 600; var r = 8 + p * 20; var a = (1 - p) * 0.7`
-         - `ctx.beginPath(); ctx.arc(e.x, e.y, r, 0, Math.PI * 2); ctx.strokeStyle = CLAUDE_ORANGE + a.toFixed(3) + ')'; ctx.lineWidth = 2.5 * (1 - p); ctx.stroke()`
-         - Also draw inner fill flash: `ctx.beginPath(); ctx.arc(e.x, e.y, 6 * (1 - p), 0, Math.PI * 2); ctx.fillStyle = CLAUDE_ORANGE + (a * 0.3).toFixed(3) + ')'; ctx.fill()`
-       - If `e.type === 'arrow'`: Draw orange wind arrow
-         - `var p = elapsed / 1200`
-         - Compute arrow direction from `e.params.direction` (degrees to radians): `var angle = e.params.direction * Math.PI / 180`
-         - Arrow length: `var len = 40 * e.params.strength`
-         - Arrow endpoint: `var ex = e.x + Math.cos(angle) * len`, `var ey = e.y + Math.sin(angle) * len`
-         - Arrow alpha: `var a = (1 - p) * 0.6`
-         - Draw shaft: `ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(ex, ey); ctx.strokeStyle = CLAUDE_ORANGE + a.toFixed(3) + ')'; ctx.lineWidth = 2.5; ctx.stroke()`
-         - Draw arrowhead (same pattern as main.js `drawWindArrow`):
-           - `var headLen = 8`
-           - `ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(ex - Math.cos(angle - 0.4) * headLen, ey - Math.sin(angle - 0.4) * headLen); ctx.moveTo(ex, ey); ctx.lineTo(ex - Math.cos(angle + 0.4) * headLen, ey - Math.sin(angle + 0.4) * headLen); ctx.strokeStyle = CLAUDE_ORANGE + a.toFixed(3) + ')'; ctx.lineWidth = 2.5; ctx.stroke()`
-  - calls: none
-  - returns: void
-  - error handling: none
+       Question: ${QUESTION}
 
-- signature: `function drawIdlePulse(ctx)`
-  - purpose: Draw gentle heartbeat glow around cursor when Claude is observing (no recent command)
-  - logic:
-    1. If `attentionX < 0`, return
-    2. `var timeSinceCommand = Date.now() - lastCommandTime`
-    3. If `timeSinceCommand < 3000`, return (only show pulse when idle for 3+ seconds)
-    4. Heartbeat uses a double-bump sine pattern:
-       - `var t = (Date.now() % 1500) / 1500` (1.5 second cycle)
-       - `var beat = 0`
-       - If `t < 0.15`: `beat = Math.sin(t / 0.15 * Math.PI)` (first bump)
-       - Else if `t < 0.3`: `beat = 0` (gap)
-       - Else if `t < 0.45`: `beat = Math.sin((t - 0.3) / 0.15 * Math.PI) * 0.6` (second bump, smaller)
-       - Else: `beat = 0` (rest)
-    5. If `beat > 0`:
-       - `var pulseRadius = CURSOR_SIZE / 2 + 4 + beat * 6`
-       - `var pulseAlpha = beat * 0.25`
-       - `ctx.beginPath()`
-       - `ctx.arc(attentionX, attentionY, pulseRadius, 0, Math.PI * 2)`
-       - `ctx.strokeStyle = CLAUDE_ORANGE + pulseAlpha.toFixed(3) + ')'`
-       - `ctx.lineWidth = 1.5`
-       - `ctx.stroke()`
-  - calls: none
-  - returns: void
-  - error handling: none
+       SQL that was run:
+       ${GENERATED_SQL}
 
-#### Wiring / Integration (module export)
-At the bottom of the IIFE, expose:
-```javascript
-window.CaretakerRenderer = {
-    onCommand: onCommand,
-    setConnected: setConnected,
-    update: update,
-    drawOverlay: drawOverlay
-};
-```
+       Results:
+       ${QUERY_RESULTS}
 
-Call `init()` at module load time (inside the IIFE, after all function declarations).
+       Give a concise, direct answer. If the results are empty, say so. Use specific numbers from the results.
+       ```
+    2. Call: `ANSWER=$(command claude -p --no-session-persistence --model haiku --max-budget-usd 0.01 "$INTERP_PROMPT" 2>/dev/null)`
+    3. If the exit code is non-zero or `ANSWER` is empty, fall back to printing raw results: set `ANSWER="$QUERY_RESULTS"`
+  - calls: `command claude -p`
+  - returns: nothing (sets ANSWER variable)
+  - error handling: on failure, gracefully fall back to raw query results (no exit, just degrade)
 
-### 3. MODIFY js/caretaker-bridge.js
+#### Main Flow
+The main body of the script (after the function definitions) executes in this exact order:
+1. `QUESTION="$1"` -- capture the first argument
+2. `check_deps`
+3. `validate_args "$@"` -- pass all args for the `$#` check
+4. `build_schema`
+5. `get_schema_info` -- populates SCHEMA_INFO
+6. Print to stderr: `"Analyzing caretaker log..."`
+7. `generate_sql` -- populates GENERATED_SQL
+8. Print to stderr: `"Running query..."`
+9. `run_query` -- populates QUERY_RESULTS
+10. `interpret_results` -- populates ANSWER
+11. Print to stdout: empty line, then `"$ANSWER"`
+
+#### Shebang and Flags
+- First line: `#!/usr/bin/env bash`
+- Second line: `set -euo pipefail`
+
+#### File Permissions
+- After creating the file, run `chmod +x tools/query-log.sh`
+
+### 2. MODIFY package.json
 - operation: MODIFY
-- reason: Hook into command execution to notify CaretakerRenderer of each command, and notify on connection state changes.
-- anchor: `switch (action) {`
+- reason: Add a convenience npm script for the query tool
+- anchor: `"caretaker": "node server/caretaker.js"`
 
-#### Modification 1: Notify renderer on command
-After the `switch` block (after the closing `}` of the switch on line 71), add:
-```javascript
-if (typeof CaretakerRenderer !== 'undefined') {
-    CaretakerRenderer.onCommand(action, params);
-}
-```
-
-Exact anchor for placement: Insert AFTER line 71 (`}` closing the default case), BEFORE the closing `}` of `executeCommand()` function.
-
-The existing code ends:
-```javascript
-      default:
-        console.warn('[caretaker] Unknown action:', action);
-    }
-  }
-```
-
-Change to:
-```javascript
-      default:
-        console.warn('[caretaker] Unknown action:', action);
-    }
-    if (typeof CaretakerRenderer !== 'undefined') {
-      CaretakerRenderer.onCommand(action, params);
-    }
-  }
-```
-
-#### Modification 2: Notify renderer on connection state
-Anchor: `connected = true;` (line 81, inside ws.onopen)
-
-After `connected = true;` on line 81, add:
-```javascript
-if (typeof CaretakerRenderer !== 'undefined') { CaretakerRenderer.setConnected(true); }
-```
-
-Anchor: `connected = false;` (line 88, inside ws.onclose)
-
-After `connected = false;` on line 88, add:
-```javascript
-if (typeof CaretakerRenderer !== 'undefined') { CaretakerRenderer.setConnected(false); }
-```
-
-### 4. MODIFY js/main.js
-- operation: MODIFY
-- reason: Call CaretakerRenderer.update() in the update loop and CaretakerRenderer.drawOverlay() in the draw function.
-- anchor (draw function): `ctx.fillStyle = 'rgba(255,255,255,0.08)';`
-- anchor (update/loop): `if (typeof Brain3D !== 'undefined' && Brain3D.active) { Brain3D.update(); }`
-
-#### Modification 1: Add overlay drawing at end of draw()
-Find the debug dot block at the end of `draw()` (line 1840-1844):
-```javascript
-    // Small dot showing fly's "nose" target for debugging (very faint)
-    ctx.beginPath();
-    ctx.arc(fly.x, fly.y, 2, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(255,255,255,0.08)';
-    ctx.fill();
-```
-
-AFTER this block (after `ctx.fill();` on line 1844), insert:
-```javascript
-    if (typeof CaretakerRenderer !== 'undefined') { CaretakerRenderer.drawOverlay(ctx); }
-```
-
-#### Modification 2: Add CaretakerRenderer.update() in loop
-Find the loop function (line 1869). The existing code on line 1880-1881:
-```javascript
-    update(dt);
-    if (typeof Brain3D !== 'undefined' && Brain3D.active) { Brain3D.update(); }
-```
-
-AFTER the Brain3D update line (line 1881), insert:
-```javascript
-    if (typeof CaretakerRenderer !== 'undefined') { CaretakerRenderer.update(dt); }
-```
-
-### 5. MODIFY index.html
-- operation: MODIFY
-- reason: Load caretaker-renderer.js before caretaker-bridge.js so the renderer is available when commands arrive.
-- anchor: `<script src="./js/caretaker-bridge.js"></script>`
-
-Find line 99:
-```html
-<script src="./js/caretaker-bridge.js"></script>
-```
-
-Insert BEFORE this line:
-```html
-<script src="./js/caretaker-renderer.js"></script>
-```
-
-So the final order is:
-```html
-<script src="./js/main.js"></script>
-<script src="./js/caretaker-renderer.js"></script>
-<script src="./js/caretaker-bridge.js"></script>
-```
-
-### 6. MODIFY css/main.css
-- operation: MODIFY
-- reason: Add CSS class for toolbar button highlight when Claude uses a tool.
-- anchor: `.tool-btn.active {`
-
-Find the `.tool-btn.active` block (around line 237-241 based on the exploration data). AFTER the closing `}` of `.tool-btn.active`, add:
-
-```css
-.tool-btn.claude-highlight {
-    border-color: #E3734B;
-    box-shadow: 0 0 8px rgba(227, 115, 75, 0.4);
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-```
-
-Note: The `box-shadow: 0 0 8px` is a subtle functional highlight, not a decorative glow per the pattern rules. It uses `rgba(227, 115, 75, 0.4)` -- barely visible, serves as a signal that Claude used this button. This is intentionally restrained. The transition ensures smooth fade-in; the 1500ms setTimeout in highlightToolbar() handles the fade-out by removing the class (which transitions back to no box-shadow).
+#### Wiring / Integration
+- Add a new script entry after the `"caretaker"` line:
+  ```json
+  "query-log": "bash tools/query-log.sh"
+  ```
+- The `"caretaker"` line needs a trailing comma added before the new entry. The result should be:
+  ```json
+  "scripts": {
+    "caretaker": "node server/caretaker.js",
+    "query-log": "bash tools/query-log.sh"
+  },
+  ```
 
 ## Verification
-- build: No build step (vanilla JS). Verify no syntax errors: `node -e "var fs=require('fs'); fs.readFileSync('js/caretaker-renderer.js','utf8');"` (exits 0 if file is valid UTF-8)
-- lint: No lint configured. Manual check: open `index.html` in browser and check console for JS errors.
-- test: No existing test suite covers rendering. Verify manually.
-- smoke:
-  1. Open `index.html` in a browser
-  2. Verify no console errors on page load (CaretakerRenderer should init silently, cursor SVG should load)
-  3. Start the caretaker server: `node server/caretaker.js`
-  4. Verify `[caretaker] Connected` appears in browser console
-  5. Send a test command via stdin to the server: `echo '{"action":"place_food","params":{"x":400,"y":300},"reasoning":"test"}' | node -e "process.stdin.pipe(process.stdout)"` (or use the agent loop)
-  6. When a `place_food` command arrives, verify:
-     - Orange ripple animation appears at the food coordinates
-     - Claude cursor (orange spark icon) appears and lerps to that position
-     - "Feed" toolbar button briefly glows with orange border
-     - Faint orange trail line follows cursor movement
-  7. After 3+ seconds with no commands, verify the cursor shows a gentle heartbeat pulse
-  8. When the WebSocket disconnects, verify all Claude visual indicators disappear
+- build: `bash -n tools/query-log.sh` (syntax check only -- no runtime deps needed)
+- lint: `shellcheck tools/query-log.sh || true` (shellcheck may not be installed; non-blocking)
+- test: no existing tests for shell scripts
+- smoke: Run `bash tools/query-log.sh` with no arguments and verify it prints the usage message with examples and exits with code 1. Verify the exit code with `echo $?`. Then run `bash tools/query-log.sh "test question"` and verify it prints the "No caretaker log found" error (since caretaker.log does not exist) and exits with code 1.
 
 ## Constraints
-- Do NOT modify `server/caretaker.js` -- it is the server relay, not a rendering concern
-- Do NOT modify `js/fly-logic.js`, `js/connectome.js`, `js/brain-worker-bridge.js`, or `js/neuro-renderer.js` -- this task is purely cosmetic overlay rendering
-- Do NOT add any npm dependencies or build steps
-- Do NOT use gradients, glassmorphism, neon glows, or decorative effects beyond the specified indicators (per pattern #1)
-- The ONLY allowed box-shadow is `0 0 8px rgba(227, 115, 75, 0.4)` on the toolbar highlight (functional, not decorative)
-- The ONLY allowed transitions are `border-color 0.2s ease` and `box-shadow 0.2s ease` (per pattern #1)
-- All canvas rendering uses `rgba(227, 115, 75, ...)` with varying alpha -- no other colors for Claude indicators
-- The CaretakerRenderer module must be fully defensive: all references to `fly`, `BRAIN`, `behavior` etc. are accessed as globals from main.js. Guard with `typeof` checks where appropriate.
-- The overlay is purely cosmetic -- it must NOT modify any simulation state (`BRAIN`, `fly`, `food`, `behavior`, etc.)
-- The `claude-highlight` CSS class must coexist with the existing `active` class (they are independent -- a button can have both)
+- Do NOT modify server/caretaker.js, js/caretaker-bridge.js, agent/run.sh, agent/caretaker-policy.md, or any file in js/, css/, or server/ (except package.json)
+- Do NOT install any new npm or system packages
+- Do NOT create a .env file or any configuration files
+- The tools/ directory does not exist yet -- it must be created by writing the file (the Write tool will create parent directories)
+- Use `command claude` (not bare `claude`) inside the script to match the pattern in agent/run.sh
+- Use `--model haiku` and `--max-budget-usd 0.01` for Claude calls to keep costs low, matching agent/run.sh conventions
+- Use `--no-session-persistence` for all Claude calls to avoid session file accumulation
+- DuckDB must be invoked in in-memory mode (no database file argument) -- just `duckdb` not `duckdb some.db`
+- Use `-markdown` flag for DuckDB output to get readable table formatting
+- The script must work with both existing and fresh (empty/nonexistent) caretaker.log files (graceful error for missing/empty log)
+- All stderr output from Claude calls must be suppressed with `2>/dev/null` to keep the UX clean
+- The JSONL log path is always `$PROJECT_DIR/caretaker.log` (matching `server/caretaker.js:8` which writes to `path.join(__dirname, '..', 'caretaker.log')`)

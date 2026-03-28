@@ -1,6 +1,6 @@
 {
-  "task_id": "T8.3",
-  "task_desc": "Canvas rendering of Claude's visual presence. Draw Claude's presence on the canvas so the user always sees where Claude is and what it's doing. Claude cursor: small Claude logo silhouette in orange (#E3734B), rendered at Claude's current \"attention point\" on the canvas. Interaction indicators: orange ripple/pulse when placing food, orange ring when touching, orange arrow for wind, toolbar highlight for light/temp changes. Attention trail: faint orange line as Claude shifts focus. Idle pulse: gentle heartbeat glow when observing. All indicators are cosmetic (rendered on the canvas draw loop), not part of the simulation. Files: `js/caretaker-renderer.js` (canvas overlay drawing), `svg/claude-cursor.svg` (Claude logo silhouette), `css/main.css` (toolbar highlight for Claude actions).",
+  "task_id": "T8.4",
+  "task_desc": "Log query tool. Build a tool to query caretaker logs with natural language. Use DuckDB to load the JSON Lines file, then let Claude Code answer questions against it. Example queries: \"how many times did Claude forget to feed the fly?\" (count periods where hunger > 0.9 with no place_food within 30s), \"how many times did Claude scare the fly?\" (count fear spikes > 0.5 within 10s of a Claude action), \"what was the fly's average hunger today?\", \"show me all incidents\". Files: new `tools/query-log.sh` (wrapper that loads log into DuckDB and passes the user's question to Claude Code).",
   "completed_stage": "builder",
-  "timestamp": "2026-03-28T01:12:06.540433+00:00"
+  "timestamp": "2026-03-28T01:18:32.935378+00:00"
 }

@@ -4,7 +4,8 @@
   "private": true,
   "description": "Interactive virtual Drosophila",
   "scripts": {
-    "caretaker": "node server/caretaker.js"
+    "caretaker": "node server/caretaker.js",
+    "query-log": "bash tools/query-log.sh"
   },
   "dependencies": {
     "ws": "^8.18.0"

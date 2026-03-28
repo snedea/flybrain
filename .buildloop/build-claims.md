@@ -1,41 +1,39 @@
-# Build Claims -- T8.3
+# Build Claims -- T8.4
 
 ## Files Changed
-- [CREATE] svg/claude-cursor.svg -- Claude logo silhouette SVG (4-pointed spark + dot, 20x20, filled #E3734B)
-- [CREATE] js/caretaker-renderer.js -- Canvas overlay IIFE module exposing window.CaretakerRenderer with onCommand, setConnected, update, drawOverlay methods
-- [MODIFY] js/caretaker-bridge.js -- Added CaretakerRenderer.onCommand() call after executeCommand switch block; added CaretakerRenderer.setConnected(true/false) in ws.onopen and ws.onclose
-- [MODIFY] js/main.js -- Added CaretakerRenderer.drawOverlay(ctx) at end of draw() (line 1845); added CaretakerRenderer.update(dt) in loop() after Brain3D.update (line 1883)
-- [MODIFY] index.html -- Added script tag for caretaker-renderer.js before caretaker-bridge.js (line 99)
-- [MODIFY] css/main.css -- Added .tool-btn.claude-highlight class with orange border and box-shadow after .tool-btn.active block (line 271)
+- [CREATE] tools/query-log.sh -- Shell script that loads caretaker.log into DuckDB, uses Claude Code (haiku) to generate SQL from natural language, executes it, and interprets results
+- [MODIFY] package.json -- Added "query-log" npm script entry pointing to tools/query-log.sh
 
 ## Verification Results
-- Build: PASS (node -e "new Function(require('fs').readFileSync('js/caretaker-renderer.js','utf8'))" -- syntax valid)
-- Tests: PASS (node tests/run-node.js -- 99 passed / 0 failed / 99 total)
-- Lint: SKIPPED (no lint configured)
+- Build: PASS (`bash -n tools/query-log.sh` -- syntax check clean)
+- Lint: PASS (`shellcheck tools/query-log.sh` -- no warnings)
+- Tests: SKIPPED (no existing test framework for shell scripts)
+- Smoke (no args): PASS -- prints usage with 4 example queries, exits 1
+- Smoke (missing log): PASS -- prints "No caretaker log found" + "Run the caretaker agent first", exits 1
+- JSON validation: PASS (`node -e "JSON.parse(...)"` on package.json)
 
 ## Claims
-- [ ] svg/claude-cursor.svg is a valid SVG with viewBox="0 0 20 20", containing a 4-pointed spark path and circle, both fill="#E3734B"
-- [ ] js/caretaker-renderer.js is an IIFE that exposes window.CaretakerRenderer with exactly 4 public methods: onCommand, setConnected, update, drawOverlay
-- [ ] init() loads the cursor SVG into an Image element at module load time, with onerror fallback logging
-- [ ] onCommand() handles all 7 action types (place_food, touch, blow_wind, set_light, set_temp, clear_food, default) per plan specification
-- [ ] onCommand() pushes 'ripple' effect for place_food, 'ring' for touch, 'arrow' for blow_wind, and calls highlightToolbar with correct tool names
-- [ ] setConnected(false) clears attentionX/Y to -1 and empties trail and activeEffects arrays, hiding all indicators
-- [ ] update() lerps attention position toward target at speed 0.08, snaps within 0.5px, manages trail points (max 40, lifetime 2000ms), prunes expired effects by type-specific durations (ripple 800ms, ring 600ms, arrow 1200ms)
-- [ ] drawOverlay() renders trail, effects, cursor, and idle pulse in that order; returns immediately if not connected
-- [ ] drawTrail() draws faint orange line segments with alpha based on age (max 0.25 opacity)
-- [ ] drawCursor() renders SVG image at 0.85 globalAlpha, with diamond fallback if SVG fails to load
-- [ ] drawEffects() renders ripple (2 concentric expanding rings), ring (expanding ring + inner fill flash), and arrow (shaft + arrowhead) effects all in Claude orange
-- [ ] drawIdlePulse() shows heartbeat glow (double-bump sine, 1.5s cycle) only after 3+ seconds of no commands
-- [ ] highlightToolbar() adds 'claude-highlight' CSS class to matching .tool-btn[data-tool] for 1500ms
-- [ ] All CaretakerRenderer calls in caretaker-bridge.js and main.js are guarded with typeof !== 'undefined' checks
-- [ ] caretaker-renderer.js is loaded before caretaker-bridge.js in index.html (line 99 vs 100)
-- [ ] .tool-btn.claude-highlight CSS uses only the allowed box-shadow (0 0 8px rgba(227,115,75,0.4)) and transitions (border-color 0.2s, box-shadow 0.2s)
-- [ ] The overlay is purely cosmetic -- no simulation state (BRAIN, fly, food, behavior) is modified by any CaretakerRenderer function
-- [ ] All canvas rendering uses rgba(227, 115, 75, ...) exclusively for Claude indicators
-- [ ] Existing 99 tests continue to pass with no regressions
+- [ ] `tools/query-log.sh` is executable (chmod +x applied)
+- [ ] Running with no arguments prints usage message to stderr with 4 example queries and exits 1
+- [ ] Running with a question but no `caretaker.log` prints an error to stderr with instructions to run the agent, and exits 1
+- [ ] `check_deps()` verifies duckdb, claude, and jq are available, with descriptive error messages for each
+- [ ] `build_schema()` creates DuckDB SQL preamble with 4 views: raw_log, observations, actions, incidents
+- [ ] `get_schema_info()` extracts view schemas, sample data, row counts, and time range from DuckDB in markdown format
+- [ ] `generate_sql()` calls `command claude -p --no-session-persistence --model haiku --max-budget-usd 0.01` to translate natural language to SQL, strips markdown fences from output
+- [ ] `run_query()` executes generated SQL against DuckDB views using `-markdown` output format, prints debugging info on failure
+- [ ] `interpret_results()` calls Claude haiku to produce a natural language answer, falls back to raw query results on failure
+- [ ] All Claude calls use `command claude` (not bare `claude`), `--no-session-persistence`, `--model haiku`, `--max-budget-usd 0.01`, with stderr suppressed via `2>/dev/null`
+- [ ] DuckDB runs in in-memory mode (no database file argument)
+- [ ] Status messages ("Analyzing caretaker log...", "Running query...") are printed to stderr, only the final answer goes to stdout
+- [ ] package.json has valid JSON with new `"query-log": "bash tools/query-log.sh"` script entry
+- [ ] Script uses `set -euo pipefail` for strict error handling
+- [ ] `QUESTION="${1:-}"` avoids unbound variable error with `set -u` when no args provided
 
 ## Gaps and Assumptions
-- Browser rendering not tested (no headless browser in CI); SVG loading, canvas drawing, and CSS highlight are verified by code inspection only
-- The `fly` global variable is referenced in onCommand() without a typeof guard; if onCommand fires before main.js initializes `fly`, it would throw. In practice this cannot happen because caretaker-bridge.js waits for BRAIN to be defined before connecting, and fly is initialized before BRAIN.
-- The `CLAUDE_ORANGE_HEX` variable is declared but unused in the module (plan specified it as state but no function references it)
-- No automated test covers the renderer itself; verification is syntax check + existing test suite regression check
+- End-to-end test with a real caretaker.log was not performed (no log file exists yet)
+- DuckDB's `read_json_auto` with `union_by_name=true` is assumed to handle the mixed-schema JSONL (observation/action/incident rows with different fields) -- not tested against real data
+- The `len(data.food)` DuckDB function in the observations view assumes DuckDB can compute array length from parsed JSON -- untested with real data
+- Claude haiku's SQL generation quality is untested -- bad SQL from Claude will trigger the `run_query` error path which displays the failed SQL for debugging
+- The `sed '/^```/d'` fence stripping handles ``` at line start only; fences with language tags like ```sql are also handled since the pattern matches lines starting with ```
+- The plan specified `echo -e` for piping to DuckDB; changed to `printf '%s'` to avoid portability issues with echo -e on macOS
+- Plan specified `user's question` in prompt text; changed to `the following question` / `user question` to avoid apostrophe quoting issues in bash heredoc/string contexts
