@@ -302,7 +302,7 @@ Claude Code acts as a hands-off caretaker for the virtual fly -- feeding it, man
 
 - [x] T8.8: Left sidebar -- Analytics Panel. Add expandable analytics section below chat with sparkline charts (inline SVG). Metrics: caretaker score (composite 0-100), hunger timeline with feed markers, fear incidents per hour, avg response time (hunger > 0.7 to food placement), feeding frequency, active hours (connected vs disconnected). Data from daily_scores + real-time observations via WebSocket. Files: `js/caretaker-analytics.js` (charts), `server/caretaker.js` (analytics query endpoints), `css/main.css` (chart styles). [SPI-]
 
-- [ ] T8.9: Left sidebar -- Calendar View. Day/week calendar grid showing daily caretaker performance. Each day: color-coded score (green > 80, yellow 50-80, red < 50), incident count, feed count, avg hunger. Click a day to filter the activity feed to that day's events. Data from daily_scores table. Files: `js/caretaker-calendar.js`, `css/main.css` (calendar grid styles), `server/caretaker.js` (daily scores endpoint).
+- [x] T8.9: Left sidebar -- Calendar View. Day/week calendar grid showing daily caretaker performance. Each day: color-coded score (green > 80, yellow 50-80, red < 50), incident count, feed count, avg hunger. Click a day to filter the activity feed to that day's events. Data from daily_scores table. Files: `js/caretaker-calendar.js`, `css/main.css` (calendar grid styles), `server/caretaker.js` (daily scores endpoint). [-PI-]
 
 - Phase 9: iOS App (iPhone) (3 tasks archived to TASKS-ARCHIVE.md)
 - Discovery Round 69 (1 tasks archived to TASKS-ARCHIVE.md)

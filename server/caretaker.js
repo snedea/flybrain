@@ -255,6 +255,54 @@ var server = http.createServer(function(req, res) {
     }
     return;
   }
+  if (req.method === 'GET' && req.url.startsWith('/calendar/scores')) {
+    try {
+      var calUrl = new URL(req.url, 'http://localhost');
+      var start = calUrl.searchParams.get('start');
+      var end = calUrl.searchParams.get('end');
+      if (!start) start = new Date(Date.now() - 28 * 86400000).toISOString().slice(0, 10);
+      if (!end) end = new Date().toISOString().slice(0, 10);
+      var scores = caretakerDb.getDailyScores(start, end);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(scores));
+    } catch (err) {
+      process.stderr.write('[caretaker] calendar/scores error: ' + err.message + '\n');
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Internal error' }));
+    }
+    return;
+  }
+  if (req.method === 'GET' && req.url.startsWith('/calendar/day-activity')) {
+    try {
+      var dayUrl = new URL(req.url, 'http://localhost');
+      var date = dayUrl.searchParams.get('date');
+      if (!date) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'date parameter required' }));
+        return;
+      }
+      var dayActivity = caretakerDb.getActivityForDate(date, 100);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(dayActivity));
+    } catch (err) {
+      process.stderr.write('[caretaker] calendar/day-activity error: ' + err.message + '\n');
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Internal error' }));
+    }
+    return;
+  }
+  if (req.method === 'GET' && req.url === '/activity/recent') {
+    try {
+      var recent = caretakerDb.getRecentActivity(50);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(recent));
+    } catch (err) {
+      process.stderr.write('[caretaker] activity/recent error: ' + err.message + '\n');
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Internal error' }));
+    }
+    return;
+  }
   res.writeHead(404);
   res.end('Not found');
 });

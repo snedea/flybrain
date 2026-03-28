@@ -1,223 +1,403 @@
-# Plan: T8.8
+# Plan: T8.9
 
 ## Dependencies
-- list: none (all dependencies already installed -- better-sqlite3, ws, @anthropic-ai/sdk)
-- commands: none
+- list: [] (no new packages)
+- commands: [] (no install commands)
 
 ## File Operations (in execution order)
 
 ### 1. MODIFY server/db.js
 - operation: MODIFY
-- reason: Add two new query methods for the analytics endpoints: getAnalyticsSummary and getHungerTimeline
-- anchor: `close: function() {`
+- reason: Add `getDailyScores(startDate, endDate)` method that returns all daily_scores rows within a date range, and `getActivityForDate(dateStr, limit)` method that returns actions+incidents for a specific day.
+- anchor: `getHungerTimeline: function(limit) {`
 
 #### Functions
-
-- signature: `getAnalyticsSummary: function(dateStr)`
-  - purpose: Return today's caretaker metrics for the analytics panel
+- signature: `getDailyScores: function(startDate, endDate)`
+  - purpose: Return all daily_scores rows between two dates (inclusive) for the calendar grid
   - logic:
-    1. Compute dayStart = dateStr + 'T00:00:00.000Z' and dayEnd = dateStr + 'T23:59:59.999Z'
-    2. Query daily_scores for the given date: `SELECT composite_score, total_feeds, avg_hunger, fear_incidents FROM daily_scores WHERE date = ?` using dateStr. Store result as `scoreRow` (may be null).
-    3. Query total feeds today: `SELECT COUNT(*) as cnt FROM actions WHERE action = 'place_food' AND timestamp >= ? AND timestamp <= ?` using dayStart, dayEnd. Store as `feedsToday`.
-    4. Query fear incidents today: `SELECT COUNT(*) as cnt FROM incidents WHERE type = 'scared_the_fly' AND timestamp >= ? AND timestamp <= ?` using dayStart, dayEnd. Store as `fearToday`.
-    5. Query observation count today: `SELECT COUNT(*) as cnt FROM observations WHERE timestamp >= ? AND timestamp <= ?` using dayStart, dayEnd. Store as `obsCount`.
-    6. Compute avg response time dynamically (not from the buggy daily_scores.avg_response_time column):
-       - Query all hunger-threshold-breach observations: `SELECT id, timestamp FROM observations WHERE hunger > 0.7 AND timestamp >= ? AND timestamp <= ? ORDER BY id ASC` using dayStart, dayEnd. Store as `hungerBreaches`.
-       - Query all place_food actions: `SELECT timestamp FROM actions WHERE action = 'place_food' AND timestamp >= ? AND timestamp <= ? ORDER BY timestamp ASC` using dayStart, dayEnd. Store as `foodPlacements`.
-       - For each hungerBreach, find the first foodPlacement whose timestamp is >= the breach timestamp. Compute delta in seconds. Collect all deltas into an array `responseTimes`.
-       - If responseTimes.length > 0, compute avgResponseTime = sum of responseTimes / responseTimes.length, rounded to 1 decimal. Else avgResponseTime = null.
-    7. Compute feeding frequency: feedsPerHour = feedsToday / max(1, obsCount * 10 / 3600). Round to 2 decimals. This converts observation count (at 10s intervals) to approximate connected hours. If obsCount is 0, feedsPerHour = 0.
-    8. Compute active hours estimate:
-       - Query: `SELECT timestamp FROM observations WHERE timestamp >= ? AND timestamp <= ? ORDER BY id ASC` using dayStart, dayEnd. Store as `obsTimes`.
-       - Iterate obsTimes. For each consecutive pair, compute gap = (new Date(obsTimes[i+1].timestamp).getTime() - new Date(obsTimes[i].timestamp).getTime()) / 1000. If gap <= 60 seconds, add gap to `connectedSeconds`. (Gaps > 60s indicate disconnection.)
-       - If obsTimes.length >= 2, add 10 to connectedSeconds for the first observation interval.
-       - Compute connectedHours = Math.round(connectedSeconds / 360) / 10 (round to 1 decimal, in hours).
-       - If obsTimes.length < 2, connectedHours = 0.
-    9. Return object: `{ composite_score: scoreRow ? scoreRow.composite_score : null, total_feeds: feedsToday, avg_hunger: scoreRow ? scoreRow.avg_hunger : null, fear_incidents: fearToday, avg_response_time: avgResponseTime, feeds_per_hour: feedsPerHour, connected_hours: connectedHours }`
-  - calls: db.prepare().get() and db.prepare().all() (inline, not cached statements -- these are called infrequently)
-  - returns: object with keys composite_score, total_feeds, avg_hunger, fear_incidents, avg_response_time, feeds_per_hour, connected_hours
-  - error handling: If any query returns null/empty, use fallback values (null for scores, 0 for counts)
+    1. Execute SQL: `SELECT date, composite_score, total_feeds, avg_hunger, fear_incidents FROM daily_scores WHERE date >= ? AND date <= ? ORDER BY date ASC`
+    2. Pass `startDate` and `endDate` as parameters (both are YYYY-MM-DD strings)
+    3. Return the array of row objects directly from `.all(startDate, endDate)`
+  - calls: `db.prepare(...).all(startDate, endDate)`
+  - returns: `Array<{date: string, composite_score: number|null, total_feeds: number, avg_hunger: number|null, fear_incidents: number}>`
+  - error handling: none (let caller handle)
 
-- signature: `getHungerTimeline: function(limit)`
-  - purpose: Return recent observations (hunger + timestamp) and food placement timestamps for sparkline chart
+- signature: `getActivityForDate: function(dateStr, limit)`
+  - purpose: Return actions and incidents for a specific calendar date, for filtering the activity feed
   - logic:
-    1. If limit is undefined, set limit = 120.
-    2. Query observations: `SELECT timestamp, hunger FROM observations ORDER BY id DESC LIMIT ?` using limit. Store as `observations`. Call `observations.reverse()` to get chronological order.
-    3. Determine time window: if observations.length > 0, set windowStart = observations[0].timestamp, windowEnd = observations[observations.length - 1].timestamp. Else windowStart = new Date().toISOString(), windowEnd = windowStart.
-    4. Query food placements within that window: `SELECT timestamp FROM actions WHERE action = 'place_food' AND timestamp >= ? AND timestamp <= ? ORDER BY timestamp ASC` using windowStart, windowEnd. Store as `feedMarkers`.
-    5. Return object: `{ observations: observations, feedMarkers: feedMarkers }`
-  - calls: db.prepare().all()
-  - returns: object with keys observations (array of {timestamp, hunger}) and feedMarkers (array of {timestamp})
-  - error handling: If no observations, return { observations: [], feedMarkers: [] }
+    1. If `limit` is undefined, set it to 100
+    2. Compute `dayStart = dateStr + 'T00:00:00.000Z'` and `dayEnd = dateStr + 'T23:59:59.999Z'`
+    3. Execute SQL:
+       ```
+       SELECT id, timestamp, kind, name, params, reasoning, state_snapshot FROM (
+         SELECT id, timestamp, 'action' AS kind, action AS name, params, reasoning, fly_state AS state_snapshot FROM actions WHERE timestamp >= ? AND timestamp <= ?
+         UNION ALL
+         SELECT id, timestamp, 'incident' AS kind, type AS name, NULL AS params, description AS reasoning, state_snapshot FROM incidents WHERE timestamp >= ? AND timestamp <= ?
+       ) ORDER BY timestamp DESC LIMIT ?
+       ```
+    4. Pass parameters: `dayStart, dayEnd, dayStart, dayEnd, limit`
+    5. Return the array of rows
+  - calls: `db.prepare(...).all(dayStart, dayEnd, dayStart, dayEnd, limit)`
+  - returns: `Array<{id: number, timestamp: string, kind: string, name: string, params: string|null, reasoning: string, state_snapshot: string|null}>`
+  - error handling: none (let caller handle)
 
 #### Wiring / Integration
-- Both methods are added to the returned object from `openDb()`, right before the `close` method. Insert them as new properties of the returned object literal.
-- Anchor for insertion point: the line `close: function() {` at db.js:251. Add both methods BEFORE this line, each followed by a comma.
+- Add both methods to the returned object from `openDb()`, after the `getHungerTimeline` method and before the `close` method. Insert them between the closing `}` of `getHungerTimeline` and the line `close: function() {`.
 
 ### 2. MODIFY server/caretaker.js
 - operation: MODIFY
-- reason: Add two GET endpoint handlers for /analytics/summary and /analytics/hunger-timeline
-- anchor: `res.writeHead(404);`
-
-#### Functions (route handlers -- inline in the http.createServer callback)
-
-- Handler 1: GET /analytics/summary
-  - signature: inline `if (req.method === 'GET' && req.url === '/analytics/summary')` block
-  - purpose: Return today's analytics summary JSON
-  - logic:
-    1. Compute today = new Date().toISOString().slice(0, 10)
-    2. Call caretakerDb.getAnalyticsSummary(today) and store result as `summary`
-    3. res.writeHead(200, { 'Content-Type': 'application/json' })
-    4. res.end(JSON.stringify(summary))
-    5. return
-  - error handling: Wrap in try/catch. On error, res.writeHead(500, ...), res.end(JSON.stringify({ error: 'Internal error' }))
-
-- Handler 2: GET /analytics/hunger-timeline
-  - signature: inline `if (req.method === 'GET' && req.url === '/analytics/hunger-timeline')` block
-  - purpose: Return recent hunger observations and feed marker timestamps
-  - logic:
-    1. Call caretakerDb.getHungerTimeline(120) and store result as `timeline`
-    2. res.writeHead(200, { 'Content-Type': 'application/json' })
-    3. res.end(JSON.stringify(timeline))
-    4. return
-  - error handling: Wrap in try/catch. On error, res.writeHead(500, ...), res.end(JSON.stringify({ error: 'Internal error' }))
-
-#### Wiring / Integration
-- Insert both route handlers BEFORE the 404 handler. The anchor line is `res.writeHead(404);` at caretaker.js:233. Place the two new `if` blocks immediately before this line, following the exact same pattern as the existing GET /state, POST /chat, and GET /chat/history handlers.
-
-### 3. CREATE js/caretaker-analytics.js
-- operation: CREATE
-- reason: New frontend module for the analytics panel -- fetches data from server, renders sparkline SVGs, handles collapse/expand
-
-#### Imports / Dependencies
-- No imports. This is a browser IIFE like caretaker-sidebar.js. Accesses DOM and fetch API.
-
-#### Module Structure
-- Wrap entire file in `(function() { ... })();`
-- Expose `window.CaretakerAnalytics = { init: init, refresh: refresh }` at the end of the IIFE
-
-#### Variables (module-level inside IIFE)
-- `var API_URL = 'http://' + (location.hostname || 'localhost') + ':7600';`
-- `var analyticsSection = null;`
-- `var analyticsContent = null;`
-- `var analyticsToggle = null;`
-- `var refreshTimer = null;`
-- `var REFRESH_INTERVAL = 30000;`
+- reason: Add two new GET endpoints: `/calendar/scores` for the calendar grid data, and `/calendar/day-activity` for filtering activity to a specific day.
+- anchor: `if (req.method === 'GET' && req.url === '/analytics/hunger-timeline') {`
 
 #### Functions
 
+Add two new route blocks AFTER the `/analytics/hunger-timeline` handler block (after its closing `return;` on line 257) and BEFORE the `res.writeHead(404)` line:
+
+**Route 1: GET /calendar/scores**
+- logic:
+  1. Parse query string from `req.url` using `new URL(req.url, 'http://localhost')` to extract `start` and `end` query params
+  2. If `start` is missing, default to 28 days ago: `new Date(Date.now() - 28 * 86400000).toISOString().slice(0, 10)`
+  3. If `end` is missing, default to today: `new Date().toISOString().slice(0, 10)`
+  4. Call `caretakerDb.getDailyScores(start, end)`
+  5. Respond with 200 and JSON array
+- error handling: wrap in try/catch, respond 500 with `{ error: 'Internal error' }` on failure
+
+**Route 2: GET /calendar/day-activity**
+- logic:
+  1. Parse query string from `req.url` using `new URL(req.url, 'http://localhost')` to extract `date` query param
+  2. If `date` is missing, respond 400 with `{ error: 'date parameter required' }`
+  3. Call `caretakerDb.getActivityForDate(date, 100)`
+  4. Respond with 200 and JSON array
+- error handling: wrap in try/catch, respond 500 with `{ error: 'Internal error' }` on failure
+
+The route matching pattern: use `req.url.startsWith('/calendar/scores')` and `req.url.startsWith('/calendar/day-activity')` since these have query params. This matches the pattern for `/analytics/summary` but with query string support.
+
+### 3. CREATE js/caretaker-calendar.js
+- operation: CREATE
+- reason: New IIFE module implementing the calendar grid view in the sidebar, following the pattern of `caretaker-analytics.js`
+
+#### Imports / Dependencies
+- none (vanilla JS IIFE, same pattern as caretaker-analytics.js)
+
+#### Functions
+
+Wrap everything in `(function() { ... })();`
+
+**Module-level variables:**
+```javascript
+var API_URL = 'http://' + (location.hostname || 'localhost') + ':7600';
+var calendarSection = null;
+var calendarContent = null;
+var calendarToggle = null;
+var selectedDate = null;
+var currentMonth = null; // Date object for first day of displayed month
+var scores = {}; // keyed by 'YYYY-MM-DD'
+```
+
 - signature: `function init()`
-  - purpose: Bind DOM elements, set up toggle, trigger initial fetch, start refresh timer
+  - purpose: Find DOM elements, set initial month, fetch scores, bind events
   - logic:
-    1. Set analyticsSection = document.getElementById('analytics-section')
-    2. If analyticsSection is null, return (panel not in DOM)
-    3. Set analyticsContent = document.getElementById('analytics-content')
-    4. Set analyticsToggle = document.getElementById('analytics-toggle')
-    5. If analyticsToggle is not null, add click event listener that calls togglePanel()
-    6. Call refresh()
-    7. Set refreshTimer = setInterval(refresh, REFRESH_INTERVAL)
+    1. Set `calendarSection = document.getElementById('calendar-section')`; if null, return
+    2. Set `calendarContent = document.getElementById('calendar-content')`
+    3. Set `calendarToggle = document.getElementById('calendar-toggle')`
+    4. If `calendarToggle !== null`, add click listener calling `togglePanel`
+    5. Set `currentMonth = new Date()` then set its date to 1: `currentMonth.setDate(1)`; also zero out hours/mins/secs
+    6. Call `fetchAndRender()`
+  - calls: `fetchAndRender()`
   - returns: void
 
 - signature: `function togglePanel()`
-  - purpose: Expand/collapse the analytics content area
+  - purpose: Show/hide the calendar content area
   - logic:
-    1. If analyticsContent is null, return
-    2. var isCollapsed = analyticsContent.classList.contains('collapsed')
-    3. If isCollapsed: analyticsContent.classList.remove('collapsed'), analyticsToggle.textContent = 'Hide'
-    4. Else: analyticsContent.classList.add('collapsed'), analyticsToggle.textContent = 'Show'
+    1. If `calendarContent === null`, return
+    2. Check `calendarContent.classList.contains('collapsed')`
+    3. If collapsed: remove 'collapsed', set `calendarToggle.textContent = 'Hide'`
+    4. If visible: add 'collapsed', set `calendarToggle.textContent = 'Show'`
   - returns: void
 
-- signature: `function refresh()`
-  - purpose: Fetch both analytics endpoints and render all metrics
+- signature: `function fetchAndRender()`
+  - purpose: Fetch daily_scores for the current displayed month range and render
   - logic:
-    1. Call Promise.all([fetch(API_URL + '/analytics/summary').then(r => r.json()), fetch(API_URL + '/analytics/hunger-timeline').then(r => r.json())])
-    2. In the .then handler, receive [summary, timeline]
-    3. Call renderMetrics(summary, timeline)
-    4. In the .catch handler, log warning to console: console.warn('[analytics] fetch error:', err.message)
-  - calls: renderMetrics(summary, timeline)
+    1. Compute `startDate` as first day of `currentMonth`: `currentMonth.getFullYear() + '-' + pad(currentMonth.getMonth() + 1) + '-01'`
+    2. Compute `endDate` as last day of month: create `new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0)`, format as `YYYY-MM-DD`
+    3. Call `fetch(API_URL + '/calendar/scores?start=' + startDate + '&end=' + endDate)`
+    4. Parse JSON response
+    5. Clear `scores` object, then loop through response array and set `scores[row.date] = row` for each
+    6. Call `renderCalendar()`
+  - calls: `fetch(...)`, `renderCalendar()`
+  - returns: void
+  - error handling: `.catch` logs to `console.warn('[calendar] fetch error:', err.message)`
+
+- signature: `function pad(n)`
+  - purpose: Zero-pad a number to 2 digits
+  - logic: `return n < 10 ? '0' + n : '' + n;`
+  - returns: string
+
+- signature: `function formatDateStr(year, month, day)`
+  - purpose: Format a date as YYYY-MM-DD
+  - logic: `return year + '-' + pad(month) + '-' + pad(day);`
+  - returns: string (YYYY-MM-DD)
+
+- signature: `function renderCalendar()`
+  - purpose: Build the full calendar HTML and inject into calendarContent
+  - logic:
+    1. If `calendarContent === null`, return
+    2. Build the navigation header:
+       ```
+       '<div class="cal-nav">' +
+         '<button class="cal-nav-btn" id="cal-prev">&lt;</button>' +
+         '<span class="cal-nav-title">' + monthName + ' ' + year + '</span>' +
+         '<button class="cal-nav-btn" id="cal-next">&gt;</button>' +
+       '</div>'
+       ```
+       where `monthName` is from array `['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][currentMonth.getMonth()]` and `year = currentMonth.getFullYear()`
+    3. Build day-of-week header row: `'<div class="cal-grid"><div class="cal-dow">Su</div><div class="cal-dow">Mo</div><div class="cal-dow">Tu</div><div class="cal-dow">We</div><div class="cal-dow">Th</div><div class="cal-dow">Fr</div><div class="cal-dow">Sa</div>'`
+    4. Compute `firstDayOfWeek = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).getDay()` (0=Sun)
+    5. Compute `daysInMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate()`
+    6. Add empty cells for days before the first: loop `i` from 0 to `firstDayOfWeek - 1`, append `'<div class="cal-cell cal-empty"></div>'`
+    7. Loop `day` from 1 to `daysInMonth`:
+       a. Compute `dateStr = formatDateStr(currentMonth.getFullYear(), currentMonth.getMonth() + 1, day)`
+       b. Look up `score = scores[dateStr]` (may be undefined)
+       c. Determine CSS class for score color:
+          - If `score` exists and `score.composite_score !== null`:
+            - If `score.composite_score > 80`: `colorClass = 'cal-green'`
+            - Else if `score.composite_score >= 50`: `colorClass = 'cal-yellow'`
+            - Else: `colorClass = 'cal-red'`
+          - Else: `colorClass = 'cal-nodata'`
+       d. Determine `selectedClass`: if `selectedDate === dateStr` then `' cal-selected'` else `''`
+       e. Build the cell HTML:
+          ```
+          '<div class="cal-cell ' + colorClass + selectedClass + '" data-date="' + dateStr + '">' +
+            '<div class="cal-day">' + day + '</div>' +
+            (score ? '<div class="cal-score">' + Math.round(score.composite_score) + '</div>' +
+                     '<div class="cal-details">' +
+                       '<span title="Incidents">' + score.fear_incidents + 'i</span>' +
+                       '<span title="Feeds">' + score.total_feeds + 'f</span>' +
+                       '<span title="Avg Hunger">' + (score.avg_hunger !== null ? score.avg_hunger.toFixed(1) : '-') + 'h</span>' +
+                     '</div>' : '') +
+          '</div>'
+          ```
+       f. Append cell HTML to the grid string
+    8. Close the grid div: `'</div>'`
+    9. Set `calendarContent.innerHTML = navHtml + gridHtml`
+    10. Bind click listeners:
+        - `document.getElementById('cal-prev').addEventListener('click', prevMonth)`
+        - `document.getElementById('cal-next').addEventListener('click', nextMonth)`
+        - Add click delegation on calendarContent: `calendarContent.addEventListener('click', onCellClick)`
+  - calls: `pad()`, `formatDateStr()`
   - returns: void
 
-- signature: `function renderMetrics(summary, timeline)`
-  - purpose: Build the HTML content for all 6 metrics inside analyticsContent
+- signature: `function onCellClick(e)`
+  - purpose: Handle clicks on calendar day cells to filter activity feed
   - logic:
-    1. If analyticsContent is null, return
-    2. Build HTML string `var html = ''`
-    3. Append score metric: `html += renderScoreGauge(summary.composite_score)`
-    4. Append hunger sparkline: `html += renderHungerSparkline(timeline.observations, timeline.feedMarkers)`
-    5. Append fear incidents: `html += renderMetricRow('Fear Incidents', summary.fear_incidents !== null ? summary.fear_incidents : 0, '/today', 'error')`
-    6. Append avg response time: `html += renderMetricRow('Avg Response', summary.avg_response_time !== null ? summary.avg_response_time.toFixed(1) + 's' : 'N/A', '', null)`
-    7. Append feeding frequency: `html += renderMetricRow('Feed Rate', summary.feeds_per_hour !== null ? summary.feeds_per_hour.toFixed(1) : '0', '/hr', null)`
-    8. Append active hours: `html += renderMetricRow('Active Time', summary.connected_hours !== null ? summary.connected_hours.toFixed(1) : '0', 'hrs', null)`
-    9. Set analyticsContent.innerHTML = html
-  - calls: renderScoreGauge, renderHungerSparkline, renderMetricRow
+    1. Find the closest `.cal-cell` from `e.target`: `var cell = e.target.closest('.cal-cell')`
+    2. If `cell === null` or `cell.classList.contains('cal-empty')`, return
+    3. Get `var dateStr = cell.getAttribute('data-date')`; if null, return
+    4. If `selectedDate === dateStr`: deselect -- set `selectedDate = null`, remove `.cal-selected` from all cells, call `restoreFullFeed()`, return
+    5. Else: set `selectedDate = dateStr`
+    6. Remove `.cal-selected` from all `.cal-cell` elements in `calendarContent`
+    7. Add `.cal-selected` to `cell`
+    8. Call `filterFeedToDate(dateStr)`
+  - calls: `filterFeedToDate()` or `restoreFullFeed()`
   - returns: void
 
-- signature: `function renderScoreGauge(score)`
-  - purpose: Render the composite caretaker score (0-100) as a colored number with label
+- signature: `function filterFeedToDate(dateStr)`
+  - purpose: Fetch activity for the selected date and replace the activity feed content
   - logic:
-    1. If score is null, set displayScore = '--', color = 'var(--text-muted)'
-    2. Else, set displayScore = Math.round(score), determine color: if score >= 80 then 'var(--success)', else if score >= 50 then 'var(--warning)', else 'var(--error)'
-    3. Return string: `'<div class="analytics-metric analytics-score"><div class="analytics-score-value" style="color:' + color + '">' + displayScore + '</div><div class="analytics-metric-label">Caretaker Score</div></div>'`
-  - returns: HTML string
+    1. Fetch `API_URL + '/calendar/day-activity?date=' + dateStr`
+    2. Parse JSON response (array of activity entries)
+    3. Get `feedList = document.getElementById('activity-feed-list')`; if null, return
+    4. Set `feedList.innerHTML = ''`
+    5. If response array is empty: `feedList.innerHTML = '<div class="cal-no-activity">No activity on ' + dateStr + '</div>'`; return
+    6. Add a date header: create a div with class `cal-feed-date-header` and text `'Activity for ' + dateStr`; prepend to feedList
+    7. Loop through entries (they are in DESC order already). For each entry:
+       - Call `window.CaretakerSidebar` method indirectly: create the entry element using the same pattern as CaretakerSidebar.createEntryEl, but since that's not exposed, build the HTML directly:
+         ```
+         var kind = entry.kind;
+         var action = entry.name;
+         var params = entry.params;
+         var reasoning = entry.reasoning;
+         var timestamp = entry.timestamp;
+         ```
+       - Determine color class: if `kind === 'incident'` use `'incident'`; if `action === 'place_food' || action === 'clear_food'` use `'feed'`; if `action === 'set_light' || action === 'set_temp'` use `'comfort'`; else `'neutral'`
+       - Determine icon: if `kind === 'incident'` use `'!'`; else use the iconMap: `{place_food:'F', clear_food:'X', set_light:'L', set_temp:'T', touch:'H', blow_wind:'W'}[action] || '*'`
+       - Format timestamp: `new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })`
+       - Build description: if `kind === 'incident'`, use `reasoning`; else build from action+params (parse params if string)
+       - Create the div element with class `activity-entry activity-{colorClass}` and innerHTML matching the existing entry pattern
+       - Append to feedList
+  - calls: `fetch(...)`
+  - returns: void
+  - error handling: `.catch` logs to `console.warn('[calendar] day-activity fetch error:', err.message)`
 
-- signature: `function renderHungerSparkline(observations, feedMarkers)`
-  - purpose: Render an inline SVG sparkline of hunger values over time, with vertical lines at feed events
+- signature: `function restoreFullFeed()`
+  - purpose: Restore the full activity feed after deselecting a calendar day
   - logic:
-    1. If observations is null or observations.length === 0, return `'<div class="analytics-metric"><div class="analytics-metric-label">Hunger Timeline</div><div class="analytics-sparkline-empty">No data yet</div></div>'`
-    2. Set SVG dimensions: var W = 240, H = 40
-    3. Build array of {x, y} points:
-       - var startTime = new Date(observations[0].timestamp).getTime()
-       - var endTime = new Date(observations[observations.length - 1].timestamp).getTime()
-       - var timeRange = Math.max(1, endTime - startTime)
-       - For each observation at index i: x = ((new Date(observations[i].timestamp).getTime() - startTime) / timeRange) * W, y = H - (observations[i].hunger * H). Clamp y to [0, H].
-    4. Build polyline points string: join all points as 'x,y' separated by spaces
-    5. Build feed marker lines: for each feedMarker, compute markerX = ((new Date(feedMarker.timestamp).getTime() - startTime) / timeRange) * W. If markerX >= 0 and markerX <= W, create `'<line x1="' + markerX + '" y1="0" x2="' + markerX + '" y2="' + H + '" stroke="var(--success)" stroke-width="1" opacity="0.6"/>'`
-    6. Build threshold line at hunger=0.7: var threshY = H - (0.7 * H). Create `'<line x1="0" y1="' + threshY + '" x2="' + W + '" y2="' + threshY + '" stroke="var(--warning)" stroke-width="0.5" stroke-dasharray="3,3" opacity="0.5"/>'`
-    7. Assemble SVG: `'<svg viewBox="0 0 ' + W + ' ' + H + '" class="analytics-sparkline-svg" preserveAspectRatio="none">' + thresholdLine + feedMarkerLines + '<polyline points="' + pointsStr + '" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>'`
-    8. Return string: `'<div class="analytics-metric"><div class="analytics-metric-label">Hunger Timeline <span class="analytics-legend"><span class="analytics-legend-marker" style="background:var(--success)"></span>fed <span class="analytics-legend-marker" style="background:var(--warning)"></span>0.7</span></div><div class="analytics-sparkline-container">' + svg + '</div></div>'`
-  - returns: HTML string
+    1. Get `feedList = document.getElementById('activity-feed-list')`; if null, return
+    2. Set `feedList.innerHTML = ''`
+    3. If `window.CaretakerSidebar` exists, call `window.CaretakerSidebar.loadHistory()` -- BUT wait, there's no `loadHistory` exposed. Instead, check if `window.caretakerBridge` is connected and the bridge ws is open. The simplest approach: trigger a reconnect/reload by calling the bridge's websocket which sends `activity_history` on connect. But that's too complex.
+    4. Simpler approach: fetch from `/calendar/day-activity` without a date param won't work. Instead, use the existing `getRecentActivity` endpoint pattern. BUT there is no standalone REST endpoint for full activity. The activity history is sent over WebSocket on connect.
+    5. Simplest correct approach: set `feedList.innerHTML = '<div class="cal-no-activity">Reload the page to restore full feed, or click Activity to reconnect.</div>'` AND then trigger reload of history by checking if the caretaker bridge websocket is available. Actually, the cleanest approach: expose a `reloadHistory` on `CaretakerSidebar` or just add a small GET endpoint.
+    6. REVISED: Add a `GET /activity/recent` endpoint to server (see step 2 revision below), then fetch from it and rebuild the feed. BUT to keep changes minimal, use a different approach: just clear the date filter indication and let the websocket's real-time flow repopulate. Add a note div saying "Live feed resumed" and the next incoming action/incident will append naturally.
+    7. FINAL APPROACH: The existing WebSocket `onconnection` handler in `server/caretaker.js` sends `activity_history` with recent entries. We can trigger this by sending a special message from the browser. But that requires modifying the WS protocol. Too invasive.
+    8. SIMPLEST FINAL: Just re-fetch using `/calendar/day-activity` with today's date is NOT right either since we want ALL activity not just today.
+    9. ACTUAL SIMPLEST: Keep it practical. When deselecting, reload the full page activity by fetching a new endpoint. Add a `GET /activity/recent` endpoint in caretaker.js.
 
-- signature: `function renderMetricRow(label, value, unit, colorKey)`
-  - purpose: Render a single metric row with label and value
+OK -- let me revise. The cleanest path: add one more GET endpoint to caretaker.js (`GET /activity/recent`) that calls `caretakerDb.getRecentActivity(50)` and returns the JSON. Then `restoreFullFeed()` fetches this and rebuilds entries. This requires:
+  - Adding the endpoint in step 2 (caretaker.js)
+  - Using it in restoreFullFeed
+
+REVISED `restoreFullFeed`:
   - logic:
-    1. var colorStyle = ''
-    2. If colorKey is not null: colorStyle = ' style="color:var(--' + colorKey + ')"'
-    3. Return string: `'<div class="analytics-metric"><div class="analytics-metric-value"' + colorStyle + '>' + value + '<span class="analytics-metric-unit">' + unit + '</span></div><div class="analytics-metric-label">' + label + '</div></div>'`
-  - returns: HTML string
+    1. Get `feedList = document.getElementById('activity-feed-list')`; if null, return
+    2. Fetch `API_URL + '/activity/recent'`
+    3. Parse JSON response (array of activity entries, same shape as `getRecentActivity`)
+    4. Set `feedList.innerHTML = ''`
+    5. Loop through entries and build entry elements the same way as `filterFeedToDate`, then append to feedList
+  - calls: `fetch(...)`
+  - returns: void
+  - error handling: `.catch` -- set feedList.innerHTML to a message "Could not reload feed"
 
-### 4. MODIFY index.html
+- signature: `function buildEntryEl(entry)`
+  - purpose: Create a DOM element for an activity/incident entry (shared by filterFeedToDate and restoreFullFeed)
+  - logic:
+    1. Extract: `kind = entry.kind`, `action = entry.name`, `params = entry.params`, `reasoning = entry.reasoning`, `timestamp = entry.timestamp`
+    2. Determine `colorClass`:
+       - If `kind === 'incident'`: `'incident'`
+       - Else if `action === 'place_food' || action === 'clear_food'`: `'feed'`
+       - Else if `action === 'set_light' || action === 'set_temp'`: `'comfort'`
+       - Else: `'neutral'`
+    3. Determine `icon`:
+       - If `kind === 'incident'`: `'!'`
+       - Else: `{place_food:'F', clear_food:'X', set_light:'L', set_temp:'T', touch:'H', blow_wind:'W'}[action] || '*'`
+    4. Format time: `new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })`
+    5. Build description:
+       - If `kind === 'incident'`: use `reasoning`
+       - Else: try `JSON.parse(params)` into `p`. Switch on action:
+         - `place_food`: `'Placed food at (' + Math.round(p.x) + ', ' + Math.round(p.y) + ')'`
+         - `clear_food`: `'Cleared all food'`
+         - `set_light`: `'Set light to ' + (p.level || 'unknown')`
+         - `set_temp`: `'Set temp to ' + (p.level || 'unknown')`
+         - `touch`: `'Touched fly'`
+         - `blow_wind`: `'Blew wind'`
+         - default: action name
+    6. Create div element with `className = 'activity-entry activity-' + colorClass`
+    7. Set innerHTML:
+       ```
+       '<div class="activity-entry-header">' +
+         '<span class="activity-icon">' + icon + '</span>' +
+         '<span class="activity-time">' + timeStr + '</span>' +
+         '<span class="activity-desc">' + desc + '</span>' +
+       '</div>' +
+       (reasoningText ? '<div class="activity-entry-detail">' + reasoningText + '</div>' : '')
+       ```
+       where `reasoningText = kind === 'incident' ? '' : (reasoning || '')`
+    8. Return the element
+  - returns: HTMLDivElement
+
+- signature: `function prevMonth()`
+  - purpose: Navigate to the previous month
+  - logic:
+    1. `currentMonth.setMonth(currentMonth.getMonth() - 1)`
+    2. `selectedDate = null`
+    3. Call `fetchAndRender()`
+  - returns: void
+
+- signature: `function nextMonth()`
+  - purpose: Navigate to the next month
+  - logic:
+    1. `currentMonth.setMonth(currentMonth.getMonth() + 1)`
+    2. `selectedDate = null`
+    3. Call `fetchAndRender()`
+  - returns: void
+
+**Initialization and exports:**
+- Call `init()` at the bottom of the IIFE
+- Set `window.CaretakerCalendar = { init: init, refresh: fetchAndRender }`
+
+### 4. MODIFY server/caretaker.js (second pass)
 - operation: MODIFY
-- reason: Add analytics section HTML inside the sidebar, add script tag for caretaker-analytics.js
+- reason: Add `GET /activity/recent` endpoint for restoring full feed after calendar day deselection
+- anchor: `res.writeHead(404);`
 
-#### Change 1: Add analytics section HTML
-- anchor: `</div>` closing tag of `<div class="chat-section" id="chat-section">` at line 98 (the `</div>` right before `</div>` of `#caretaker-sidebar`)
-- After the closing `</div>` of `.chat-section` (line 98) and before the closing `</div>` of `#caretaker-sidebar` (line 99), insert:
-```html
-        <div class="analytics-section" id="analytics-section">
-            <div class="analytics-section-header">
-                <span class="analytics-section-title">Analytics</span>
-                <button class="analytics-toggle-btn" id="analytics-toggle">Hide</button>
-            </div>
-            <div class="analytics-content" id="analytics-content"></div>
-        </div>
+#### Functions
+Add a new route block BEFORE the `res.writeHead(404);` line:
+
+**Route: GET /activity/recent**
+```javascript
+if (req.method === 'GET' && req.url === '/activity/recent') {
+  try {
+    var recent = caretakerDb.getRecentActivity(50);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(recent));
+  } catch (err) {
+    process.stderr.write('[caretaker] activity/recent error: ' + err.message + '\n');
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Internal error' }));
+  }
+  return;
+}
 ```
 
-#### Change 2: Add script tag
-- anchor: `<script type="text/javascript" src="./js/caretaker-sidebar.js?v=17"></script>` at line 127
-- After this line, insert: `    <script type="text/javascript" src="./js/caretaker-analytics.js?v=17"></script>`
-- The new script loads after caretaker-sidebar.js and before caretaker-bridge.js.
+NOTE: Combine this with the routes from step 2. All three new routes (calendar/scores, calendar/day-activity, activity/recent) should be added together in one MODIFY pass, all before the `res.writeHead(404);` line.
 
-### 5. MODIFY css/main.css
+### 5. MODIFY index.html
 - operation: MODIFY
-- reason: Add styles for the analytics section, sparkline charts, metric rows, toggle, and collapsed state
-- anchor: `/* --- Hamburger toggle (hidden on desktop) --- */` at line 1274
+- reason: Add calendar section HTML div inside #caretaker-sidebar (after analytics-section), add new script tag for caretaker-calendar.js
+- anchor: `<div class="analytics-section" id="analytics-section">`
 
-#### Styles to insert
-- Insert the following CSS block BEFORE the line `/* --- Hamburger toggle (hidden on desktop) --- */` at css/main.css:1274:
+#### HTML Changes
+
+**Change 1: Add calendar section div**
+After the closing `</div>` of `analytics-section` (the one on the line containing `</div>` that closes `id="analytics-section"`) and before `</div>` of `#caretaker-sidebar`, insert:
+
+```html
+<div class="calendar-section" id="calendar-section">
+    <div class="calendar-section-header">
+        <span class="calendar-section-title">Calendar</span>
+        <button class="calendar-toggle-btn" id="calendar-toggle">Hide</button>
+    </div>
+    <div class="calendar-content" id="calendar-content"></div>
+</div>
+```
+
+Specifically, find this exact block:
+```html
+        <div class="analytics-content" id="analytics-content"></div>
+        </div>
+    </div>
+```
+
+Replace with:
+```html
+        <div class="analytics-content" id="analytics-content"></div>
+        </div>
+        <div class="calendar-section" id="calendar-section">
+            <div class="calendar-section-header">
+                <span class="calendar-section-title">Calendar</span>
+                <button class="calendar-toggle-btn" id="calendar-toggle">Hide</button>
+            </div>
+            <div class="calendar-content" id="calendar-content"></div>
+        </div>
+    </div>
+```
+
+**Change 2: Add script tag**
+After the line `<script type="text/javascript" src="./js/caretaker-analytics.js?v=17"></script>`, add:
+```html
+    <script type="text/javascript" src="./js/caretaker-calendar.js?v=17"></script>
+```
+
+### 6. MODIFY css/main.css
+- operation: MODIFY
+- reason: Add calendar grid styles for the new calendar section in the sidebar
+- anchor: `.analytics-sparkline-empty {`
+
+#### CSS Rules
+After the `.analytics-sparkline-empty { ... }` block (ending on line 1416 with `}`), and BEFORE the `/* --- Hamburger toggle (hidden on desktop) --- */` comment, insert the following CSS:
 
 ```css
-/* --- Caretaker Analytics Panel --- */
-.analytics-section {
+/* --- Caretaker Calendar Panel --- */
+.calendar-section {
     display: flex;
     flex-direction: column;
     border-top: 1px solid var(--border);
@@ -228,20 +408,20 @@
     scrollbar-color: rgba(136, 146, 164, 0.3) transparent;
 }
 
-.analytics-section::-webkit-scrollbar {
+.calendar-section::-webkit-scrollbar {
     width: 6px;
 }
 
-.analytics-section::-webkit-scrollbar-track {
+.calendar-section::-webkit-scrollbar-track {
     background: transparent;
 }
 
-.analytics-section::-webkit-scrollbar-thumb {
+.calendar-section::-webkit-scrollbar-thumb {
     background: rgba(136, 146, 164, 0.3);
     border-radius: 3px;
 }
 
-.analytics-section-header {
+.calendar-section-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -249,13 +429,13 @@
     flex-shrink: 0;
 }
 
-.analytics-section-title {
+.calendar-section-title {
     color: var(--text);
     font-size: 0.8rem;
     font-weight: 600;
 }
 
-.analytics-toggle-btn {
+.calendar-toggle-btn {
     background: none;
     border: 1px solid var(--border);
     color: var(--text-muted);
@@ -266,118 +446,184 @@
     font-family: system-ui, -apple-system, sans-serif;
 }
 
-.analytics-toggle-btn:hover {
+.calendar-toggle-btn:hover {
     color: var(--text);
     border-color: var(--accent);
 }
 
-.analytics-content {
+.calendar-content {
     padding: 0 0.75rem 0.75rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
 }
 
-.analytics-content.collapsed {
+.calendar-content.collapsed {
     display: none;
 }
 
-.analytics-metric {
+.cal-nav {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.cal-nav-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    padding: 0.15rem 0.4rem;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-family: system-ui, -apple-system, sans-serif;
+    line-height: 1;
+}
+
+.cal-nav-btn:hover {
+    color: var(--text);
+    border-color: var(--accent);
+}
+
+.cal-nav-title {
+    color: var(--text);
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.cal-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+}
+
+.cal-dow {
+    text-align: center;
+    font-size: 0.6rem;
+    color: var(--text-muted);
+    padding: 0.15rem 0;
+    font-weight: 600;
+}
+
+.cal-cell {
+    background: var(--bg);
+    border-radius: 4px;
+    padding: 0.2rem;
+    min-height: 2.5rem;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: border-color 0.2s ease;
     display: flex;
     flex-direction: column;
-    gap: 0.15rem;
-}
-
-.analytics-score {
     align-items: center;
-    padding: 0.5rem 0;
+    gap: 1px;
 }
 
-.analytics-score-value {
-    font-size: 1.75rem;
+.cal-cell:hover {
+    border-color: var(--accent);
+}
+
+.cal-cell.cal-empty {
+    background: transparent;
+    cursor: default;
+    border: none;
+}
+
+.cal-cell.cal-empty:hover {
+    border-color: transparent;
+}
+
+.cal-cell.cal-selected {
+    border-color: var(--accent);
+    background: var(--accent-subtle);
+}
+
+.cal-cell.cal-green {
+    background: rgba(74, 222, 128, 0.12);
+}
+
+.cal-cell.cal-yellow {
+    background: rgba(251, 191, 36, 0.12);
+}
+
+.cal-cell.cal-red {
+    background: rgba(248, 113, 113, 0.12);
+}
+
+.cal-cell.cal-nodata {
+    background: var(--bg);
+}
+
+.cal-day {
+    font-size: 0.65rem;
+    color: var(--text);
+    font-weight: 600;
+    line-height: 1;
+}
+
+.cal-score {
+    font-size: 0.6rem;
     font-weight: 700;
     line-height: 1;
     font-variant-numeric: tabular-nums;
 }
 
-.analytics-metric-value {
-    font-size: 1rem;
-    font-weight: 600;
-    color: var(--text);
-    line-height: 1;
-    font-variant-numeric: tabular-nums;
+.cal-green .cal-score {
+    color: var(--success);
 }
 
-.analytics-metric-unit {
-    font-size: 0.7rem;
-    color: var(--text-muted);
-    font-weight: 400;
-    margin-left: 0.15rem;
+.cal-yellow .cal-score {
+    color: var(--warning);
 }
 
-.analytics-metric-label {
-    font-size: 0.7rem;
+.cal-red .cal-score {
+    color: var(--error);
+}
+
+.cal-nodata .cal-score {
     color: var(--text-muted);
+}
+
+.cal-details {
     display: flex;
-    align-items: center;
-    gap: 0.5rem;
-}
-
-.analytics-legend {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-    font-size: 0.65rem;
-    margin-left: auto;
-}
-
-.analytics-legend-marker {
-    display: inline-block;
-    width: 8px;
-    height: 3px;
-    border-radius: 1px;
-}
-
-.analytics-sparkline-container {
-    width: 100%;
-    height: 40px;
-    background: var(--bg);
-    border-radius: var(--radius);
-    padding: 0.25rem;
-    box-sizing: border-box;
-}
-
-.analytics-sparkline-svg {
-    width: 100%;
-    height: 100%;
-    display: block;
-}
-
-.analytics-sparkline-empty {
-    font-size: 0.75rem;
+    gap: 0.2rem;
+    font-size: 0.5rem;
     color: var(--text-muted);
-    padding: 0.5rem 0;
+    line-height: 1;
+}
+
+.cal-no-activity {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    padding: 1rem 0.5rem;
     text-align: center;
+}
+
+.cal-feed-date-header {
+    font-size: 0.75rem;
+    color: var(--accent);
+    padding: 0.4rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+    font-weight: 600;
+    margin-bottom: 0.25rem;
 }
 ```
 
 ## Verification
-- build: No build step (vanilla JS project). Verify server starts: `cd /Users/name/homelab/flybrain && node server/caretaker.js` (should print `[caretaker] WebSocket server on port 7600` to stderr, then Ctrl-C)
-- lint: No linter configured in project
-- test: No existing tests
+- build: No build step (vanilla JS). Run `node -e "require('./server/db.js')"` from the `flybrain` directory to verify db.js has no syntax errors.
+- lint: No linter configured. Manually check for syntax errors with `node -c js/caretaker-calendar.js` (will fail since it's browser JS with no module -- skip this).
+- test: No existing tests.
 - smoke:
-  1. Start server: `cd /Users/name/homelab/flybrain && node server/caretaker.js &`
-  2. Test analytics/summary endpoint: `curl -s http://localhost:7600/analytics/summary` -- expect JSON with keys composite_score, total_feeds, avg_hunger, fear_incidents, avg_response_time, feeds_per_hour, connected_hours (values may be null/0 if DB is empty)
-  3. Test analytics/hunger-timeline endpoint: `curl -s http://localhost:7600/analytics/hunger-timeline` -- expect JSON with keys observations (array) and feedMarkers (array)
-  4. Kill server: `kill %1`
-  5. Open index.html in browser with server running. Open the left sidebar. Verify the Analytics section appears below the chat section with a "Hide" toggle button. Click "Hide" to collapse, "Show" to expand. Metrics should display (or show fallback values if DB is empty).
+  1. Start the server: `cd /Users/name/homelab/flybrain && node server/caretaker.js`
+  2. Test calendar scores endpoint: `curl -s 'http://localhost:7600/calendar/scores?start=2026-01-01&end=2026-03-27'` -- expect a JSON array (possibly empty if no scores exist)
+  3. Test day activity endpoint: `curl -s 'http://localhost:7600/calendar/day-activity?date=2026-03-27'` -- expect a JSON array
+  4. Test activity recent endpoint: `curl -s 'http://localhost:7600/activity/recent'` -- expect a JSON array
+  5. Test missing date param: `curl -s 'http://localhost:7600/calendar/day-activity'` -- expect `{"error":"date parameter required"}`
+  6. Open `index.html` in a browser with the server running and verify the Calendar section appears in the left sidebar below Analytics
 
 ## Constraints
-- Do NOT modify SPEC.md, CLAUDE.md, TASKS.md, or any .buildloop/ files (other than this plan)
-- Do NOT add any npm dependencies
-- Do NOT modify caretaker-bridge.js -- analytics uses polling (setInterval), not WebSocket push
-- Do NOT fix the buggy avg_response_time column in computeDailyScore() -- the analytics endpoint computes real response time dynamically from raw observation/action data instead
-- Do NOT change the version query param (?v=17) on existing script/CSS tags -- only the new script tag uses ?v=17 to match the current version
-- All CSS colors must use existing CSS custom properties (--bg, --surface, --border, --text, --text-muted, --accent, --success, --warning, --error). No hardcoded hex values in new styles except within var() references.
-- All SVG marker/def IDs must be prefixed with 'analytics-' to avoid namespace collisions (pattern #7 from known patterns)
-- The analytics panel must handle empty DB gracefully -- show "No data yet" or fallback values, never broken SVGs or NaN
+- Do not modify SPEC.md, TASKS.md, or CLAUDE.md
+- Do not add any npm packages
+- Do not modify the WebSocket protocol in caretaker-bridge.js
+- Do not modify existing analytics or sidebar functionality
+- All colors must use CSS custom properties from :root (no hardcoded hex values in component styles except rgba transparency variations)
+- Follow the IIFE pattern of caretaker-analytics.js for the new JS file
+- Do not bump the `?v=17` version parameter on existing script/CSS tags -- only the new file needs v=17 for consistency

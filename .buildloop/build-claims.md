@@ -1,37 +1,43 @@
-# Build Claims -- T8.8
+# Build Claims -- T8.9
 
 ## Files Changed
-- [MODIFY] server/db.js -- Added getAnalyticsSummary(dateStr) and getHungerTimeline(limit) query methods before close()
-- [MODIFY] server/caretaker.js -- Added GET /analytics/summary and GET /analytics/hunger-timeline route handlers before the 404 handler
-- [CREATE] js/caretaker-analytics.js -- New IIFE frontend module: fetches analytics data, renders score gauge, hunger sparkline SVG, and 4 metric rows; 30s auto-refresh; collapse/expand toggle. Exposes window.CaretakerAnalytics
-- [MODIFY] index.html -- Added analytics-section div inside #caretaker-sidebar after chat-section; added script tag for caretaker-analytics.js between caretaker-sidebar.js and caretaker-bridge.js
-- [MODIFY] css/main.css -- Added 120 lines of analytics panel styles (section, header, toggle, metrics, sparkline, legend, scrollbar) before the hamburger toggle section
+- [MODIFY] server/db.js -- Added getDailyScores(startDate, endDate) and getActivityForDate(dateStr, limit) methods
+- [MODIFY] server/caretaker.js -- Added GET /calendar/scores, GET /calendar/day-activity, and GET /activity/recent endpoints
+- [CREATE] js/caretaker-calendar.js -- New IIFE module implementing calendar grid view with month navigation, color-coded day cells, and day-click filtering of the activity feed
+- [MODIFY] index.html -- Added calendar-section HTML inside #caretaker-sidebar (after analytics-section) and script tag for caretaker-calendar.js
+- [MODIFY] css/main.css -- Added calendar grid styles (.calendar-section, .cal-grid, .cal-cell color classes, .cal-nav, .cal-details, etc.)
 
 ## Verification Results
-- Build: PASS (node -c js/caretaker-analytics.js -- syntax OK; node server/caretaker.js starts and listens on port 7600)
+- Build: PASS (`node -e "require('./server/db.js')"` -- no syntax errors)
 - Tests: SKIPPED (no test framework configured)
 - Lint: SKIPPED (no linter configured)
-- Smoke: PASS (curl http://localhost:7600/analytics/summary returns JSON with keys: composite_score, total_feeds, avg_hunger, fear_incidents, avg_response_time, feeds_per_hour, connected_hours; curl http://localhost:7600/analytics/hunger-timeline returns JSON with keys: observations (array of 120), feedMarkers (array of 3))
+- Smoke: PASS (all 5 endpoint tests passed via curl)
+  - `curl 'http://localhost:7600/calendar/scores?start=2026-01-01&end=2026-03-27'` returned JSON array (200)
+  - `curl 'http://localhost:7600/calendar/day-activity?date=2026-03-27'` returned JSON array (200)
+  - `curl 'http://localhost:7600/activity/recent'` returned JSON array with real data (200)
+  - `curl 'http://localhost:7600/calendar/day-activity'` returned `{"error":"date parameter required"}` (400)
+  - `curl 'http://localhost:7600/calendar/scores'` returned data with default 28-day range (200)
 
 ## Claims
-- [ ] GET /analytics/summary returns JSON with all 7 required keys (composite_score, total_feeds, avg_hunger, fear_incidents, avg_response_time, feeds_per_hour, connected_hours)
-- [ ] GET /analytics/hunger-timeline returns JSON with observations array (timestamp + hunger per entry) and feedMarkers array (timestamp per entry)
-- [ ] avg_response_time is computed dynamically from raw observation/action data (hunger > 0.7 breaches matched to subsequent place_food actions), NOT from the buggy daily_scores.avg_response_time column
-- [ ] connected_hours is computed by analyzing observation timestamp gaps (gaps <= 60s count as connected time)
-- [ ] feeds_per_hour is computed as feedsToday / estimated connected hours from observation count
-- [ ] Frontend analytics panel renders inside #caretaker-sidebar after the chat-section with a "Hide"/"Show" toggle
-- [ ] Sparkline SVG renders hunger values as polyline, feed markers as vertical green lines, and a dashed 0.7 threshold line
-- [ ] Score gauge displays composite_score with color coding: green >= 80, yellow >= 50, red < 50, "--" for null
-- [ ] Analytics auto-refreshes every 30 seconds via setInterval
-- [ ] Empty database is handled gracefully: null scores show "--", zero counts show "0", empty timeline shows "No data yet"
-- [ ] All CSS uses existing custom properties (--bg, --surface, --border, --text, --text-muted, --accent, --success, --warning, --error, --radius) -- no hardcoded hex colors
-- [ ] caretaker-analytics.js loads after caretaker-sidebar.js and before caretaker-bridge.js
-- [ ] No new npm dependencies added
-- [ ] caretaker-bridge.js was NOT modified -- analytics uses polling, not WebSocket push
+- [ ] getDailyScores(startDate, endDate) queries daily_scores table with date range filter and returns rows with date, composite_score, total_feeds, avg_hunger, fear_incidents
+- [ ] getActivityForDate(dateStr, limit) returns union of actions and incidents for a single calendar day (using T00:00:00.000Z to T23:59:59.999Z range), ordered by timestamp DESC
+- [ ] GET /calendar/scores accepts optional start and end query params, defaults to 28 days ago through today
+- [ ] GET /calendar/day-activity requires date query param, returns 400 with error message if missing
+- [ ] GET /activity/recent returns last 50 activity entries (used for restoring full feed after day deselection)
+- [ ] Calendar JS module renders a 7-column grid with Su-Sa headers, empty padding cells for first-day offset, and day cells with score/details
+- [ ] Day cells are color-coded: green (score > 80), yellow (50-80), red (< 50), nodata (no score)
+- [ ] Each scored day cell shows: day number, rounded composite score, incident count (Ni), feed count (Nf), avg hunger (N.Nh)
+- [ ] Month navigation (prev/next buttons) re-fetches scores and re-renders the grid
+- [ ] Clicking a day cell adds cal-selected class and calls filterFeedToDate which replaces activity feed content with that day's entries
+- [ ] Clicking the same selected day deselects it and calls restoreFullFeed which fetches /activity/recent and rebuilds the feed
+- [ ] Toggle button (Hide/Show) adds/removes collapsed class on calendar-content
+- [ ] Calendar section is placed in index.html after analytics-section and before the closing sidebar div
+- [ ] Script tag loads after caretaker-analytics.js and before caretaker-bridge.js
+- [ ] All CSS colors use CSS custom properties (--text, --bg, --border, --accent, etc.) except rgba transparency values for cell backgrounds
 
 ## Gaps and Assumptions
-- Browser rendering not tested (only server endpoints and JS syntax verified via CLI)
-- The collapse/expand toggle state is not persisted across page reloads (starts expanded)
-- Response time of 873s in test data seems high -- this is correct given the test DB has many hunger > 0.7 observations with infrequent feeding; the dynamic computation is faithful to the data
-- Mobile responsive behavior of analytics panel not specifically tested (inherits sidebar's existing responsive layout)
-- The API_URL in caretaker-analytics.js uses location.hostname which may not work if the page is served from a different origin than the caretaker server on port 7600
+- Browser-side JS (caretaker-calendar.js) was not tested in an actual browser; only server endpoints were smoke-tested via curl
+- The buildEntryEl function in caretaker-calendar.js duplicates entry rendering logic from caretaker-sidebar.js rather than sharing it (as planned, since CaretakerSidebar doesn't expose createEntryEl)
+- If daily_scores table has no rows for a month, all cells show as cal-nodata with no score/details (correct behavior but not visually tested)
+- The onCellClick delegation listener is bound once in init(), not per-render, avoiding duplicate handler accumulation on month navigation
+- No existing script version tags were modified (only new file uses v=17)

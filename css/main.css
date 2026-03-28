@@ -1415,6 +1415,216 @@ canvas {
     text-align: center;
 }
 
+/* --- Caretaker Calendar Panel --- */
+.calendar-section {
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+    max-height: 50%;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(136, 146, 164, 0.3) transparent;
+}
+
+.calendar-section::-webkit-scrollbar {
+    width: 6px;
+}
+
+.calendar-section::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.calendar-section::-webkit-scrollbar-thumb {
+    background: rgba(136, 146, 164, 0.3);
+    border-radius: 3px;
+}
+
+.calendar-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0.75rem;
+    flex-shrink: 0;
+}
+
+.calendar-section-title {
+    color: var(--text);
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.calendar-toggle-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-family: system-ui, -apple-system, sans-serif;
+}
+
+.calendar-toggle-btn:hover {
+    color: var(--text);
+    border-color: var(--accent);
+}
+
+.calendar-content {
+    padding: 0 0.75rem 0.75rem;
+}
+
+.calendar-content.collapsed {
+    display: none;
+}
+
+.cal-nav {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.cal-nav-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    padding: 0.15rem 0.4rem;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-family: system-ui, -apple-system, sans-serif;
+    line-height: 1;
+}
+
+.cal-nav-btn:hover {
+    color: var(--text);
+    border-color: var(--accent);
+}
+
+.cal-nav-title {
+    color: var(--text);
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.cal-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+}
+
+.cal-dow {
+    text-align: center;
+    font-size: 0.6rem;
+    color: var(--text-muted);
+    padding: 0.15rem 0;
+    font-weight: 600;
+}
+
+.cal-cell {
+    background: var(--bg);
+    border-radius: 4px;
+    padding: 0.2rem;
+    min-height: 2.5rem;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: border-color 0.2s ease;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+}
+
+.cal-cell:hover {
+    border-color: var(--accent);
+}
+
+.cal-cell.cal-empty {
+    background: transparent;
+    cursor: default;
+    border: none;
+}
+
+.cal-cell.cal-empty:hover {
+    border-color: transparent;
+}
+
+.cal-cell.cal-selected {
+    border-color: var(--accent);
+    background: var(--accent-subtle);
+}
+
+.cal-cell.cal-green {
+    background: rgba(74, 222, 128, 0.12);
+}
+
+.cal-cell.cal-yellow {
+    background: rgba(251, 191, 36, 0.12);
+}
+
+.cal-cell.cal-red {
+    background: rgba(248, 113, 113, 0.12);
+}
+
+.cal-cell.cal-nodata {
+    background: var(--bg);
+}
+
+.cal-day {
+    font-size: 0.65rem;
+    color: var(--text);
+    font-weight: 600;
+    line-height: 1;
+}
+
+.cal-score {
+    font-size: 0.6rem;
+    font-weight: 700;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+}
+
+.cal-green .cal-score {
+    color: var(--success);
+}
+
+.cal-yellow .cal-score {
+    color: var(--warning);
+}
+
+.cal-red .cal-score {
+    color: var(--error);
+}
+
+.cal-nodata .cal-score {
+    color: var(--text-muted);
+}
+
+.cal-details {
+    display: flex;
+    gap: 0.2rem;
+    font-size: 0.5rem;
+    color: var(--text-muted);
+    line-height: 1;
+}
+
+.cal-no-activity {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    padding: 1rem 0.5rem;
+    text-align: center;
+}
+
+.cal-feed-date-header {
+    font-size: 0.75rem;
+    color: var(--accent);
+    padding: 0.4rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+}
+
 /* --- Hamburger toggle (hidden on desktop) --- */
 #sidebarToggle {
     display: none;

@@ -351,6 +351,25 @@ function openDb(dbPath) {
       return { observations: observations, feedMarkers: feedMarkers };
     },
 
+    getDailyScores: function(startDate, endDate) {
+      return db.prepare(
+        'SELECT date, composite_score, total_feeds, avg_hunger, fear_incidents FROM daily_scores WHERE date >= ? AND date <= ? ORDER BY date ASC'
+      ).all(startDate, endDate);
+    },
+
+    getActivityForDate: function(dateStr, limit) {
+      if (limit === undefined) limit = 100;
+      var dayStart = dateStr + 'T00:00:00.000Z';
+      var dayEnd = dateStr + 'T23:59:59.999Z';
+      return db.prepare(
+        'SELECT id, timestamp, kind, name, params, reasoning, state_snapshot FROM (' +
+        '  SELECT id, timestamp, \'action\' AS kind, action AS name, params, reasoning, fly_state AS state_snapshot FROM actions WHERE timestamp >= ? AND timestamp <= ?' +
+        '  UNION ALL' +
+        '  SELECT id, timestamp, \'incident\' AS kind, type AS name, NULL AS params, description AS reasoning, state_snapshot FROM incidents WHERE timestamp >= ? AND timestamp <= ?' +
+        ') ORDER BY timestamp DESC LIMIT ?'
+      ).all(dayStart, dayEnd, dayStart, dayEnd, limit);
+    },
+
     close: function() {
       db.close();
     },
