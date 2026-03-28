@@ -5,9 +5,11 @@
   "description": "Interactive virtual Drosophila",
   "scripts": {
     "caretaker": "node server/caretaker.js",
-    "query-log": "bash tools/query-log.sh"
+    "query-log": "bash tools/query-log.sh",
+    "migrate-logs": "node server/migrate-logs.js"
   },
   "dependencies": {
+    "better-sqlite3": "^12.8.0",
     "ws": "^8.18.0"
   }
 }

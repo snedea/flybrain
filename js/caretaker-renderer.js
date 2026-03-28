@@ -106,15 +106,14 @@
 
   function update(dt) {
     if (!caretakerConnected) return;
-    // When idle (no recent command), gently follow the fly
+    // Only show cursor when Claude recently acted (within 3s of a command)
     var idleTime = Date.now() - lastCommandTime;
-    if (idleTime > 2000 && typeof fly !== 'undefined') {
-      attentionTargetX = fly.x + Math.cos(Date.now() * 0.001) * 30;
-      attentionTargetY = fly.y + Math.sin(Date.now() * 0.0007) * 20;
-    }
-    if (attentionX < 0 && typeof fly !== 'undefined') {
-      attentionX = fly.x;
-      attentionY = fly.y;
+    if (lastCommandTime === 0 || idleTime > 3000) {
+      // Fade out: clear attention so cursor/trail stop drawing
+      attentionX = -1;
+      attentionY = -1;
+      trail = [];
+      return;
     }
     if (attentionX < 0) return;
     var lerpSpeed = 0.08;
@@ -140,10 +139,11 @@
 
   function drawOverlay(ctx) {
     if (!caretakerConnected) return;
-    drawTrail(ctx);
     drawEffects(ctx);
-    drawCursor(ctx);
-    drawIdlePulse(ctx);
+    if (attentionX >= 0) {
+      drawTrail(ctx);
+      drawCursor(ctx);
+    }
   }
 
   function drawTrail(ctx) {

@@ -1,27 +1,45 @@
-# Build Claims -- D69.1
+# Build Claims -- T8.5
 
 ## Files Changed
-- [MODIFY] js/caretaker-bridge.js -- getState() now reports lightStateIndex/tempStateIndex (integer indices) instead of raw BRAIN.stimulate floats; set_light and set_temp handlers accept numeric index params in addition to string names; init() skips WebSocket connection when location.protocol is "file:"
-- [MODIFY] agent/run.sh -- Replaced macOS-incompatible `date +%s%3N` with portable `python3 -c "import time; print(int(time.time()*1000))"` for millisecond timestamps
-- [MODIFY] .gitignore -- Added caretaker-decisions.log entry after existing caretaker.log
+- [CREATE] server/db.js -- SQLite schema (5 tables, indexes), prepared statements, openDb() API with insert/query/computeDailyScore methods
+- [MODIFY] server/caretaker.js -- Replaced file-stream logging with SQLite via caretakerDb, added observation rate-limiting (10s), HTTP /state endpoint, daily_scores interval (5min), forgot_to_feed incident rate-limiting (60s)
+- [MODIFY] agent/run.sh -- Replaced grep-based get_latest_state() with HTTP curl to /state endpoint, removed LOG variable
+- [CREATE] server/migrate-logs.js -- One-time migration script reads caretaker.log, inserts into SQLite in a transaction, computes historical daily_scores
+- [MODIFY] package.json -- Added better-sqlite3 dependency (^12.8.0, plan said ^11.0.0 but Node 25 required v12), added migrate-logs script
+- [MODIFY] .gitignore -- Added data/ to prevent committing database files
 
 ## Verification Results
-- Build: PASS (no build step -- vanilla JS project)
-- Tests: PASS (node tests/run-node.js -- 99 passed / 0 failed / 99 total)
+- Build: PASS (npm install)
+- Tests: SKIPPED (no test suite configured)
 - Lint: SKIPPED (no linter configured)
-- Smoke: PASS (python3 timestamp outputs 13-digit integer; grep confirms .gitignore entry)
+- Smoke 1: PASS (node -e "..." -- db.js insert/query/computeDailyScore all returned expected values)
+- Smoke 2: PASS (node server/migrate-logs.js -- migrated 3161 observations, 17 actions, 1943 incidents, 0 parse errors, computed 1 day of scores)
+- Smoke 3: PASS (caretaker.js server started, curl /state returned "null" as expected with no browser connected)
+- Smoke 4: PASS (ls -la data/caretaker.db -- 3.0MB file exists after migration)
 
 ## Claims
-- [ ] Claim 1: getState() environment object at js/caretaker-bridge.js:16 returns `lightStateIndex` and `tempStateIndex` (global integer vars from main.js) instead of `BRAIN.stimulate.lightLevel` and `BRAIN.stimulate.temperature` (floats)
-- [ ] Claim 2: set_light handler (js/caretaker-bridge.js:42-52) accepts both string keys ("bright","dim","dark") via lightMap AND numeric indices (0,1,2) via else-if branch; existing string path unchanged
-- [ ] Claim 3: set_temp handler (js/caretaker-bridge.js:54-65) accepts both string keys ("neutral","warm","cool") via tempMap AND numeric indices (0,1,2) via else-if branch; existing string path unchanged
-- [ ] Claim 4: init() (js/caretaker-bridge.js:115-122) returns early without calling connect() when location.protocol === 'file:', preventing infinite WebSocket reconnect loop on iOS/WKWebView
-- [ ] Claim 5: agent/run.sh:134 uses `python3 -c "import time; print(int(time.time()*1000))"` instead of `date +%s%3N`, producing valid 13-digit millisecond timestamps on macOS BSD
-- [ ] Claim 6: .gitignore contains `caretaker-decisions.log` on its own line immediately after `caretaker.log`
-- [ ] Claim 7: agent/caretaker-policy.md was NOT modified -- its state schema already documented integer indices (0/1/2) which now matches what getState() actually emits
+- [ ] server/db.js exports openDb() which creates 5 tables: observations, actions, incidents, chat_messages, daily_scores
+- [ ] Each table has a timestamp index; daily_scores has a unique date index
+- [ ] observations table stores denormalized drive/behavior/position/firing/environment columns plus raw_data JSON blob
+- [ ] insertObservation safely handles null/missing nested properties (drives, behavior, position, firingStats, environment)
+- [ ] computeDailyScore calculates composite score (0-100) with penalties for hunger, fear incidents, and forgot_to_feed incidents, upserts into daily_scores
+- [ ] server/caretaker.js rate-limits observations to one insert per 10 seconds (OBSERVATION_INTERVAL_MS = 10000)
+- [ ] All state messages are still forwarded to stdout regardless of observation sampling
+- [ ] forgot_to_feed incidents are rate-limited to one per 60 seconds via getLastIncidentTime query
+- [ ] scared_the_fly incidents are logged with severity 'high', forgot_to_feed with 'medium'
+- [ ] HTTP GET /state returns lastState JSON from memory (not database), returns "null" string when no state available
+- [ ] daily_scores are computed every 5 minutes via setInterval
+- [ ] shutdown() calls caretakerDb.close() instead of logStream.end()
+- [ ] writeLog function is fully removed; all call sites replaced with direct caretakerDb method calls
+- [ ] agent/run.sh get_latest_state() uses curl to HTTP /state endpoint instead of grepping caretaker.log
+- [ ] server/migrate-logs.js reads caretaker.log, wraps all inserts in a single transaction, then computes daily_scores for each distinct day
+- [ ] migrate-logs.js classifies entries by type field: observation, action, incident; skips unknown types
+- [ ] data/ directory is gitignored
 
 ## Gaps and Assumptions
-- lightStateIndex and tempStateIndex are assumed to be accessible globals declared in main.js (lines 144, 147) -- not independently verified at runtime, but the existing set_light/set_temp handlers already read/write these same globals successfully
-- The numeric index else-if branches in set_light/set_temp do not handle non-integer numbers (e.g., 1.5) -- they would be accepted since the check is `>= 0 && <= 2`; the plan did not specify integer-only validation and the LLM agent always emits whole numbers
-- The file:// guard in init() prevents ALL caretaker bridge functionality (including getState via window.caretakerBridge) from being WebSocket-connected on iOS; this is intentional per the plan since no server exists in that context
-- python3 availability on the target macOS system is assumed (ships with Xcode CLI tools)
+- better-sqlite3 version is ^12.8.0 instead of plan's ^11.0.0 -- Node 25.1.0 has V8 API changes incompatible with v11; v12 compiles and works correctly
+- caretaker.log is not deleted by migration (per plan constraints)
+- The `fs` module import on line 3 of caretaker.js is no longer used for logging but may be used elsewhere or by future code; left in place to avoid unintended breakage
+- Migration was tested against actual caretaker.log data (3161 obs, 17 actions, 1943 incidents) but edge cases in log format (malformed JSON, missing fields) were not exhaustively tested beyond the 0-error result
+- The daily_scores interval starts immediately on server boot; no initial computation on startup (first computation happens after 5 minutes)
+- chat_messages table is created but no code path currently inserts into it (per plan -- insertChatMessage is exposed on the API for future use)

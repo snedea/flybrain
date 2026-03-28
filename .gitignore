@@ -4,6 +4,7 @@ extract_weights_to_json.py
 node_modules/
 caretaker.log
 caretaker-decisions.log
+data/
 
 # Xcode
 ios/FlyBrain.xcodeproj/xcuserdata/

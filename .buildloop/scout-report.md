@@ -1,73 +1,60 @@
-# Scout Report: T9.2
+# Scout Report: T8.5
 
 ## Key Facts (read this first)
 
-- **Tech stack**: Vanilla JS + HTML5 Canvas + CSS + Three.js v0.128.0. No build step. iOS shell is Swift/SwiftUI + WKWebView (T9.1 complete).
-- **Critical layout constants**: toolbar height `44px` (hardcoded in CSS and JS), bottom panel height `210px` (hardcoded in CSS and referenced in `js/main.js:1677` as `bottomBound = window.innerHeight - 210`). These must change for mobile.
-- **Touch events already wired**: `js/main.js:622-642` has touchstart/touchmove/touchend handlers that delegate to the mouse handlers. The canvas does NOT yet have `touch-action: none`, but `{ passive: false }` + `event.preventDefault()` are already set -- iOS may still intercept gestures before the event fires.
-- **OrbitControls touch**: Confirmed native touch support in the vendored `js/vendor/OrbitControls.js` -- `onTouchStart` handles single-finger rotate and two-finger dolly/pan. No manual touch mapping needed.
-- **ContentView.swift**: Already sets `scrollView.bounces = false`, `isScrollEnabled = false`, `contentInsetAdjustmentBehavior = .never`. Missing: status bar extension (needs `edgesIgnoringSafeArea`) and there is no UIStatusBarStyle config. The app uses `.ignoresSafeArea()` in SwiftUI, but safe areas are NOT communicated to the web layer via CSS env() -- that must be added.
+- **Tech stack**: Node.js v25.1.0, plain CommonJS (`var` style, no build step), `ws` is the only current dependency. `better-sqlite3` is **not installed** -- `npm install better-sqlite3` required.
+- **Logging today**: `server/caretaker.js` writes JSON Lines to `caretaker.log` via `fs.createWriteStream`. Log has 5,121 lines: 3,161 observations, 1,943 incidents, 17 actions. Zero `chat_message` entries (new table for T8.7).
+- **Critical break**: `agent/run.sh:get_latest_state()` greps `caretaker.log` for the latest observation. Removing the flat-file log **breaks the agent loop**. The planner must decide: add a server HTTP/JSON endpoint for run.sh to query, OR keep writing `caretaker.log` in parallel (defeats purpose), OR modify run.sh to query SQLite via node CLI.
+- **Observation rate**: task spec says 0.1Hz (1 per 10s); browser currently sends at ~1Hz. The server needs to downsample in `handleStateMessage()` -- only write to DB every 10th call (or time-gate to 10s intervals).
+- **`tools/query-log.sh`** uses DuckDB on `caretaker.log`. After migration it will break, but T8.7 replaces it with SQLite queries. The task description does not require updating `query-log.sh` -- leave it or document it as deprecated.
 
 ## Relevant Files
 
-| File | Role for T9.2 |
-|------|--------------|
-| `css/main.css` | All layout: add `@media (max-width: 768px)` block, `env(safe-area-inset-*)` padding, `touch-action: none` on `#canvas`, drawer styles for neuron panel, hamburger/sidebar toggle |
-| `index.html` | Viewport meta already added in T9.1. Add hamburger button markup, drawer wrapper for `#left-panel`, sidebar overlay |
-| `js/main.js` | `bottomBound = window.innerHeight - 210` at line 1677 -- must become dynamic (read panel height). `topBound = 44` at line 1676 -- must account for safe area on iOS. Canvas resize function at line 1849. Food placement clamp at line 650 uses hardcoded `44`. Touch handlers at 622-642. |
-| `ios/FlyBrain/ContentView.swift` | Add status bar style config (`preferredStatusBarStyle`), verify `.ignoresSafeArea()` propagates correctly, potentially set `overrideUserInterfaceStyle` if desired. Swift-side CSS env() injection for safe-area-inset may be needed if WKWebView doesn't expose it automatically. |
-| `ios/FlyBrain/Info.plist` | Orientation keys already set (portrait + landscape left/right). `UIRequiresFullScreen = false` already set. No changes needed here. |
-| `js/brain3d.js` | `_onResize` at line 437 reads `Brain3D._container.clientHeight` -- works correctly when overlay position changes. CSS `#brain3d-overlay` has `bottom: 210px` hardcoded at `css/main.css:528`. Must update. |
-| `js/neuro-renderer.js` | Reads container `getBoundingClientRect()` for canvas sizing -- works correctly as long as CSS layout is correct. No hardcoded constants to change here. |
+| File | Role |
+|------|------|
+| `server/caretaker.js` | **MODIFY** -- replace `logStream`/`writeLog()` with `db.js` calls; add observation rate-limiting |
+| `server/db.js` | **CREATE** -- schema DDL + prepared-statement query module |
+| `server/migrate-logs.js` | **CREATE** -- reads `caretaker.log`, inserts rows into new DB tables |
+| `package.json` | **MODIFY** -- add `"better-sqlite3": "^9.x"` to dependencies |
+| `agent/run.sh` | **ASSESS** -- currently reads from `caretaker.log`; will break post-migration |
 
 ## Architecture Notes
 
-**Layout structure (desktop):**
-```
-#toolbar (fixed, top:0, height:44px)
-#canvas (fills window, behind toolbar and left-panel)
-#left-panel (fixed, bottom:0, height:210px -- neuron viz + drive meters)
-#brain3d-overlay (fixed, top:44px, bottom:210px)
-#education-panel (fixed, right slide-out, top:44px)
-```
+### caretaker.js structure
+- Three globals track last state: `lastState`, `lastActionTime`, `lastActionType`, `preFearLevel`
+- `writeLog(entry)` -- single point for all writes. This is the only function to replace.
+- `detectIncidents(state)` -- called from `handleStateMessage()` after every observation. Writes incidents inline.
+- `handleStdinCommand(line)` -- writes action entries. Called from readline on stdin.
+- WebSocket single-client (`browserSocket`). No HTTP API exists today.
 
-**Hardcoded boundary values in JS (must become dynamic):**
-- `main.js:1676` -- `topBound = 44` (toolbar height)
-- `main.js:1677` -- `bottomBound = window.innerHeight - 210` (panel height)
-- `main.js:649` -- `foodMinY = 44` (toolbar height guard)
+### Log entry shapes (what migrate-logs.js must parse)
+- `observation`: `{type, timestamp, data: {drives, behavior, position, firingStats, food, environment}}`
+- `action`: `{type, timestamp, action, params, reasoning, flyState}`
+- `incident`: `{type, timestamp, incident: "scared_the_fly"|"forgot_to_feed", ...flyState fields}`
+- No `chat_message` entries exist yet (new table only).
 
-**Canvas sizing**: `main.js:1849-1866` -- IIFE sets canvas pixel dimensions to `window.innerWidth * dpr` x `window.innerHeight * dpr`. No awareness of toolbar/panel -- the canvas occupies the full viewport but content drawn at (fly.x, fly.y) stays within the computed bounds.
-
-**Brain tick rate**: `setInterval(updateBrain, 500)` = 2Hz behavioral update, but the sim-worker fires at ~10Hz internally. RAF loop runs the render at ~60fps. For "Lite mode", the most impactful lever is reducing the neuro-renderer update rate (currently every RAF frame -- 60fps) by skipping frames when only idle neurons exist. The `brainTickId` interval is 500ms, not 100ms -- the "10Hz" in the task description refers to the sim-worker tick in `js/sim-worker.js`.
-
-**Safe area in WKWebView**: iOS 11+ WKWebView inside a SwiftUI app that calls `.ignoresSafeArea()` WILL expose `env(safe-area-inset-*)` CSS variables to the web content -- no Swift injection needed. However, the HTML `<meta name="viewport">` must include `viewport-fit=cover` for the env() values to be non-zero. T9.1 set `maximum-scale=1.0, user-scalable=no` but did NOT include `viewport-fit=cover`. This is required.
-
-**OrbitControls touch**: Confirmed working via `onTouchStart` in vendored file. Default config maps 1-finger -> ROTATE, 2-finger -> DOLLY_PAN. No JS changes needed.
+### daily_scores computation
+Task spec: composite score, total feeds, avg hunger, fear incidents, avg response time. No formula given. Planner must define one. Suggested: `score = 100 - (avg_hunger*30) - (fear_incidents*5) - (missed_feeds*10)`. Runs on `setInterval(5 * 60 * 1000)` in `caretaker.js`.
 
 ## Suggested Approach
 
-1. **`index.html`**: Add `viewport-fit=cover` to the existing viewport meta. Add hamburger button `#sidebar-toggle` in toolbar. Wrap `#left-panel` in a `.drawer-container` or add `.drawer` class for mobile slide-up. Add a backdrop overlay `#drawer-backdrop` for tap-to-close.
+1. **`server/db.js`** -- export `openDb(dbPath)` returning a db handle with:
+   - `createSchema()` -- CREATE TABLE IF NOT EXISTS for all 5 tables
+   - Prepared insert statements: `insertObservation`, `insertAction`, `insertIncident`, `insertChatMessage`, `upsertDailyScore`
+   - `getLatestObservation()` -- for run.sh replacement
+   - `computeDailyScore(date)` -- aggregates from observations/actions/incidents
 
-2. **`css/main.css`**:
-   - Add `touch-action: none` to `#canvas` (unconditionally -- not just mobile).
-   - Add `padding-top: env(safe-area-inset-top)` to `#toolbar`, and `padding-bottom: env(safe-area-inset-bottom)` to `#left-panel` (drawer).
-   - `@media (max-width: 768px)`: toolbar becomes compact horizontal strip (reduce padding, smaller buttons, possibly icon-only with labels); canvas fills full viewport minus the compact toolbar; `#left-panel` transforms to a slide-up drawer (position:fixed, bottom, translate Y to show/hide, full-width, max-height ~50vh); `#education-panel` becomes full-width slide-up instead of right sidebar; hide github/center/clear icons behind the hamburger or just hide on mobile.
-   - Add landscape orientation handling: `@media (orientation: landscape) and (max-width: 926px)` -- neuron drawer sits beside canvas (right side, fixed width) instead of below.
-   - Update `#brain3d-overlay` bottom from `210px` to `0` on mobile (since panel is a drawer, not always visible).
+2. **`server/caretaker.js`** -- replace `writeLog()` body with `db.insertObservation()` / `db.insertAction()` / `db.insertIncident()` calls. Add time-gate for 0.1Hz observation sampling. Add `setInterval` for daily score computation. Keep `writeStdout()` unchanged (agent reads stdout, not the log file). To fix run.sh: add a `latest_state` JSON endpoint over HTTP on the same port, OR add a simple `node server/get-state.js` CLI wrapper that queries SQLite.
 
-3. **`js/main.js`**: Replace hardcoded `44` and `210` boundary constants with a helper function `getLayoutBounds()` that reads `document.getElementById('toolbar').offsetHeight` and `document.getElementById('left-panel').offsetHeight` (returns 0 when panel is hidden as drawer). This ensures bounds are correct in both desktop and mobile layouts.
+3. **`server/migrate-logs.js`** -- standalone script: open `caretaker.log`, parse line by line, batch-insert into all tables. Handle missing/null fields gracefully (some log entries lack `reasoning`, incident entries vary in shape).
 
-4. **`ios/FlyBrain/ContentView.swift`**: Add `UIViewControllerRepresentable` wrapper or use SwiftUI `.statusBar(hidden: false)` + `.preferredColorScheme(.dark)`. The existing `.ignoresSafeArea()` on the SwiftUI view already causes WKWebView to extend under the status bar. The background is already set to `.black`. May want to set `webView.backgroundColor = UIColor(red: 0.102, green: 0.102, blue: 0.180, alpha: 1.0)` to match `--bg` color during load.
-
-5. **Lite mode**: Add a `#liteBtn` button to toolbar (mobile-only via CSS `display:none` on desktop). JS: `liteModeActive` flag that when true, sets `brainTickId = setInterval(updateBrain, 1000)` (1Hz vs 2Hz -- the 500ms tick is already the slow path) and skips neuro-renderer WebGL updates when no neurons fired (`BRAIN.latestFireState` is all-zero). The neuro-renderer render loop already does brightness decay on every frame; skip `gl.bufferSubData` + `gl.drawArrays` when `maxBrightness < 0.01`.
+4. **run.sh fix** -- simplest approach: add a tiny HTTP GET `/state` endpoint to `caretaker.js` that returns `JSON.stringify(lastState)`. Then change `get_latest_state()` in run.sh to `curl -sf http://localhost:$PORT/state`. This is minimal and doesn't require run.sh to know about SQLite.
 
 ## Risks and Constraints (read this last)
 
-- **`viewport-fit=cover` required**: Without it, `env(safe-area-inset-top)` returns 0 in WKWebView and the status bar overlap fix won't work. The existing viewport meta in `index.html` must be extended.
-- **Hardcoded `210` in JS**: `bottomBound` at `main.js:1677` uses `window.innerHeight - 210`. On mobile where the panel is a drawer (height=0 when closed), the fly will be artificially constrained to the top 70% of the screen. Fix is required before the fly behavior is correct on mobile.
-- **`brain3d-overlay` bottom is `210px` in CSS**: When the panel becomes a drawer, this overlay will leave a 210px dead zone at the bottom of the 3D view on mobile. Must set `bottom: 0` for mobile.
-- **Touch events and `passive: false`**: The existing touchstart/touchmove handlers use `{ passive: false }` + `preventDefault()`. This should prevent iOS from intercepting scroll/zoom. The addition of `touch-action: none` via CSS provides a complementary CSS-level hint. Both are needed.
-- **WKWebView and `contentInsetAdjustmentBehavior = .never`**: This is already set in T9.1 ContentView.swift. Combined with `.ignoresSafeArea()` in SwiftUI and `viewport-fit=cover`, the web content will extend edge-to-edge. The CSS env() values will correctly report the safe area insets, so this is the right approach.
-- **Lite mode lever**: The "10Hz tick rate" mentioned in the task refers to the sim-worker in `sim-worker.js` (which uses `setInterval(tick, 100)`). The main brain tick is 500ms (2Hz). Halving the sim-worker rate to 5Hz means editing `sim-worker.js:setInterval(tick, 200)` -- the planner should be aware it's a separate file from `main.js`.
-- **Caretaker bridge**: `js/caretaker-bridge.js` connects to a WebSocket server at `ws://localhost:3001`. On iPhone (no local server), the WebSocket will fail to connect silently (it already handles connection errors). No issue, but worth noting.
-- **Neuro-renderer WebGL**: On iPhone, WebGL is hardware-accelerated but the 139K-point draw call may be ~15-20ms on older devices. The render loop runs every RAF frame. Skipping frames when idle (brightness all < 0.01) is a safe optimization.
+- **better-sqlite3 native module**: Requires node-gyp / C++ build tools. On macOS with Node v25 this typically works with Xcode CLI tools installed. If the build fails, consider `sql.js` (pure JS, no native binding) as a fallback -- but `better-sqlite3` is preferred for synchronous API.
+- **Observation volume**: 3,161 observations for a short session suggests ~1Hz current rate. At 0.1Hz the DB will stay manageable. But migration inserts ALL existing 1Hz observations -- that's fine for a one-time script.
+- **Synchronous writes**: `better-sqlite3` is synchronous (unlike `node-sqlite3`). This is correct here -- the server is single-threaded and sync writes avoid write-ordering bugs. No WAL mode needed unless file sharing with query-log.sh simultaneously.
+- **`daily_scores` for partial days**: migration script inserts historical observations but daily scores for past days need to be computed retroactively. The migrate script should also compute historical `daily_scores` rows after bulk-inserting observations.
+- **Incident deduplication**: `detectIncidents()` currently fires `forgot_to_feed` on EVERY observation when hunger > 0.9 and food is empty (1,943 incidents for 3,161 observations). The migration will faithfully insert all 1,943 rows. The new DB code should consider rate-limiting: only insert a new `forgot_to_feed` if none was inserted in the last 60s.
+- **`caretaker-decisions.log`**: `run.sh` writes its own separate decisions log. This is NOT part of `caretaker.js` and is not in scope for T8.5.

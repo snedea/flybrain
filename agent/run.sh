@@ -5,7 +5,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 POLICY="$SCRIPT_DIR/caretaker-policy.md"
 SERVER="$PROJECT_DIR/server/caretaker.js"
-LOG="$PROJECT_DIR/caretaker.log"
 DECISION_LOG="$PROJECT_DIR/caretaker-decisions.log"
 FIFO="/tmp/caretaker_cmd_pipe_$$"
 LOOP_INTERVAL=5
@@ -58,16 +57,14 @@ start_server() {
 }
 
 get_latest_state() {
-  if [[ ! -f "$LOG" ]]; then
+  local PORT="${CARETAKER_PORT:-7600}"
+  local RESULT
+  RESULT=$(curl -sf "http://localhost:${PORT}/state" 2>/dev/null) || true
+  if [[ -z "$RESULT" || "$RESULT" == "null" ]]; then
     echo ""
     return 1
   fi
-  STATE_LINE=$(grep '"type":"observation"' "$LOG" | tail -1)
-  if [[ -z "$STATE_LINE" ]]; then
-    echo ""
-    return 1
-  fi
-  echo "$STATE_LINE" | jq -r '.data'
+  echo "$RESULT"
   return 0
 }
 
@@ -87,8 +84,10 @@ check_fear_backoff() {
 }
 
 send_command() {
-  echo "$1" >&3
-  echo "{\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"command\":$1}" >> "$DECISION_LOG"
+  local compact
+  compact=$(echo "$1" | jq -c '.')
+  echo "$compact" >&3
+  echo "{\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"command\":$compact}" >> "$DECISION_LOG"
 }
 
 log_decision() {
@@ -143,12 +142,13 @@ ${STATE}"
     --no-session-persistence \
     --model haiku \
     --output-format json \
-    --max-budget-usd 0.50 \
     "$PROMPT" \
     2>/dev/null) || true
 
-  # Extract the result text from claude's JSON envelope, then parse as our action JSON
-  RESPONSE=$(echo "$RAW_RESPONSE" | jq -r '.result // empty' 2>/dev/null | jq '.' 2>/dev/null) || true
+  # Extract the result text from claude's JSON envelope, strip markdown fences, parse as JSON
+  RESULT_TEXT=$(echo "$RAW_RESPONSE" | jq -r '.result // empty' 2>/dev/null) || true
+  # Strip ```json ... ``` fences (handles escaped newlines from jq -r output)
+  RESPONSE=$(echo "$RESULT_TEXT" | sed 's/^```json[[:space:]]*//;s/[[:space:]]*```[[:space:]]*$//' | jq -c '.' 2>/dev/null) || true
 
   if [[ -z "$RESPONSE" || "$RESPONSE" == "null" ]]; then
     echo "[caretaker] Could not parse response, skipping" >&2

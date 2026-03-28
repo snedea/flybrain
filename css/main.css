@@ -323,7 +323,7 @@ canvas {
     left: 0;
     right: 0;
     bottom: 0;
-    height: 210px;
+    height: 180px;
     padding-bottom: env(safe-area-inset-bottom, 0px);
     background: var(--surface-alpha);
     border-top: 1px solid var(--border);
@@ -361,7 +361,7 @@ canvas {
 
 #drive-meters {
     flex-shrink: 0;
-    width: 120px;
+    width: 170px;
     display: flex;
     flex-direction: column;
     gap: 0.15rem;
@@ -373,14 +373,14 @@ canvas {
 .drive-row {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.35rem;
     line-height: 1;
 }
 
 .drive-label {
-    font-size: 0.7rem;
+    font-size: 0.65rem;
     color: var(--text-muted);
-    width: 42px;
+    width: auto;
     flex-shrink: 0;
     text-align: right;
 }
@@ -421,11 +421,12 @@ canvas {
 }
 
 .behavior-state {
-    font-size: 0.7rem;
+    font-size: 0.6rem;
     color: var(--accent);
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.03em;
     font-weight: 600;
+    white-space: nowrap;
 }
 
 /* --- Help Overlay --- */
@@ -607,7 +608,7 @@ canvas {
     top: calc(44px + env(safe-area-inset-top, 0px));
     left: 0;
     right: 0;
-    bottom: 210px;
+    bottom: 180px;
     z-index: 15;
     background: #0a0a1a;
 }
@@ -1030,20 +1031,20 @@ canvas {
         display: none;
     }
 
-    /* --- Bottom panel becomes a slide-up drawer --- */
+    /* --- Bottom panel: always visible, compact on mobile --- */
     #left-panel {
-        height: auto;
-        max-height: 50vh;
-        transform: translateY(100%);
-        transition: transform 0.3s ease;
-        border-radius: var(--radius) var(--radius) 0 0;
-        flex-direction: column;
-        padding-top: 0.5rem;
+        height: 120px;
+        flex-direction: row;
+        padding-top: 0.3rem;
         z-index: 21;
+        border-radius: 0;
+        transform: none;
+        transition: none;
     }
 
     #left-panel.drawer-open {
-        transform: translateY(0);
+        height: 50vh;
+        flex-direction: column;
     }
 
     /* Drawer handle indicator */
@@ -1054,12 +1055,27 @@ canvas {
         height: 4px;
         background: var(--border);
         border-radius: 2px;
-        margin: 0 auto 0.5rem auto;
+        margin: 0 auto 0.25rem auto;
         flex-shrink: 0;
+        position: absolute;
+        top: 4px;
+        left: 50%;
+        transform: translateX(-50%);
     }
 
-    /* Drive meters sit below connectome instead of beside */
+    /* Drive meters sit beside connectome, compact */
     #drive-meters {
+        width: 100px;
+        border-left: 1px solid var(--border);
+        border-top: none;
+        padding-left: 0.4rem;
+        padding-top: 0;
+        flex-direction: column;
+        flex-wrap: nowrap;
+        gap: 0.1rem;
+    }
+
+    #drive-meters.drawer-open {
         width: auto;
         border-left: none;
         border-top: 1px solid var(--border);
@@ -1071,8 +1087,7 @@ canvas {
     }
 
     .drive-row {
-        flex: 1 1 40%;
-        min-width: 100px;
+        min-width: 0;
     }
 
     /* --- Brain 3D overlay goes edge-to-edge on mobile --- */
