@@ -1,72 +1,86 @@
-# Scout Report: D68.2
+# Scout Report: T8.2
 
 ## Key Facts (read this first)
 
-- **Tech stack**: Vanilla JS (ES5), no build tools. Tests use Node.js `vm.runInThisContext` to load browser JS files sequentially into shared globals.
-- **Current test count**: 69 tests, all passing (`node tests/run-node.js`).
-- **Load order in run-node.js**: `constants.js` → `connectome.js` (sets `BRAIN._testMode=true`) → `brain-worker-bridge.js` → `fly-logic.js` → `tests/tests.js`. Neither `main.js` nor `sim-worker.js` is loaded.
-- **main.js is untestable as-is**: It executes `document.getElementById(...).onclick` at top level -- loading it in Node crashes immediately. Pure functions must be extracted to `fly-logic.js` (which IS loaded) or a new module.
-- **sim-worker.js uses Worker APIs**: References `self.postMessage` and `performance.now()` -- requires mocks in run-node.js to load at all, OR extract stats logic inline.
+- **T8.1 is fully complete**: `server/caretaker.js` (WebSocket + stdin/stdout relay) and `js/caretaker-bridge.js` (browser-side client) are built and already loaded in `index.html:99`. No modifications to existing files are needed.
+- **Only two new files required**: `agent/caretaker-policy.md` and `agent/run.sh`. The `agent/` directory does not exist -- it must be created.
+- **Claude Code CLI v2.1.86 is available** (`command claude`). Key flags for this task: `-p/--print` (non-interactive), `--system-prompt <string>` (system prompt as a string, NOT a file path), `--no-session-persistence` (avoid session file accumulation per loop iteration).
+- **Server protocol (critical for run.sh)**: stdin expects JSON lines `{action, params, reasoning}`; stdout emits JSON lines `{type:'state', data:{...}}`. The server also writes every observation + action to `caretaker.log` as JSON Lines. The agent can read latest state from `caretaker.log` instead of piping server stdout.
+- **State schema** (from `js/caretaker-bridge.js:7-18`): drives `{hunger, fear, fatigue, curiosity, groom}` (0.0-1.0), behavior `{current, enterTime}`, position `{x, y, facingDir, speed}`, food `[{x, y, radius, eaten}]`, environment `{lightLevel: 0-2, temperature: 0-2}`.
 
 ## Relevant Files
 
-- `tests/tests.js` -- Test file to add new `test_*` functions to; runner discovers all `test_` globals
-- `tests/run-node.js` -- Load sequence; must add any new file loads and mocks (e.g. `self`, `performance`) here
-- `js/fly-logic.js` -- Already loaded in tests; home for extracted pure functions from main.js
-- `js/main.js` -- Contains food-seeking (line 856-865), feed approach (line 897-908), food consumption (line 1745-1788); `nearestFood()` at line 751
-- `js/connectome.js` -- `motorcontrol()` reads DN_STARTLE from `nextState` at line 485 (already correct)
-- `js/sim-worker.js` -- Stats accumulation at lines 358-384; reset handler at lines 460-478; `STATS_INTERVAL=20` constant at line 32
+| File | Role |
+|------|------|
+| `server/caretaker.js` | Server: relays state from browser to stdout, commands from stdin to browser. Logs to `caretaker.log`. Do NOT modify. |
+| `js/caretaker-bridge.js` | Browser client: defines `getState()` schema, `executeCommand()` dispatch, command set. Do NOT modify. |
+| `index.html:99` | Already loads `caretaker-bridge.js`. No change needed. |
+| `package.json` | Has `"caretaker": "node server/caretaker.js"` script. run.sh can use `node server/caretaker.js` directly. |
 
 ## Architecture Notes
 
-**Test discovery**: `runAllTests()` scans the global scope for functions starting with `test_`. Tests added to `tests.js` are auto-discovered.
+**Data flow:**
+```
+Browser (caretaker-bridge.js)
+  -> WebSocket -> server/caretaker.js
+    -> stdout JSON lines (type:'state') + caretaker.log writes
+    <- stdin JSON lines {action, params, reasoning}
+  <- WebSocket command dispatch
+```
 
-**Global state shared across files**: `fly`, `food`, `behavior`, `BRAIN` are globals. `fly-logic.js` functions (`evaluateBehaviorEntry`, `hasNearbyFood`, `normalizeAngle`) reference these globals directly. Extracted functions from `main.js` can follow the same pattern.
+**Command set** (from `js/caretaker-bridge.js:34-71`):
+- `place_food` params: `{x, y}` -- coordinates within canvas bounds (x >= 0, y >= 44)
+- `set_light` params: `{level: "bright"|"dim"|"dark"}`
+- `set_temp` params: `{level: "neutral"|"warm"|"cool"}`
+- `touch` params: `{x, y}` (optional -- omit to touch fly center)
+- `blow_wind` params: `{strength: 0-1, direction: deg}`
+- `clear_food` params: `{}`
 
-**Food proximity model**:
-- `BRAIN.stimulate.foodNearby` = food within 50px (set by main.js update loop, line 1750)
-- `BRAIN.stimulate.foodContact` = food within 20px (line 1752)
-- `hasNearbyFood()` (fly-logic.js:41) reads the `food` array directly checking 50px -- independent of `BRAIN.stimulate.foodNearby`
+**Environment state mapping** (from `js/caretaker-bridge.js:33-34`):
+- `lightLevel` in state: 0=bright, 1=dim, 2=dark
+- `temperature` in state: 0=neutral, 1=warm, 2=cool
 
-**Hunger bypass for feed entry** (fly-logic.js:64-66): `evaluateBehaviorEntry()` already testable. Condition: `(BRAIN.drives.hunger > 0.7 && BRAIN.stimulate.foodNearby) || accumFeed > 8`, PLUS `hasNearbyFood()` (food within 50px in `food` array). Tests must set BOTH `BRAIN.stimulate.foodNearby = true` AND place a food item within 50px of `fly`.
+**Behavior time tracking**: `behavior.enterTime` is `Date.now()` ms. To detect idle > 120s: `(Date.now() - enterTime) / 1000 > 120` and `behavior.current === 'idle'`.
 
-**Food-seeking direction** (main.js:856-865): Uses `facingDir` (not `targetDir`) as the base for `angleDiffToFood`. `seekStrength = Math.min(1, hunger)`. Result: `targetDir = facingDir + angleDiffToFood * seekStrength`. Can be extracted as a pure function taking `(flyPos, foodPos, hunger, facingDirValue)` → `{targetDir, seekStrength}`.
+**Fear spike backoff tracking**: Must be tracked in shell script state (timestamp of last fear > 0.5 detection), since each `claude -p` call is stateless.
 
-**Feed approach speed**: Hardcoded `targetSpeed = 0.25` at main.js:903 inside the `'feed'` state branch of `computeMovementForBehavior()`.
+**Loop architecture for run.sh**:
+1. Create a named FIFO (`/tmp/caretaker_cmd_pipe`) for server stdin
+2. Start `node server/caretaker.js < FIFO &` (background)
+3. Open FIFO for writing with `exec 3>FIFO` to keep it open (prevents server stdin EOF)
+4. Every 5s: read last `"type":"observation"` line from `caretaker.log`, invoke `claude -p --system-prompt "$(cat policy)" --no-session-persistence` with state, parse response, write to fd 3
 
-**Food consumption** (main.js:1754-1787): Progress = `(food.eaten || 0) + elapsed / food.feedDuration`. When fly leaves contact range (>20px), `eaten` is updated from elapsed time and `feedStart` is reset to 0. Food is removed when `progress >= 1`. Uses `Date.now()` -- tests need to control time or set explicit `feedStart`/`feedDuration`/`eaten` values and compute progress manually.
-
-**DN_STARTLE state** (connectome.js:485): `BRAIN.accumStartle = BRAIN.postSynaptic['DN_STARTLE'][BRAIN.nextState]` -- reads `nextState` already. Directly testable: set `postSynaptic['DN_STARTLE'][nextState] = X` and `[thisState] = Y`, call `motorcontrol()`, assert `accumStartle === X`.
-
-**sim-worker stats**: Pure arithmetic at lines 362-383. `cumulativeFiredCount += firedNeuronCount`; when `tickTimeSamples >= STATS_INTERVAL`, computes `avgFired = Math.round(cumulativeFiredCount / tickTimeSamples)` and resets. Reset handler (line 476) already clears `cumulativeFiredCount = 0` (D68.1 fix is in place). To test this without Worker environment: mock `self = {postMessage: function(){}}` and `performance = {now: function(){return 0;}}` in run-node.js, then load sim-worker.js. BUT sim-worker.js also defines `tick()` which calls `setTimeout` -- need `setTimeout` mock too. Alternatively, extract the stats accumulation into a standalone testable function.
+**caretaker.log format** (from `server/caretaker.js:17-20,52`):
+- Observation entries: `{"timestamp":"...","type":"observation","data":{state}}`
+- Action entries: `{"timestamp":"...","type":"action","action":"...","params":{},"reasoning":"...",...}`
 
 ## Suggested Approach
 
-**Step 1 -- Extract pure functions into fly-logic.js** (no DOM/Worker deps, already loaded):
-1. `computeFoodSeekDir(flyPos, foodPos, hunger, facingDirValue)` → `{targetDir, seekStrength}` -- extracted from main.js:858-862
-2. `computeFoodProgress(foodItem, now)` → progress value (0..1) -- extracted from main.js:1761
+**`agent/caretaker-policy.md`** -- Write as a system prompt document (not CLAUDE.md format). Include:
+1. Role description (you are a caretaker for a virtual Drosophila)
+2. Decision loop context (called every 5s with current state)
+3. Full policy rules verbatim from task spec
+4. State JSON schema with field descriptions
+5. Output format: single JSON object `{action, params, reasoning}` or `{action: "wait", reasoning}` -- no other output, no markdown, no explanation
+6. Policy application examples (fear > 0.3 -> set_temp neutral; hunger > 0.6 + no food -> place_food near fly)
+7. Coordinate calculation guidance: place food 60-80px from fly in a random cardinal direction, not on top
 
-**Step 2 -- sim-worker.js stats**: Simplest path is to add mocks to run-node.js (`global.self`, `global.performance`, `global.setTimeout`) and load sim-worker.js as an additional file. Then expose module-level vars (`cumulativeFiredCount`, `tickTimeSamples`, etc.) via a test hook object (similar to `BRAIN._bridge`). Alternative: extract a `trackFiredCount(n)` function and expose it.
-
-**Step 3 -- Add tests to tests.js**:
-- (a) food-seeking: call extracted `computeFoodSeekDir()`, verify `targetDir` is based on `facingDir + offset`, `seekStrength = hunger` when hunger < 1
-- (b) feed entry bypass: set hunger=0.8, `BRAIN.stimulate.foodNearby=true`, food at 30px → returns 'feed'; hunger=0.65 same setup → does NOT return 'feed' via bypass (requires accumFeed > 8)
-- (c) food consumption: construct food item with known `feedStart`/`feedDuration`/`eaten`; call extracted progress function; verify eaten accumulates across exits; verify removal at progress >= 1
-- (d) sim-worker stats: drive fake ticks (increment `tickTimeSamples`, call `cumulativeFiredCount` accumulator), verify avg and reset; verify reset handler zeroes it
-- (e) DN_STARTLE: set `postSynaptic['DN_STARTLE'][nextState]=50`, `[thisState]=5`, call `motorcontrol()`, assert `accumStartle === 50`
-
-**Step 4 -- Update run-node.js** to load any new extracted functions file and/or sim-worker with mocks.
+**`agent/run.sh`** -- Shell script:
+1. Resolve paths relative to script location (use `$(cd "$(dirname "$0")/.." && pwd)` for flybrain root)
+2. Check `node` is available; check `caretaker.log` writability
+3. FIFO creation + server startup with SIGTERM trap for cleanup
+4. Fear-backoff state: track `FEAR_SPIKE_TIME` variable updated when fear > 0.5 detected
+5. Parse `claude -p` response with `jq` (require jq; if absent, use `python3 -c` fallback)
+6. Validate action field is in allowed set before sending to FIFO
+7. Log each decision to `caretaker-decisions.log` alongside `caretaker.log`
 
 ## Risks and Constraints (read this last)
 
-1. **sim-worker.js load complexity**: Even with mocks for `self`, `performance`, `setTimeout`, the `tick()` function uses `decompressGzip` and many other globals. Only the stats-related variables need to be exercised -- consider a minimal test harness that simulates just the stats accumulation loop rather than loading the full worker.
-
-2. **food consumption is time-based**: `Date.now()` is embedded in the production loop. Tests should mock `Date.now` (like `withMockedRandom`) or use the extracted function with explicit time params.
-
-3. **nearestFood() is in main.js** (line 751): If food-seeking tests need it, either re-implement inline in the test or extract to fly-logic.js as well. The function uses globals `fly` and `food` which are already available in the test context.
-
-4. **Feed approach speed is a bare literal `0.25`**: No named constant exists. The test can only assert the value by calling `computeMovementForBehavior()` -- but that function uses global `state = behavior.current`, `speed`, `targetSpeed`, `speedChangeInterval` -- all undefined in Node. Safer to assert the constant value by extracting `FEED_APPROACH_SPEED = 0.25` or by testing a small extracted helper.
-
-5. **DN_STARTLE test (e) is straightforward** -- only needs `resetBrainState()` + direct manipulation of `postSynaptic` + `motorcontrol()` call. No extraction needed.
-
-6. **D68.1 is already merged**: `cumulativeFiredCount = 0` is present in the reset handler (sim-worker.js:476). The test for (d) should verify this works; it doesn't need to fix anything.
+- **`--system-prompt` takes a string, not a file path**: run.sh must do `--system-prompt "$(cat "$POLICY")"`. Quotes inside the policy file must not break the shell expansion -- use single-line substitution or a temp file approach. Safest: write policy to a temp file and use command substitution.
+- **FIFO deadlock**: `mkfifo` + `node ... < FIFO` will block until a writer opens FIFO. The `exec 3>FIFO` line in the script must come *after* the node backgrounded process has started and before the loop. Actually: node opens FIFO for read when it starts, blocking until a writer appears; exec 3>FIFO provides the writer. Order: node background first, then exec -- this should work but needs to account for node startup delay.
+- **claude -p startup time**: Each loop iteration forks a new Claude Code process (~1-3s startup). With a 5s sleep, real decision frequency will be ~5s + startup. That's acceptable per spec.
+- **caretaker.log may not exist on first loop iteration**: Guard with `[[ -f "$LOG" ]]` before reading.
+- **No browser connected yet**: Server will still receive stdin commands but `action_ack` will show `success: false, error: 'no browser connected'`. Agent should handle this gracefully (it's logged, not a fatal error).
+- **Coordinate space**: `place_food` needs canvas-relative coordinates. Canvas spans full window (`window.innerWidth` x `window.innerHeight`). The policy should instruct the agent to compute x/y as fly position + 60-80px offset in a random direction, clamped to [0, innerWidth] x [44, innerHeight]. Since the agent doesn't know canvas size from the state alone, use fly position +/- 80px and trust the bridge's clamp at `js/caretaker-bridge.js:37-38`.
+- **`jq` may not be installed**: run.sh should check for `jq` and fail with a helpful message. Alternative: use `python3 -c "import json,sys; ..."` as fallback.
+- **Claude Code's `command claude`** is a shell function wrapping `command claude "$@"` with a `switch` subcommand override. Use `command claude` not `claude` inside run.sh to bypass the function wrapper.

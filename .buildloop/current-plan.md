@@ -1,375 +1,312 @@
-# Plan: T8.1
-
-Build WebSocket bridge and caretaker server. Three new files + one modification.
+# Plan: T8.2
 
 ## Dependencies
-- list: [`ws@8.18.0`]
-- commands: [`cd /Users/name/homelab/flybrain && npm init -y && npm install ws@8.18.0`]
+- list: none (uses existing `node`, `jq`, and `claude` CLI -- no new packages)
+- commands: none
 
 ## File Operations (in execution order)
 
-### 1. CREATE `package.json`
+### 1. CREATE agent/caretaker-policy.md
 - operation: CREATE
-- reason: Project has no package.json. Needed for the `ws` npm dependency used by `server/caretaker.js`.
+- reason: Define the caretaker policy as a system prompt document that Claude Code receives via `--system-prompt`. This is the "brain" of the caretaker agent -- it tells Claude how to interpret fly state and what actions to take.
 
-#### Content
+#### Content Structure
+
+The file is a markdown document (not code). It is consumed as a string by `claude -p --system-prompt "$(cat agent/caretaker-policy.md)"`. Write it in second-person imperative ("You are..."). It must contain these exact sections in this order:
+
+**Section 1: Role**
+```
+You are a caretaker for a virtual Drosophila (fruit fly) in the FlyBrain simulation. You receive the fly's current state as JSON every ~5 seconds. You decide whether to take an action or wait. You must output exactly one JSON object per invocation -- no markdown, no explanation, no extra text.
+```
+
+**Section 2: Output Format**
+
+Specify the exact JSON output format. Two valid forms:
+
+Action form:
 ```json
+{"action": "<action_name>", "params": {<action_params>}, "reasoning": "<1-2 sentence explanation>"}
+```
+
+Wait form (when no action needed):
+```json
+{"action": "wait", "params": {}, "reasoning": "<1-2 sentence explanation>"}
+```
+
+State that any output not matching this format will break the pipeline. No markdown fences, no preamble, no trailing text.
+
+**Section 3: Available Actions**
+
+List each action with its exact param schema:
+
+| Action | Params | Effect |
+|--------|--------|--------|
+| `place_food` | `{"x": <number>, "y": <number>}` | Places food at canvas coordinates. x >= 0, y >= 44 (toolbar height). |
+| `set_light` | `{"level": "bright"\|"dim"\|"dark"}` | Changes ambient light level. |
+| `set_temp` | `{"level": "neutral"\|"warm"\|"cool"}` | Changes temperature. |
+| `touch` | `{"x": <number>, "y": <number>}` or `{}` | Touches at coordinates, or fly center if omitted. |
+| `blow_wind` | `{"strength": <0-1>, "direction": <degrees>}` | Blows wind. Strength 0-1, direction in degrees. |
+| `clear_food` | `{}` | Removes all food from canvas. |
+
+**Section 4: State Schema**
+
+Document the exact JSON schema the agent receives as its prompt input:
+
+```
 {
-  "name": "flybrain",
-  "version": "1.0.0",
-  "private": true,
-  "description": "Interactive virtual Drosophila",
-  "scripts": {
-    "caretaker": "node server/caretaker.js"
+  "drives": {
+    "hunger": 0.0-1.0,    // increases over time, decreases when fed
+    "fear": 0.0-1.0,      // spikes on touch/wind, decays over ~10s
+    "fatigue": 0.0-1.0,   // increases with activity, decreases at rest
+    "curiosity": 0.0-1.0, // fluctuates randomly
+    "groom": 0.0-1.0      // grooming urge
   },
-  "dependencies": {
-    "ws": "^8.18.0"
+  "behavior": {
+    "current": "idle"|"walk"|"feed"|"groom"|"fly"|"rest"|"explore"|"startle"|"phototaxis",
+    "enterTime": <unix_ms>,   // Date.now() when behavior started
+    "groomLocation": <string> // body part being groomed, if grooming
+  },
+  "position": {
+    "x": <number>,        // canvas x coordinate
+    "y": <number>,        // canvas y coordinate (y >= 44 is below toolbar)
+    "facingDir": <radians>, // direction fly faces
+    "speed": <number>     // current movement speed
+  },
+  "firingStats": {
+    "firedNeurons": <number> // count of neurons that fired recently
+  },
+  "food": [               // array of food items on canvas
+    {"x": <number>, "y": <number>, "radius": <number>, "eaten": <0-1>}
+  ],
+  "environment": {
+    "lightLevel": 0|1|2,  // 0=bright, 1=dim, 2=dark
+    "temperature": 0|1|2  // 0=neutral, 1=warm, 2=cool
   }
 }
 ```
 
-Note: Use `npm init -y` then `npm install ws@8.18.0` to generate the lock file. Then overwrite package.json with the above content (keeping the generated lock file).
+**Section 5: Policy Rules**
 
----
+Write each rule as a numbered item with exact thresholds and the action to take. These are evaluated in priority order (highest priority first):
 
-### 2. CREATE `server/caretaker.js`
+1. **Fear backoff**: If the `FEAR_BACKOFF` flag is present in the input metadata (set by run.sh when fear > 0.5 was detected in the last 30s), output `{"action": "wait", "params": {}, "reasoning": "Backing off -- fear spike detected within last 30s"}`. Do not take any action during backoff.
+
+2. **No stacking stressors**: Never issue `blow_wind`, `touch`, or `set_light` with level `"bright"` in the same decision cycle. If the environment already has `lightLevel: 0` (bright), do not also issue `touch` or `blow_wind`. If the fly's fear > 0.3, do not issue any of these three.
+
+3. **Fear > 0.3 -- comfort the fly**: If `drives.fear > 0.3` and `environment.temperature !== 0`, issue `{"action": "set_temp", "params": {"level": "neutral"}, "reasoning": "Fear elevated at <value>, setting temperature to neutral to reduce stress"}`.
+
+4. **Hunger > 0.6 -- feed the fly**: If `drives.hunger > 0.6` and `food.length === 0` (no food on canvas), place food near the fly but NOT on top of it. Compute food placement as:
+   - Pick a random cardinal offset: one of (+80, 0), (-80, 0), (0, +80), (0, -80)
+   - Add offset to fly position: `x = position.x + offsetX`, `y = position.y + offsetY`
+   - Clamp: `x = max(20, min(x, 800))`, `y = max(64, min(y, 560))`
+   - Issue `{"action": "place_food", "params": {"x": <computed_x>, "y": <computed_y>}, "reasoning": "Hunger at <value>, placing food ~80px from fly"}`
+   - If food already exists on canvas (`food.length > 0`), do NOT place more food. Wait instead.
+
+5. **Fatigue > 0.5 -- dim lights**: If `drives.fatigue > 0.5` and `environment.lightLevel === 0` (bright), issue `{"action": "set_light", "params": {"level": "dim"}, "reasoning": "Fatigue at <value>, dimming lights to encourage rest"}`.
+
+6. **Idle > 120s -- stimulate**: If `behavior.current === "idle"` and `(now - behavior.enterTime) / 1000 > 120` (where `now` is provided in input metadata), vary stimuli to spark curiosity. Alternate between:
+   - If `food.length === 0`: place food (same offset logic as rule 4)
+   - If food already exists: issue a light touch at the fly's position `{"action": "touch", "params": {}, "reasoning": "Idle for >120s, gentle touch to spark curiosity"}`
+   - Only issue the touch if fear < 0.3 (respect rule 2)
+
+7. **Default -- wait**: If no rule triggers, output `{"action": "wait", "params": {}, "reasoning": "All drives within normal range, observing"}`.
+
+**Section 6: Important Notes**
+
+- You receive a single JSON state snapshot. You output a single JSON action. No multi-turn conversation.
+- Clamp coordinates: x in [20, 800], y in [64, 560]. These are safe canvas bounds.
+- Prefer doing nothing over doing something harmful. When in doubt, wait.
+- Never place food at the fly's exact position -- always offset by at least 60px.
+- The `FEAR_BACKOFF` and `CURRENT_TIME` fields are injected by the launch script into your prompt, not part of the state JSON.
+
+### 2. CREATE agent/run.sh
 - operation: CREATE
-- reason: WebSocket server bridging browser state to Claude Code via stdin/stdout, plus JSON Lines logging and incident detection.
+- reason: Shell script that starts the caretaker server, runs the Claude Code decision loop, and manages state between iterations (fear backoff tracking, log reading, command relay).
 
-#### Imports / Dependencies
-```javascript
-var WebSocket = require('ws');
-var http = require('http');
-var fs = require('fs');
-var path = require('path');
-var readline = require('readline');
+#### Shebang and Settings
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
 ```
 
 #### Constants
-```javascript
-var PORT = parseInt(process.env.CARETAKER_PORT, 10) || 7600;
-var LOG_PATH = path.join(__dirname, '..', 'caretaker.log');
+```bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+POLICY="$SCRIPT_DIR/caretaker-policy.md"
+SERVER="$PROJECT_DIR/server/caretaker.js"
+LOG="$PROJECT_DIR/caretaker.log"
+DECISION_LOG="$PROJECT_DIR/caretaker-decisions.log"
+FIFO="/tmp/caretaker_cmd_pipe_$$"
+LOOP_INTERVAL=5
+FEAR_BACKOFF_DURATION=30
+SERVER_PID=""
+FEAR_SPIKE_TIME=0
 ```
 
-#### State Variables
-```javascript
-var logStream = fs.createWriteStream(LOG_PATH, { flags: 'a' });
-var lastState = null;         // most recent fly state from browser
-var lastActionTime = 0;       // timestamp of last Claude action sent
-var lastActionType = null;    // string name of last Claude action
-var preFearLevel = 0;         // fear level before last Claude action
-var browserSocket = null;     // current WebSocket connection (only one browser at a time)
+#### Function: cleanup()
+- signature: `cleanup()`
+- purpose: Kill server process, remove FIFO, close file descriptor
+- logic:
+  1. If `SERVER_PID` is non-empty and process exists (`kill -0 "$SERVER_PID" 2>/dev/null`), send `kill "$SERVER_PID"` and `wait "$SERVER_PID" 2>/dev/null`
+  2. Close fd 3 with `exec 3>&-` (suppress errors)
+  3. Remove FIFO with `rm -f "$FIFO"`
+  4. Print `"[caretaker] Shutdown complete"` to stderr
+- wiring: Registered as trap handler: `trap cleanup EXIT INT TERM`
+
+#### Function: check_deps()
+- signature: `check_deps()`
+- purpose: Verify required commands exist before starting
+- logic:
+  1. Check `command -v node >/dev/null 2>&1` -- if missing, print `"Error: node is required but not found"` to stderr and `exit 1`
+  2. Check `command -v jq >/dev/null 2>&1` -- if missing, print `"Error: jq is required but not found. Install with: brew install jq"` to stderr and `exit 1`
+  3. Check `command -v claude >/dev/null 2>&1` -- if missing, print `"Error: claude CLI is required but not found. Install Claude Code first."` to stderr and `exit 1`
+  4. Check `[[ -f "$POLICY" ]]` -- if missing, print `"Error: Policy file not found at $POLICY"` to stderr and `exit 1`
+  5. Check `[[ -f "$SERVER" ]]` -- if missing, print `"Error: Server not found at $SERVER"` to stderr and `exit 1`
+
+#### Function: start_server()
+- signature: `start_server()`
+- purpose: Create FIFO, start the caretaker server with stdin from FIFO, open FIFO for writing
+- logic:
+  1. `mkfifo "$FIFO"`
+  2. Start server in background: `node "$SERVER" < "$FIFO" &`
+  3. Capture PID: `SERVER_PID=$!`
+  4. Sleep 1 second to let server start and open FIFO for reading: `sleep 1`
+  5. Open FIFO for writing on fd 3: `exec 3>"$FIFO"`
+  6. Print `"[caretaker] Server started (PID $SERVER_PID)"` to stderr
+  7. Sleep 2 more seconds to let server fully initialize WebSocket: `sleep 2`
+  8. Print `"[caretaker] Waiting for browser connection..."` to stderr
+
+#### Function: get_latest_state()
+- signature: `get_latest_state()`
+- purpose: Read the most recent observation from caretaker.log and print the state JSON to stdout
+- logic:
+  1. If `[[ ! -f "$LOG" ]]`, print `""` (empty string) to stdout and return 1
+  2. Read the last observation line: `STATE_LINE=$(grep '"type":"observation"' "$LOG" | tail -1)`
+  3. If `STATE_LINE` is empty, print `""` to stdout and return 1
+  4. Extract the `.data` field: `echo "$STATE_LINE" | jq -r '.data'`
+  5. Return 0
+
+#### Function: check_fear_backoff()
+- signature: `check_fear_backoff(state_json)`
+- purpose: Check if fear > 0.5 in current state and update FEAR_SPIKE_TIME. Return 0 if in backoff, 1 if not.
+- logic:
+  1. Extract fear: `FEAR=$(echo "$1" | jq -r '.drives.fear')`
+  2. Get current time: `NOW=$(date +%s)`
+  3. If fear > 0.5 (use `bc` or awk: `echo "$FEAR > 0.5" | bc -l` returns 1): set `FEAR_SPIKE_TIME=$NOW`
+  4. Compute elapsed: `ELAPSED=$((NOW - FEAR_SPIKE_TIME))`
+  5. If `FEAR_SPIKE_TIME > 0` AND `ELAPSED < $FEAR_BACKOFF_DURATION`: return 0 (in backoff)
+  6. Else: return 1 (not in backoff)
+- note: Use awk for float comparison instead of bc since bc may not be available: `awk "BEGIN {exit !($FEAR > 0.5)}"`
+
+#### Function: send_command()
+- signature: `send_command(json_string)`
+- purpose: Write a command JSON line to the server via fd 3 and log it
+- logic:
+  1. `echo "$1" >&3`
+  2. Append to decision log: `echo "{\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"command\":$1}" >> "$DECISION_LOG"`
+
+#### Function: log_decision()
+- signature: `log_decision(state_json, response_json, in_backoff)`
+- purpose: Write a structured decision log entry
+- logic:
+  1. Construct JSON: `jq -n --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg backoff "$3" --argjson state "$1" --argjson response "$2" '{timestamp: $ts, backoff: ($backoff == "true"), state_summary: {hunger: $state.drives.hunger, fear: $state.drives.fear, fatigue: $state.drives.fatigue, behavior: $state.behavior.current}, response: $response}'`
+  2. Append to `$DECISION_LOG`
+
+#### Main Script Body
+- logic (executed sequentially):
+  1. Call `check_deps`
+  2. Register trap: `trap cleanup EXIT INT TERM`
+  3. Call `start_server`
+  4. Print `"[caretaker] Decision loop starting (interval: ${LOOP_INTERVAL}s)"` to stderr
+  5. Read policy file into variable: `POLICY_CONTENT=$(cat "$POLICY")`
+  6. Enter infinite loop: `while true; do ... done`
+
+#### Main Loop Body (inside `while true`)
+- logic (each iteration):
+  1. Sleep: `sleep "$LOOP_INTERVAL"`
+  2. Check server is still running: `if ! kill -0 "$SERVER_PID" 2>/dev/null; then echo "[caretaker] Server died, exiting" >&2; exit 1; fi`
+  3. Get latest state: `STATE=$(get_latest_state)` -- if return code is non-zero or STATE is empty, print `"[caretaker] No state available yet, waiting..."` to stderr and `continue`
+  4. Check fear backoff: call `check_fear_backoff "$STATE"`. Capture result in `IN_BACKOFF` variable (`true` or `false`).
+  5. Build the prompt string for Claude. The prompt is the state JSON plus metadata:
+     ```bash
+     CURRENT_TIME=$(date +%s%3N)
+     PROMPT="CURRENT_TIME: ${CURRENT_TIME}
+     FEAR_BACKOFF: ${IN_BACKOFF}
+
+     Current fly state:
+     ${STATE}"
+     ```
+  6. Call Claude Code:
+     ```bash
+     RESPONSE=$(command claude -p \
+       --system-prompt "$POLICY_CONTENT" \
+       --no-session-persistence \
+       --model haiku \
+       --max-budget-usd 0.01 \
+       2>/dev/null) || true
+     ```
+     Notes:
+     - Use `command claude` (not bare `claude`) to bypass shell function wrappers
+     - Use `--model haiku` for cost efficiency on a 5s loop (Haiku is fast and cheap for simple policy evaluation)
+     - Use `--max-budget-usd 0.01` as a safety cap per invocation
+     - Redirect stderr to /dev/null to suppress Claude CLI startup noise
+     - `|| true` prevents set -e from exiting on non-zero Claude exit code
+     - The prompt is passed as a positional argument (the state text) after all flags
+  7. Validate response is valid JSON with an `action` field:
+     ```bash
+     ACTION=$(echo "$RESPONSE" | jq -r '.action' 2>/dev/null)
+     if [[ -z "$ACTION" || "$ACTION" == "null" ]]; then
+       echo "[caretaker] Invalid response from Claude, skipping" >&2
+       continue
+     fi
+     ```
+  8. Log the decision: call `log_decision "$STATE" "$RESPONSE" "$IN_BACKOFF"`
+  9. If `ACTION` equals `"wait"`, print `"[caretaker] Action: wait -- $(echo "$RESPONSE" | jq -r '.reasoning')"` to stderr and `continue`
+  10. Validate action is in allowed set:
+      ```bash
+      case "$ACTION" in
+        place_food|set_light|set_temp|touch|blow_wind|clear_food) ;;
+        *) echo "[caretaker] Unknown action '$ACTION', skipping" >&2; continue ;;
+      esac
+      ```
+  11. Send command to server: `send_command "$RESPONSE"`
+  12. Print `"[caretaker] Action: $ACTION -- $(echo "$RESPONSE" | jq -r '.reasoning')"` to stderr
+
+#### Full Prompt Construction Detail
+
+The prompt passed to `claude -p` must be the positional argument (after all flags). The exact invocation:
+
+```bash
+RESPONSE=$(command claude -p \
+  --system-prompt "$POLICY_CONTENT" \
+  --no-session-persistence \
+  --model haiku \
+  --max-budget-usd 0.01 \
+  "$PROMPT" \
+  2>/dev/null) || true
 ```
 
-#### Functions
+Where `$PROMPT` is the state string built in step 5.
 
-- signature: `function writeLog(entry)`
-  - purpose: Append a JSON Lines entry to caretaker.log
-  - logic:
-    1. Set `entry.timestamp = new Date().toISOString()`
-    2. Call `logStream.write(JSON.stringify(entry) + '\n')`
-  - returns: void
-
-- signature: `function writeStdout(obj)`
-  - purpose: Send a JSON line to stdout for Claude Code to read
-  - logic:
-    1. Call `process.stdout.write(JSON.stringify(obj) + '\n')`
-  - returns: void
-
-- signature: `function detectIncidents(state)`
-  - purpose: Check for incidents based on current state and recent actions
-  - logic:
-    1. Extract `fear = state.drives.fear`, `hunger = state.drives.hunger`, `foodCount = state.food.length`
-    2. **Scared the fly**: If `lastActionTime > 0` AND `Date.now() - lastActionTime < 5000` AND `fear - preFearLevel > 0.2`, create incident `{ type: "incident", incident: "scared_the_fly", action: lastActionType, fearBefore: preFearLevel, fearAfter: fear, flyState: state }`. Call `writeLog(incident)`. Call `writeStdout(incident)`. Reset `lastActionTime = 0`.
-    3. **Forgot to feed**: If `hunger > 0.9` AND `foodCount === 0`, create incident `{ type: "incident", incident: "forgot_to_feed", hunger: hunger, flyState: state }`. Call `writeLog(incident)`. Call `writeStdout(incident)`.
-  - returns: void
-
-- signature: `function handleStateMessage(data)`
-  - purpose: Process a state update from the browser
-  - logic:
-    1. Parse `msg = JSON.parse(data)`. If parse fails, return.
-    2. If `msg.type !== 'state'`, return.
-    3. Set `lastState = msg.data`
-    4. Create log entry `{ type: "observation", data: msg.data }`
-    5. Call `writeLog(logEntry)`
-    6. Call `writeStdout({ type: "state", timestamp: new Date().toISOString(), data: msg.data })`
-    7. Call `detectIncidents(msg.data)`
-  - returns: void
-
-- signature: `function handleStdinCommand(line)`
-  - purpose: Process a command line from stdin (from Claude Code)
-  - logic:
-    1. Parse `cmd = JSON.parse(line)`. If parse fails, write error to stderr and return.
-    2. Validate `cmd.action` is one of: `'place_food'`, `'set_light'`, `'set_temp'`, `'touch'`, `'blow_wind'`, `'clear_food'`. If not, write error to stderr and return.
-    3. Record pre-action state: `preFearLevel = lastState ? lastState.drives.fear : 0`
-    4. Set `lastActionTime = Date.now()`
-    5. Set `lastActionType = cmd.action`
-    6. Create log entry `{ type: "action", action: cmd.action, params: cmd.params || {}, reasoning: cmd.reasoning || "", flyState: lastState }`
-    7. Call `writeLog(logEntry)`
-    8. If `browserSocket` is not null and `browserSocket.readyState === WebSocket.OPEN`:
-       - Send `JSON.stringify({ type: "command", action: cmd.action, params: cmd.params || {} })` to `browserSocket`
-       - Call `writeStdout({ type: "action_ack", action: cmd.action, success: true })`
-    9. Else: call `writeStdout({ type: "action_ack", action: cmd.action, success: false, error: "no browser connected" })`
-  - returns: void
-
-#### Server Setup (top-level wiring after function definitions)
-
-1. Create HTTP server: `var server = http.createServer()` (no routes needed, only WebSocket).
-2. Create WebSocket server: `var wss = new WebSocket.Server({ server: server })`.
-3. On `wss` `'connection'` event with callback `function(ws)`:
-   - Set `browserSocket = ws`
-   - Write to stderr: `'[caretaker] Browser connected\n'`
-   - On `ws` `'message'` event: call `handleStateMessage(data.toString())`
-   - On `ws` `'close'` event: set `browserSocket = null`, write to stderr `'[caretaker] Browser disconnected\n'`
-   - On `ws` `'error'` event: write error to stderr
-4. Set up stdin readline:
-   ```javascript
-   var rl = readline.createInterface({ input: process.stdin, terminal: false });
-   rl.on('line', handleStdinCommand);
-   rl.on('close', function() { process.exit(0); });
-   ```
-5. Start server: `server.listen(PORT, function() { process.stderr.write('[caretaker] WebSocket server on port ' + PORT + '\n'); })`
-6. Handle SIGINT/SIGTERM: close `logStream`, close `wss`, call `process.exit(0)`.
-
-#### Error Handling
-- JSON parse errors in `handleStateMessage`: catch and write to stderr, do not crash.
-- JSON parse errors in `handleStdinCommand`: catch and write to stderr, write error JSON to stdout.
-- WebSocket send errors: catch and write to stderr.
-
----
-
-### 3. CREATE `js/caretaker-bridge.js`
-- operation: CREATE
-- reason: Browser-side WebSocket client that serializes fly state at ~1Hz and executes commands received from the server.
-
-#### Design Notes
-- All variables referenced (`fly`, `food`, `behavior`, `BRAIN`, `facingDir`, `speed`, `lightStates`, `lightStateIndex`, `lightLabels`, `tempStates`, `tempStateIndex`, `tempLabels`, `windResetTime`, `touchResetTime`, `applyTouchTool`) are globals defined in `main.js` and `connectome.js`. Since all scripts share the global scope, they are accessible directly.
-- Wrap everything in an IIFE `(function() { ... })()` to avoid polluting global scope with bridge internals.
-- Expose `window.caretakerBridge` for debugging (connection status, manual send).
-
-#### Constants
-```javascript
-var WS_URL = 'ws://' + (location.hostname || 'localhost') + ':7600';
-var STATE_INTERVAL = 1000; // 1Hz state broadcast
-var RECONNECT_DELAY = 3000; // retry after 3s on disconnect
-```
-
-#### State Variables
-```javascript
-var ws = null;
-var stateTimer = null;
-var reconnectTimer = null;
-var connected = false;
-```
-
-#### Functions
-
-- signature: `function getState()`
-  - purpose: Serialize current fly state into a plain object
-  - logic:
-    1. Return object:
-       ```javascript
-       {
-         drives: {
-           hunger: BRAIN.drives.hunger,
-           fear: BRAIN.drives.fear,
-           fatigue: BRAIN.drives.fatigue,
-           curiosity: BRAIN.drives.curiosity,
-           groom: BRAIN.drives.groom
-         },
-         behavior: {
-           current: behavior.current,
-           enterTime: behavior.enterTime,
-           groomLocation: behavior.groomLocation
-         },
-         position: {
-           x: fly.x,
-           y: fly.y,
-           facingDir: facingDir,
-           speed: speed
-         },
-         firingStats: {
-           firedNeurons: BRAIN.workerFiredNeurons || 0
-         },
-         food: food.map(function(f) {
-           return { x: f.x, y: f.y, radius: f.radius, eaten: f.eaten };
-         }),
-         environment: {
-           lightLevel: BRAIN.stimulate.lightLevel,
-           temperature: BRAIN.stimulate.temperature
-         }
-       }
-       ```
-  - returns: plain object with the structure above
-
-- signature: `function sendState()`
-  - purpose: Send current fly state to the WebSocket server
-  - logic:
-    1. If `ws === null` or `ws.readyState !== WebSocket.OPEN`, return.
-    2. Call `ws.send(JSON.stringify({ type: 'state', data: getState() }))`
-  - returns: void
-
-- signature: `function executeCommand(msg)`
-  - purpose: Parse and execute a command received from the server
-  - logic:
-    1. Parse `msg` with `JSON.parse`. If parse fails, log to console.warn and return.
-    2. If `msg.type !== 'command'`, return.
-    3. Extract `action = msg.action`, `params = msg.params || {}`.
-    4. Switch on `action`:
-       - **`'place_food'`**: Push `{ x: params.x, y: params.y, radius: 10, feedStart: 0, feedDuration: 0, eaten: 0 }` onto the global `food` array. Clamp `params.x` to `[0, window.innerWidth]` and `params.y` to `[44, window.innerHeight]` before pushing (44 is toolbar height, matching main.js line 650).
-       - **`'set_light'`**: Validate `params.level` is one of `'bright'`, `'dim'`, `'dark'`. Map to index: `bright=0`, `dim=1`, `dark=2`. Set `lightStateIndex = index`. Set `BRAIN.stimulate.lightLevel = lightStates[index]`. Update button text: `document.getElementById('lightBtn').textContent = 'Light: ' + lightLabels[index]`.
-       - **`'set_temp'`**: Validate `params.level` is one of `'neutral'`, `'warm'`, `'cool'`. Map to index: `neutral=0`, `warm=1`, `cool=2`. Set `tempStateIndex = index`. Set `BRAIN.stimulate.temperature = tempStates[index]`. Update button text: `document.getElementById('tempBtn').textContent = 'Temp: ' + tempLabels[index]`.
-       - **`'touch'`**: Call `applyTouchTool(params.x, params.y)`. Default `params.x` to `fly.x` and `params.y` to `fly.y` if not provided (touch the fly center).
-       - **`'blow_wind'`**: Set `BRAIN.stimulate.wind = true`. Set `BRAIN.stimulate.windStrength = Math.min(1, Math.max(0, params.strength || 0.5))`. Set `BRAIN.stimulate.windDirection = params.direction || 0`. Set `windResetTime = Date.now() + 2000`.
-       - **`'clear_food'`**: Set `food.length = 0` (mutates the global array in-place).
-       - **default**: Log unknown action to console.warn.
-  - returns: void
-
-- signature: `function connect()`
-  - purpose: Establish WebSocket connection to the caretaker server
-  - logic:
-    1. If `reconnectTimer !== null`, call `clearTimeout(reconnectTimer)` and set `reconnectTimer = null`.
-    2. Try to create `ws = new WebSocket(WS_URL)`.
-    3. On `ws.onopen`:
-       - Set `connected = true`
-       - Log to console: `'[caretaker] Connected to ' + WS_URL`
-       - Start state interval: `stateTimer = setInterval(sendState, STATE_INTERVAL)`
-       - Send an initial state immediately: call `sendState()`
-    4. On `ws.onmessage`:
-       - Call `executeCommand(event.data)`
-    5. On `ws.onclose`:
-       - Set `connected = false`
-       - If `stateTimer !== null`, call `clearInterval(stateTimer)` and set `stateTimer = null`.
-       - Log to console: `'[caretaker] Disconnected, reconnecting in ' + (RECONNECT_DELAY / 1000) + 's'`
-       - Set `reconnectTimer = setTimeout(connect, RECONNECT_DELAY)`
-    6. On `ws.onerror`:
-       - Do nothing (onclose will fire after onerror). Prevents console spam.
-  - returns: void
-
-- signature: `function init()`
-  - purpose: Wait for BRAIN to be ready, then connect
-  - logic:
-    1. Check if `typeof BRAIN !== 'undefined' && BRAIN.drives`. If true, call `connect()` and return.
-    2. Otherwise, `setTimeout(init, 500)` (poll until BRAIN is initialized).
-  - returns: void
-
-#### IIFE Bottom (wiring)
-1. Call `init()`.
-2. Expose debug handle: `window.caretakerBridge = { getState: getState, connect: connect, isConnected: function() { return connected; } }`.
-
----
-
-### 4. MODIFY `.gitignore`
-- operation: MODIFY
-- reason: Add `node_modules/` and `caretaker.log` to prevent committing npm deps and log output.
-- anchor: `.vscode/`
-
-#### Change
-Append these two lines to the end of the existing `.gitignore` file:
-
-```
-node_modules/
-caretaker.log
-```
-
-The existing file contains:
-```
-weights.txt
-extract_weights_to_json.py
-.vscode/
-```
-
-After modification:
-```
-weights.txt
-extract_weights_to_json.py
-.vscode/
-node_modules/
-caretaker.log
-```
-
----
-
-### 5. MODIFY `index.html`
-- operation: MODIFY
-- reason: Load `caretaker-bridge.js` after `main.js` so all globals are available.
-- anchor: `<script type="text/javascript" src="./js/main.js?v=7"></script>`
-
-#### Change
-Insert ONE new script tag immediately after the `main.js` script tag:
-
-**Before:**
-```html
-    <script type="text/javascript" src="./js/main.js?v=7"></script>
-</body>
-```
-
-**After:**
-```html
-    <script type="text/javascript" src="./js/main.js?v=7"></script>
-    <script type="text/javascript" src="./js/caretaker-bridge.js?v=7"></script>
-</body>
-```
-
-No other changes to `index.html`.
-
----
-
-## Protocol Reference (for builder context)
-
-### Browser → Server (WebSocket)
-```json
-{"type":"state","data":{"drives":{"hunger":0.3,"fear":0,"fatigue":0,"curiosity":0.5,"groom":0.1},"behavior":{"current":"idle","enterTime":1711540800000,"groomLocation":null},"position":{"x":500,"y":300,"facingDir":0,"speed":0},"firingStats":{"firedNeurons":0},"food":[],"environment":{"lightLevel":1,"temperature":0.5}}}
-```
-
-### Server → Browser (WebSocket)
-```json
-{"type":"command","action":"place_food","params":{"x":100,"y":200}}
-```
-
-### stdin → Server (from Claude Code, one JSON object per line)
-```json
-{"action":"place_food","params":{"x":100,"y":200},"reasoning":"Fly hunger at 0.7, placing food nearby"}
-```
-
-### Server → stdout (to Claude Code, one JSON object per line)
-State update:
-```json
-{"type":"state","timestamp":"2026-03-27T12:00:00.000Z","data":{...same as browser state...}}
-```
-Action acknowledgment:
-```json
-{"type":"action_ack","action":"place_food","success":true}
-```
-Incident:
-```json
-{"type":"incident","timestamp":"2026-03-27T12:00:01.000Z","incident":"scared_the_fly","action":"touch","fearBefore":0.1,"fearAfter":0.6,"flyState":{...}}
-```
-
-### caretaker.log (JSON Lines, all events)
-Each line is a JSON object with `timestamp` (ISO 8601) and `type` (`"observation"`, `"action"`, or `"incident"`).
-
----
+#### File Permissions
+- After creating `agent/run.sh`, make it executable: the builder must run `chmod +x agent/run.sh`
 
 ## Verification
-
-- build: `cd /Users/name/homelab/flybrain && npm install`
-- lint: No linter configured in this project. Verify no syntax errors: `node -c server/caretaker.js`
-- test: `node tests/run-node.js` (existing 69 tests must still pass -- caretaker-bridge.js is NOT loaded in tests, so no impact)
-- smoke:
-  1. Start the server: `node server/caretaker.js` -- verify stderr output: `[caretaker] WebSocket server on port 7600`
-  2. Open `index.html` in a browser -- verify console logs `[caretaker] Connected to ws://localhost:7600` (or `Disconnected, reconnecting in 3s` if server is not running -- no errors either way)
-  3. With both running, type into server stdin: `{"action":"place_food","params":{"x":300,"y":300},"reasoning":"test"}` -- verify stdout outputs an `action_ack` line and a food item appears in the browser
-  4. Verify `caretaker.log` contains JSON Lines with observation and action entries
-  5. Kill server with Ctrl+C -- verify browser logs reconnect message, no errors
+- build: `node -c server/caretaker.js` (syntax check existing server -- should pass, confirms no accidental edits)
+- lint: `bash -n agent/run.sh` (bash syntax check on the new script)
+- test: no existing tests for this subsystem
+- smoke: Run `cat agent/caretaker-policy.md | head -5` and verify it starts with the role description. Run `bash -n agent/run.sh && echo OK` and verify it prints OK. Run `grep -c '"action"' agent/caretaker-policy.md` and verify count is > 5 (policy references actions multiple times). Verify `agent/run.sh` has executable permission with `test -x agent/run.sh && echo executable`.
 
 ## Constraints
-
-- Do NOT modify any existing JS files (`main.js`, `connectome.js`, `fly-logic.js`, `brain-worker-bridge.js`, etc.) -- the bridge reads globals but changes nothing.
-- Do NOT modify CSS -- no UI changes.
-- Do NOT add caretaker-bridge.js to `tests/run-node.js` -- it depends on DOM/WebSocket APIs not available in Node.
-- Do NOT use ES modules (`import`/`export`) -- the project is vanilla ES5 with `var` declarations and no build step. Server file uses `require()` (CommonJS).
-- The `ws` package is the ONLY new npm dependency. Do not add express, socket.io, or any other packages.
-- Do NOT add `.gitignore` entries -- `node_modules/` is already likely gitignored or untracked.
-- `caretaker.log` should NOT be committed. Add `caretaker.log` to `.gitignore` if a `.gitignore` exists, otherwise note it for the user.
-- Keep the server file under 150 lines. Keep the browser bridge under 120 lines. This is a lightweight bridge, not a framework.
+- Do NOT modify any existing files (`server/caretaker.js`, `js/caretaker-bridge.js`, `index.html`, `package.json`). T8.1 is complete and these files must not change.
+- Do NOT create any files outside the `agent/` directory. The only two files to create are `agent/caretaker-policy.md` and `agent/run.sh`.
+- Do NOT install any new npm packages or system dependencies.
+- Do NOT use `--system-prompt-file` -- it does not exist in the Claude CLI. Use `--system-prompt "$POLICY_CONTENT"` where `POLICY_CONTENT` is read via `cat`.
+- The policy file (`caretaker-policy.md`) must be pure prose/markdown -- no shell code, no executable content. It is consumed as a system prompt string.
+- `run.sh` must use `command claude` (not bare `claude`) to avoid shell function interference.
+- The FIFO path must include `$$` (PID) to avoid collisions if multiple instances run: `/tmp/caretaker_cmd_pipe_$$`.
+- Use `--model haiku` for cost efficiency. The caretaker policy is simple enough for Haiku and runs every 5 seconds.
+- All float comparisons in bash must use `awk` (not `bc`), since `bc` is not guaranteed on macOS.
+- Do not add the `agent/` directory to `.gitignore` -- these files should be committed.
+- The `caretaker-policy.md` must NOT contain single quotes that would break `--system-prompt "$POLICY_CONTENT"` shell expansion. Use double quotes or rephrase. Actually: since `POLICY_CONTENT` is in double quotes, single quotes inside are fine. Avoid unescaped backticks, dollar signs, and double quotes inside the policy file, OR ensure the builder reads the policy into a variable before expansion. Safest approach: the policy file should avoid `$`, backticks, and unescaped double quotes. Use words instead of special characters where possible.

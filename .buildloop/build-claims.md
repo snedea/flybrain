@@ -1,43 +1,42 @@
-# Build Claims -- T8.1
+# Build Claims -- T8.2
 
 ## Files Changed
-- [CREATE] package.json -- npm project config with ws@8.18.0 dependency
-- [CREATE] package-lock.json -- auto-generated lockfile from npm install
-- [CREATE] server/caretaker.js -- WebSocket server bridging browser state to Claude Code via stdin/stdout, with JSON Lines logging and incident detection (112 lines)
-- [CREATE] js/caretaker-bridge.js -- Browser-side IIFE that serializes fly state at 1Hz over WebSocket and executes commands from the server (104 lines)
-- [MODIFY] index.html -- Added script tag for caretaker-bridge.js after main.js
-- [MODIFY] .gitignore -- Added node_modules/ and caretaker.log
+- [CREATE] agent/caretaker-policy.md -- Caretaker policy document defining the Claude Code system prompt with role, output format, available actions, state schema, 7 priority-ordered policy rules, and safety notes
+- [CREATE] agent/run.sh -- Bash launch script that starts caretaker server via FIFO, runs a 5s decision loop calling Claude Code with the policy, tracks fear backoff state, validates and relays commands, logs decisions
 
 ## Verification Results
-- Build: PASS (`npm install` -- 0 vulnerabilities)
-- Lint: PASS (`node -c server/caretaker.js` -- no syntax errors)
-- Tests: PASS (`node tests/run-node.js` -- 99 passed / 0 failed / 99 total)
-- Smoke: PASS (server starts on port 7600, stdin commands produce action_ack on stdout, caretaker.log written with timestamped JSON Lines)
+- Build: PASS (node -c server/caretaker.js -- existing server syntax unchanged)
+- Lint: PASS (bash -n agent/run.sh -- no syntax errors)
+- Tests: SKIPPED (no existing test suite for agent subsystem)
+- Smoke: PASS (policy starts with role description, 8 action references found (>5), run.sh is executable)
 
 ## Claims
-- [ ] server/caretaker.js starts a WebSocket server on port 7600 (or CARETAKER_PORT env var)
-- [ ] server/caretaker.js reads JSON commands from stdin and writes JSON responses to stdout
-- [ ] server/caretaker.js validates actions against whitelist: place_food, set_light, set_temp, touch, blow_wind, clear_food
-- [ ] server/caretaker.js forwards commands to connected browser via WebSocket
-- [ ] server/caretaker.js writes all observations, actions, and incidents to caretaker.log as JSON Lines with ISO timestamps
-- [ ] server/caretaker.js detects "scared_the_fly" incident when fear spikes > 0.2 within 5s of a Claude action
-- [ ] server/caretaker.js detects "forgot_to_feed" incident when hunger > 0.9 and food array is empty
-- [ ] server/caretaker.js sends action_ack with success:false and error message when no browser is connected
-- [ ] js/caretaker-bridge.js is wrapped in an IIFE, exposes window.caretakerBridge for debugging
-- [ ] js/caretaker-bridge.js polls for BRAIN initialization before connecting
-- [ ] js/caretaker-bridge.js sends fly state (drives, behavior, position, firingStats, food, environment) at 1Hz
-- [ ] js/caretaker-bridge.js executes all 6 command types: place_food (with coordinate clamping), set_light, set_temp, touch (defaults to fly center), blow_wind, clear_food
-- [ ] js/caretaker-bridge.js auto-reconnects after 3s on disconnect
-- [ ] index.html loads caretaker-bridge.js after main.js
-- [ ] .gitignore includes node_modules/ and caretaker.log
-- [ ] No existing JS files were modified
-- [ ] All 99 existing tests still pass (caretaker-bridge.js is not loaded in Node tests)
-- [ ] server/caretaker.js is under 150 lines (112 lines)
-- [ ] js/caretaker-bridge.js is under 120 lines (104 lines)
+- [ ] agent/caretaker-policy.md contains all 6 sections: Role, Output Format, Available Actions, State Schema, Policy Rules, Important Notes
+- [ ] Policy defines 7 priority-ordered rules: (1) fear backoff, (2) no stacking stressors, (3) fear > 0.3 comfort, (4) hunger > 0.6 feed, (5) fatigue > 0.5 dim lights, (6) idle > 120s stimulate, (7) default wait
+- [ ] Policy output format requires raw JSON only (no markdown fences, no preamble)
+- [ ] Policy specifies food placement offset of 80px in cardinal directions with clamping to [20,800] x [64,560]
+- [ ] Policy forbids placing food at fly's exact position (minimum 60px offset)
+- [ ] Policy forbids stacking stressors (no simultaneous wind + touch + bright)
+- [ ] agent/run.sh has executable permission (chmod +x applied)
+- [ ] run.sh checks for node, jq, and claude CLI dependencies before starting
+- [ ] run.sh creates a PID-namespaced FIFO at /tmp/caretaker_cmd_pipe_$$ to avoid collisions
+- [ ] run.sh starts server with FIFO stdin and opens fd 3 for writing commands
+- [ ] run.sh cleanup trap kills server, closes fd 3, and removes FIFO on EXIT/INT/TERM
+- [ ] run.sh decision loop sleeps LOOP_INTERVAL (5s), reads latest state from caretaker.log via grep + jq
+- [ ] run.sh tracks FEAR_SPIKE_TIME and enforces 30s backoff when fear > 0.5 detected
+- [ ] run.sh uses awk (not bc) for float comparisons (macOS compatibility)
+- [ ] run.sh invokes claude with: command claude -p --system-prompt, --no-session-persistence, --model haiku, --max-budget-usd 0.01
+- [ ] run.sh validates Claude response is valid JSON with an action field before relaying
+- [ ] run.sh validates action is in allowed set (place_food, set_light, set_temp, touch, blow_wind, clear_food) via case statement
+- [ ] run.sh logs decisions to caretaker-decisions.log with timestamp, backoff state, state summary, and response
+- [ ] No existing files were modified (server/caretaker.js, js/caretaker-bridge.js, index.html, package.json untouched)
+- [ ] No files created outside agent/ directory (except .buildloop/build-claims.md)
 
 ## Gaps and Assumptions
-- Browser-side testing not performed (requires DOM + WebSocket APIs in a real browser)
-- Only one browser connection is supported at a time (last connection wins)
-- "forgot_to_feed" incident fires on every state update while condition holds (no debouncing) -- this matches the plan but could be noisy
-- The bridge assumes globals (fly, food, behavior, BRAIN, facingDir, speed, lightStates, lightStateIndex, lightLabels, tempStates, tempStateIndex, tempLabels, windResetTime, applyTouchTool) are defined by the time BRAIN.drives exists -- reasonable given script load order but not independently verified
-- place_food coordinate clamping uses toolbar height 44 as lower y bound, matching main.js convention
+- The claude CLI flag --no-session-persistence is assumed to exist based on the plan; not verified at runtime
+- The --max-budget-usd flag is assumed to exist in the current Claude Code CLI version
+- date +%s%3N for millisecond timestamps may not work on all macOS versions (GNU date vs BSD date) -- on BSD date it may output literal %3N. This would affect the CURRENT_TIME metadata but not break the loop.
+- The policy file contains no dollar signs, backticks, or unescaped double quotes that would break shell expansion via --system-prompt "$POLICY_CONTENT"
+- The FIFO + backgrounded node approach assumes node opens stdin for reading immediately; a 1s sleep is used as buffer but may be insufficient on slow machines
+- No end-to-end integration test was run (requires browser + WebSocket connection)
+- The policy instructs the LLM to pick a "random" cardinal direction, but LLM randomness is not truly random -- it may favor certain directions
