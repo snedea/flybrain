@@ -90,3 +90,44 @@ function evaluateBehaviorEntry() {
 	}
 	return 'idle';
 }
+
+// ============================================================
+// Extracted Pure Functions for Testing (D68.2)
+// These mirror inline logic from main.js and sim-worker.js
+// so it can be exercised without DOM/Worker dependencies.
+// ============================================================
+
+var FEED_APPROACH_SPEED = 0.25;
+
+/**
+ * Pure extraction of food-seeking steering logic (main.js ~lines 859-862).
+ * Returns the computed targetDir and seekStrength.
+ */
+function computeFoodSeekDir(flyX, flyY, foodX, foodY, hunger, facingDirVal) {
+	var foodAngle = Math.atan2(-(foodY - flyY), foodX - flyX);
+	var seekStrength = Math.min(1, hunger);
+	var angleDiffToFood = normalizeAngle(foodAngle - facingDirVal);
+	var targetDir = facingDirVal + angleDiffToFood * seekStrength;
+	return { targetDir: targetDir, seekStrength: seekStrength };
+}
+
+/**
+ * Pure extraction of food consumption progress (main.js ~lines 1760-1761).
+ * Returns progress value clamped to [0, 1].
+ */
+function computeFoodProgress(foodItem, now) {
+	var elapsed = now - foodItem.feedStart;
+	var progress = Math.min(1, (foodItem.eaten || 0) + elapsed / foodItem.feedDuration);
+	return progress;
+}
+
+/**
+ * Pure extraction of pause-feeding logic (main.js ~lines 1773-1776).
+ * Mutates foodItem in place: accumulates eaten progress and resets feedStart to 0.
+ */
+function pauseFeeding(foodItem, now) {
+	if (foodItem.feedStart === 0) return;
+	var ate = now - foodItem.feedStart;
+	foodItem.eaten = Math.min(1, (foodItem.eaten || 0) + ate / foodItem.feedDuration);
+	foodItem.feedStart = 0;
+}

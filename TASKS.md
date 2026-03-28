@@ -8,45 +8,7 @@
 - Phase 5: Spec Compliance and Behavioral Enrichment (4 tasks archived to TASKS-ARCHIVE.md)
 - Phase 6: Educational 3D Brain Visualization (3 tasks archived to TASKS-ARCHIVE.md)
 
-## Phase 7: Full FlyWire Connectome (139K Neurons) (1 archived, 6 retained)
-
-Replace the 59-group approximation with the real FlyWire connectome (139,255 neurons, 2.7M connections, FAFB v783). Keep the existing behavioral layer and fly canvas; rebuild the neural simulation and connectome visualization to use real data.
-
-Data source: FlyWire Codex GCS bucket (public, no auth). Files in data/:
-- connections.csv.gz (48MB) -- 3.87M rows: pre_root_id, post_root_id, neuropil, syn_count, nt_type
-- neurons.csv.gz (1.6MB) -- 139,255 rows: root_id, group, nt_type
-- classification.csv.gz (0.9MB) -- root_id, flow, super_class, class, sub_class, side
-- coordinates.csv.gz (5.1MB) -- root_id, position, supervoxel_id
-
-### T7.1: Data Pipeline
-
-- [x] T7.1: Build Python preprocessing script (scripts/build_connectome.py) that reads the 4 CSV files from data/, aggregates connections across neuropils into a single sparse edge list, remaps root_ids to contiguous indices 0..139254, classifies each neuron into a functional region (sensory/central/drives/motor) using classification.csv flow+super_class fields, maps each neuron to one of the existing 59 behavioral groups using sub_class/class/hemilineage annotations (unmapped neurons get a generic group per region), and outputs two files: (1) connectome.bin.gz (~6-7MB target) with header (uint32 neuron_count, uint32 edge_count) + edges (uint32 pre, uint32 post, float32 weight derived from syn_count and nt_type sign) + per-neuron metadata (uint8 region_type, uint16 group_id), and (2) neuron_meta.json with group names, region assignments, and neuron count per group for the UI. [SPI-]
-
-### T7.2: Neuron-to-Group Mapping
-
-- [x] T7.2: Define the mapping from 139K individual neurons to the 59 functional groups used by fly-logic.js. Use classification.csv fields: flow (sensory/intrinsic/motor) maps to region type, super_class+class maps to specific groups (e.g., class=visual -> VIS_*, class=olfactory -> OLF_*, class=kenyon_cell -> MB_KC). Write mapping logic in the preprocessing script. Output a lookup table in the binary file (uint16 group_id per neuron). The behavioral layer reads aggregated activation per group as before -- sum of fire states for all neurons in that group, normalized by group size. [-PI-]
-
-### T7.3: LIF Simulation Engine (Web Worker)
-
-- [x] T7.3: Implement a leaky integrate-and-fire (LIF) neuron simulator in a dedicated Web Worker (js/sim-worker.js). On init, receives the binary connectome data via transferable ArrayBuffer. Builds sparse adjacency from edge list (CSR format for cache-friendly iteration). Each neuron has: membrane potential V (Float32Array), leak rate (0.95 default), threshold (1.0), refractory counter (Uint8Array). Each tick: (1) decay V *= leak, (2) for each neuron that fired last tick, iterate its outgoing edges and add weight to post-synaptic V, (3) check threshold and set fire state, (4) handle refractory. Post fire state (Uint8Array, 139K bytes) back to main thread every tick. Receive sensory stimulation messages (neuron indices + intensity) from main thread. Target: 20+ simulation ticks/second. [-PI-]
-
-### T7.4: Main Thread Integration
-
-  ... (1 tasks archived to TASKS-ARCHIVE.md)
-
-### T7.5: WebGL2 Visualization
-
-- [x] T7.5: Replace the DOM-based dot clusters in the left sidebar with a WebGL2 canvas (js/neuro-renderer.js) that renders 139K neurons as instanced points. Each neuron is a 1-2px point colored by region type (sensory blue, central purple, drives amber, motor red), brightness driven by fire state from the Uint8Array. Layout: neurons arranged within their region section in a grid pattern, with section labels (Sensory, Central, Drives, Motor) as HTML overlays positioned above the canvas regions. Single draw call using ANGLE_instanced_arrays. Update at display refresh rate, reading from the latest fire state buffer. Keep the tooltip on hover (raycast from mouse position to nearest neuron, show group name + description). [-PI-]
-
-### T7.6: Loading and Fallback
-
-- [x] T7.6: Load connectome.bin.gz at startup with a progress indicator in the left sidebar ("Loading connectome... 4.2/6.1 MB"). Parse in the Web Worker (receives ArrayBuffer, builds CSR, posts ready message). Show the existing 59-group dots while loading, then swap to the WebGL canvas when the worker is ready. Add a scale indicator to the header: "139,255 neurons / 2,713,004 connections -- FlyWire FAFB v783". Add a toggle (keyboard shortcut or button) to switch between full connectome and 59-group view. [-PI-]
-
-### T7.7: Performance Tuning
-
-- [x] T7.7: Profile and optimize. If 20 ticks/sec at 139K neurons is not achievable: (1) implement neuropil-gated simulation -- only tick neurons in neuropil regions that have active sensory input, lazy-activate regions when stimulation arrives, (2) use SIMD-friendly memory layout (struct-of-arrays), (3) reduce tick rate to 10/sec with interpolation in the renderer. Test on Chrome, Firefox, Safari. Verify fly behavior qualitatively matches the 59-group version. Document performance characteristics in SPEC.md. [SPI-]
-
-- Discovery Round 22 (2 tasks archived to TASKS-ARCHIVE.md)
+- Phase 7: Full FlyWire Connectome (139K Neurons) (1 archived, 6 retained) (6 tasks archived to TASKS-ARCHIVE.md)
 ## Discovery Round 23: Motor Pipeline & Visual Panel Regression Fix
 
 Commit 5516089 ("Fix FlyWire classification, horizontal layout, and motor output pipeline") introduced two major regressions: (1) the fly is stuck in idle and never walks, flies, startles, or exhibits any behavior, and (2) the bottom neuron visualization panel has badly unbalanced region proportions, making Drives and Motor regions nearly invisible.
@@ -154,7 +116,7 @@ After D23.1-D23.3 are fixed, verify the full pipeline produces correct emergent 
 1. **Idle -> Walk**: With no stimuli, tonic CX stimulation should produce accumWalkLeft+Right > 5 within 10-15 seconds. If not, increase tonic intensity in sendStimulation() lines 472-475 (currently 0.03-0.08).
 2. **Touch -> Groom**: Click fly body. Verify MECH_BRISTLE fires, groom drive increases (via updateDrives), DRIVE_GROOM postSynaptic reflects it (via virtual group bypass), and accumGroom > 8.
 3. **Touch -> Startle -> Fly**: Quick tap. Verify fear drive spikes, DRIVE_FEAR postSynaptic reflects it, flightIntent > gate threshold, MN_WING values written, accumFlight > 15. If not, trace which stage drops the signal.
-4. **Food -> Feed**: Place food near fly. Verify OLF_ORN_FOOD fires, fly walks toward food, GUS_GRN_SWEET fires on contact, accumFeed > 8, proboscis extends.
+4. **Food -> Feed**: Place food near fly. Verify two distinct entry paths: (a) neural pathway -- OLF_ORN_FOOD fires, fly walks toward food, GUS_GRN_SWEET fires on contact (dist <= 20px), accumFeed > 8, proboscis extends; (b) hunger bypass -- when hunger > 0.7 and food is within 50px (foodNearby), fly enters feed state directly without needing 20px contact first (fly-logic.js:64). In both paths, verify food shrinks proportionally as eaten progress accumulates, persists across feed-state exits, and food is removed when fully consumed.
 5. **Wind -> Brace/Fly**: Air tool. Light wind = MECH_JO moderate activation -> brace. Strong wind = high activation + fear spike -> flight.
 6. **Light -> Phototaxis**: Bright mode. Verify VIS_R1R6 fires (VIS_R7R8 too if populated by D23.1), fly orients toward light.
 7. **Temperature**: Warm/Cool. Verify THERMO_WARM or THERMO_COOL fires.
@@ -171,12 +133,7 @@ Using the logged values from Step 1, adjust:
 
 Files: `js/brain-worker-bridge.js`, `js/fly-logic.js`, `js/connectome.js`, `js/main.js`
 
-## Discovery Round 24: Test Coverage for Worker Bridge Pipeline
-
-All 45 existing tests (tests/tests.js, tests/run-node.js) cover only the legacy 59-group path (constants.js, connectome.js, fly-logic.js). The 139K-neuron worker bridge path in brain-worker-bridge.js -- which is now the primary execution path -- has zero test coverage. Regressions in motor synthesis, fire state aggregation, or virtual group bypass would go completely undetected.
-
-- [x] D24.1: Add unit tests for brain-worker-bridge.js motor synthesis and aggregation functions. The worker bridge IIFE currently hides all functions (synthesizeMotorOutputs, aggregateFireState, buildGroupIndices, sendStimulation) in closure scope, making them untestable from outside. Refactor to expose these as testable functions: either attach them to a test-only namespace (e.g., BRAIN._bridge = {synthesizeMotorOutputs, aggregateFireState, ...} guarded by a test flag), or extract the pure computational logic into a shared module loadable by both the bridge IIFE and the test runner. Then add 15-20 new test functions to tests/tests.js covering: (1) aggregateFireState -- given a synthetic Uint8Array fire state (e.g., 100 neurons, groups of 10) and groupIndices map, verify per-group activation is correctly computed as (sum of fired neurons in group / group size) * FIRE_STATE_SCALE, (2) synthesizeMotorOutputs -- given representative postSynaptic values for GNG_DESC, CX_PFN, CX_FC, DRIVE_FEAR, MB_MBON_AV etc., verify walkDrive produces accumWalkLeft+Right in 6-10 range for idle tonic input, flightIntent exceeds gate for high DRIVE_FEAR, groomIntent exceeds gate for high DRIVE_GROOM, and DN_STARTLE writes correctly to nextState, (3) virtual group bypass -- for groups with 0 neurons (DRIVE_FEAR, DRIVE_CURIOSITY, DRIVE_GROOM), verify that workerUpdate writes BRAIN.drives values to BRAIN.postSynaptic[groupName][nextState] scaled appropriately, (4) sendStimulation mapping -- verify BRAIN.stimulate.touch maps to MECH_BRISTLE, foodNearby maps to OLF_ORN_FOOD, lightLevel > 0.2 maps to VIS_R1R6 + VIS_R7R8, temperature thresholds map to THERMO_WARM/COOL, nociception maps to NOCI with 5x intensity and auto-clears. Update tests/run-node.js to load the refactored module. Prerequisite: D23.1-D23.4 must be complete first since the functions under test will change during those tasks. Files: js/brain-worker-bridge.js (refactor for testability), tests/tests.js (new test functions), tests/run-node.js (updated load list) [SPI-]
-
+- Discovery Round 24: Test Coverage for Worker Bridge Pipeline (1 tasks archived to TASKS-ARCHIVE.md)
 ## Discovery Round 25
 
 No new tasks discovered.
@@ -189,10 +146,7 @@ No new tasks discovered.
 
 No new tasks discovered.
 
-## Discovery Round 28
-
-- [x] D28.1: Fix Math.random mock leak in tests causing cascading false failures. 9 test functions (2 pre-existing: test_dark_curiosity_range_reduced, test_bright_curiosity_range_normal; 7 new from D24.1: test_bridge_synthesize_walk_tonic, test_bridge_synthesize_flight_fear, test_bridge_synthesize_groom, test_bridge_synthesize_feed, test_bridge_virtual_bypass_fear, test_bridge_virtual_bypass_curiosity, test_bridge_virtual_bypass_groom) mock Math.random with a bare var origRandom = Math.random; Math.random = mock; ... Math.random = origRandom; pattern. If any of these tests throws before the restore line, the mock (always returning 0.5) leaks into ALL subsequent tests. This corrupts any test that depends on Math.random -- BRAIN.updateDrives() uses it for curiosity random walk (connectome.js:203), BRAIN.randExcite() uses it (connectome.js:228), and synthesizeMotorOutputs() uses it for walk jitter (brain-worker-bridge.js:323). A single bridge test failure would cause cascading false failures with misleading error messages, making the root cause hard to identify. Fix: wrap each mock/restore pair in try/finally so Math.random is always restored even on test failure. Consider adding a helper function like withMockedRandom(value, fn) to tests.js Section 1 to DRY the pattern and prevent future instances of the same bug. No try/finally is used anywhere in the current test file (confirmed via grep). Files: tests/tests.js (9 test functions across Section 3 and Section 5) [-PI-]
-
+- Discovery Round 28 (1 tasks archived to TASKS-ARCHIVE.md)
 ## Discovery Round 29
 
 No new tasks discovered.
@@ -321,14 +275,28 @@ No new tasks discovered.
 
 No new tasks discovered.
 
-## Discovery Round 65
-
-- [x] D65.1: Fix stale latestFireState in aggregateFireState() causing redundant 139K-neuron iteration and full motor pipeline execution on every animation frame between worker ticks. In brain-worker-bridge.js, workerUpdate() guards the aggregation/motor/swap block with `if (latestFireState || pendingWorkerTicks > 0)`. After the primary path (pendingGroupSpikes) runs and clears pendingGroupSpikes/pendingWorkerTicks, latestFireState remains non-null because aggregateFireState() never clears it. On subsequent frames before the next worker tick (~2-3 frames at 60fps/20Hz), the guard passes via the stale latestFireState, triggering the fallback path which iterates all 139K neurons from the old Uint8Array snapshot, then runs the full pipeline (virtual bypass, synthesizeMotorOutputs, motorcontrol, state swap). Effects: (a) ~5.6M wasted neuron iterations/sec (139K neurons * ~40 stale frames/sec), (b) the 0.75 prevActivation decay in aggregateFireState is bypassed between ticks because the stale snapshot re-injects the same windowActivation each frame via Math.max(windowActivation, prevActivation * 0.75), and (c) synthesizeMotorOutputs runs with fresh Math.random jitter on each stale frame causing micro-oscillations in walk left/right balance. Fix: set latestFireState = null at the end of aggregateFireState() after the fallback branch consumes it (BRAIN.latestFireState used by neuro-renderer.js is a separate reference and remains unaffected). Files: js/brain-worker-bridge.js (aggregateFireState around line 549, workerUpdate guard at line 368) [-PI-]
-
+- Discovery Round 65 (1 tasks archived to TASKS-ARCHIVE.md)
 ## Discovery Round 66
 
 No new tasks discovered.
 
-## Discovery Round 67
+- Discovery Round 67 (1 tasks archived to TASKS-ARCHIVE.md)
+## Discovery Round 68
 
-- [x] D67.1: Fix workerUpdate() timing mismatch between main-thread frame rate and worker tick rate causing lost nociception stimuli and attenuated drive responses. Two related bugs in brain-worker-bridge.js: (1) Nociception stimulus overwrite -- collectStimulationSegments() creates a NOCI segment and immediately clears BRAIN.stimulate.nociception (line 461). sendStimulation() runs every animation frame (~60fps), posting setStimulusState which fully replaces the worker's stored sustainedIndices/sustainedIntensities. The NOCI segment only exists in the frame where nociception fires; the next frame's setStimulusState overwrites it WITHOUT NOCI before the worker tick (~10-20Hz) processes it. Result: NOCI neurons in the worker are rarely stimulated, breaking the pain-to-DN_STARTLE pathway. The worker already has a 'stimulate' message type (sim-worker.js line 435) for one-shot immediate voltage injection, but nothing sends it. Fix: send one-shot stimuli like NOCI via the worker 'stimulate' message (immediate V[idx] += intensity) instead of including them in the setStimulusState bulk replacement, OR make sendStimulation merge one-shot segments into the sustained state without clearing them until a worker tick confirms consumption. (2) Drive-motor timing mismatch (D65.1 side effect) -- after D65.1 gated the motor pipeline behind if (latestFireState || pendingWorkerTicks > 0) at line 368, updateDrives() still runs every frame at ~60fps while the virtual bypass + synthesizeMotorOutputs + motorcontrol + state swap only run on worker ticks at ~10-20Hz. Transient drive signals (fear spikes at 0.85 decay per updateDrives call) attenuate by 0.85^k where k is 3-6 frames between stimulus and next motor pipeline execution, losing 40-60% of peak signal before it reaches the motor pipeline via virtual bypass. This weakens startle/flight responses from touch compared to pre-D65.1 behavior where the motor pipeline ran every frame. Fix: restructure workerUpdate to either (a) throttle updateDrives and sendStimulation to only run on worker ticks (adjusting drive accumulation/decay rates to compensate for lower frequency), or (b) split the guard so that aggregateFireState is gated on worker ticks but virtual bypass + synthesize + motorcontrol + swap run every frame using last-known aggregated postSynaptic values for non-drive groups. Option (a) also fixes the nociception overwrite since sendStimulation would only run once per tick. Files: js/brain-worker-bridge.js (workerUpdate at line 360, sendStimulation at line 479, collectStimulationSegments line 461), js/sim-worker.js (stimulate message handler at line 435) [-PI-]
+- [x] D68.1: Fix worker stats reset correctness. The averaged firedNeurons logic in sim-worker.js accumulates cumulativeFiredCount across the stats window and resets it when stats are emitted (line 384). However, cumulativeFiredCount is NOT cleared on worker reset (sim-worker.js case 'reset' at line 460), so post-reset stats can include stale pre-reset spikes in the first averaged window. Fix: add `cumulativeFiredCount = 0;` to the reset handler alongside the existing tickTimeSum/tickTimeSamples resets. Files: js/sim-worker.js (reset handler around line 474).
+
+- [x] D68.2: Add test coverage for post-D24 files still unexercised by the 69-test suite. D24.1 (TASKS.md:174) added brain-worker-bridge.js coverage, but main.js, sim-worker.js, neuro-renderer.js, and CSS are still untested. Add tests or extract pure helper functions for: (a) main.js food-seeking -- verify steering angle uses facingDir (not targetDir), seekStrength scales with hunger, feed approach speed is 0.25; (b) main.js feed entry -- verify feed state enters at 50px when hunger > 0.7 via bypass, still requires 20px for neural pathway; (c) main.js food consumption -- verify eaten progress accumulates across feed-state exits, food removed at progress >= 1; (d) sim-worker.js averaged stats -- verify cumulativeFiredCount is accumulated, averaged, and reset correctly across the stats window and on worker reset; (e) connectome.js DN_STARTLE -- verify accumStartle reads from nextState, not thisState. Files: tests/tests.js (new test functions), tests/run-node.js (load paths), js/main.js and js/sim-worker.js (extract testable pure functions if needed). [SPI-]
+
+- [ ] D68.3: Browser smoke verification checklist for neuro-renderer.js changes. The renderer now includes canvas CSS stretch, per-section adaptive point sizes, resize rebuilds on width change, per-vertex gl_PointSize attribute, and displayScale-aware hit-testing -- significantly broader than the original label overlap fix. Manual verification checklist: (1) width-only window resize triggers relayout (not just height), (2) tooltip hover aligns with neurons after CSS stretch (mouse coords correctly convert via canvas.width/rect.width), (3) labels truncate with ellipsis when sections are narrow (box-sizing:border-box prevents overflow), (4) DRIVES/MOTOR sections render as visible grids at all zoom levels (not 1px slivers), (5) high-DPI displays show crisp points (image-rendering:pixelated), (6) last section (Motor) is not clipped at container edge (canvas shrinks to fit via displayScale < 1). Files: js/neuro-renderer.js (manual testing), css/main.css (#neuro-renderer-wrap overflow).
+
+## Phase 8: Autonomous Claude Code Caretaker (GitHub Issue #1)
+
+Claude Code acts as a hands-off caretaker for the virtual fly -- feeding it, managing its environment, and keeping it healthy. All actions and observations are logged in structured JSON Lines for AI-powered querying ("how many times did Claude forget to feed the fly?").
+
+- [ ] T8.1: Build WebSocket bridge and caretaker server. Add a lightweight WebSocket server (Node.js) that bridges between the browser and Claude Code. Browser-side: expose fly state (drives, behavior, position, firing stats, food positions) at ~1Hz over WebSocket, accept commands (place_food, set_light, set_temp, touch, blow_wind, clear_food). Server-side: relay state/commands between browser and Claude Code via stdin/stdout, write every observation and action to `caretaker.log` as JSON Lines with timestamps, action type, parameters, reasoning, and fly state snapshot. Include incident detection (fear spike after Claude action = "scared the fly", hunger > 0.9 with no food = "forgot to feed"). Files: new `server/caretaker.js` (WebSocket + logging), `js/caretaker-bridge.js` (browser-side WebSocket client, state serialization, command execution), `index.html` (load caretaker-bridge.js).
+
+- [ ] T8.2: Build Claude Code caretaker agent and policy. Define the caretaker policy as a Claude Code agent that reads fly state and decides actions. Policy rules: feed when hunger > 0.6 (place food near fly, not on top of it), dim lights when fatigue > 0.5, set temp neutral when fear > 0.3, vary stimuli when idle > 120s (light touch or food placement to spark curiosity), never stack stressors (no wind + touch + bright simultaneously), back off for 30s after any fear spike > 0.5. Agent runs on a ~5s decision loop: read state, evaluate policy, send 0-1 commands, log reasoning. Files: new `agent/caretaker-policy.md` (policy definition for Claude Code), new `agent/run.sh` (launch script that starts server + connects Claude Code).
+
+- [ ] T8.3: Canvas rendering of Claude's visual presence. Draw Claude's presence on the canvas so the user always sees where Claude is and what it's doing. Claude cursor: small Claude logo silhouette in orange (#E3734B), rendered at Claude's current "attention point" on the canvas. Interaction indicators: orange ripple/pulse when placing food, orange ring when touching, orange arrow for wind, toolbar highlight for light/temp changes. Attention trail: faint orange line as Claude shifts focus. Idle pulse: gentle heartbeat glow when observing. All indicators are cosmetic (rendered on the canvas draw loop), not part of the simulation. Files: `js/caretaker-renderer.js` (canvas overlay drawing), `svg/claude-cursor.svg` (Claude logo silhouette), `css/main.css` (toolbar highlight for Claude actions).
+
+- [ ] T8.4: Log query tool. Build a tool to query caretaker logs with natural language. Use DuckDB to load the JSON Lines file, then let Claude Code answer questions against it. Example queries: "how many times did Claude forget to feed the fly?" (count periods where hunger > 0.9 with no place_food within 30s), "how many times did Claude scare the fly?" (count fear spikes > 0.5 within 10s of a Claude action), "what was the fly's average hunger today?", "show me all incidents". Files: new `tools/query-log.sh` (wrapper that loads log into DuckDB and passes the user's question to Claude Code).

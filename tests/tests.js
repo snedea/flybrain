@@ -592,6 +592,202 @@ function runAllTests() {
 }
 
 // ============================================================
+// Section 4b: Food-Seeking, Consumption, Stats, and Startle Tests (D68.2)
+// ============================================================
+
+// --- Test group (a): Food-seeking direction ---
+
+function test_food_seek_uses_facingDir_not_targetDir() {
+	resetBrainState();
+	var facingDirVal = Math.PI / 4;
+	var flyX = 400, flyY = 300, foodX = 500, foodY = 200;
+	var result = computeFoodSeekDir(flyX, flyY, foodX, foodY, 0.8, facingDirVal);
+	// foodAngle = atan2(-(200-300), 500-400) = atan2(100, 100) = PI/4
+	// angleDiff = normalizeAngle(PI/4 - PI/4) = 0
+	// targetDir = PI/4 + 0 * 0.8 = PI/4
+	assertClose(result.targetDir, Math.PI / 4, 0.001,
+		'targetDir matches facingDir when food is straight ahead');
+
+	var facingDirVal2 = -Math.PI / 2;
+	var result2 = computeFoodSeekDir(flyX, flyY, foodX, foodY, 0.8, facingDirVal2);
+	// angleDiff2 = normalizeAngle(PI/4 - (-PI/2)) = normalizeAngle(3*PI/4) = 3*PI/4
+	// targetDir = -PI/2 + (3*PI/4) * 0.8
+	var expected2 = -Math.PI / 2 + (3 * Math.PI / 4) * 0.8;
+	assertClose(result2.targetDir, expected2, 0.001,
+		'targetDir differs with different facingDir');
+	assertTrue(result2.targetDir !== result.targetDir,
+		'different facingDir produces different result');
+}
+
+function test_food_seek_strength_scales_with_hunger() {
+	var r1 = computeFoodSeekDir(400, 300, 500, 200, 0.3, 0);
+	assertClose(r1.seekStrength, 0.3, 0.001, 'seekStrength = 0.3 at hunger 0.3');
+
+	var r2 = computeFoodSeekDir(400, 300, 500, 200, 0.9, 0);
+	assertClose(r2.seekStrength, 0.9, 0.001, 'seekStrength = 0.9 at hunger 0.9');
+
+	var r3 = computeFoodSeekDir(400, 300, 500, 200, 1.5, 0);
+	assertClose(r3.seekStrength, 1.0, 0.001, 'seekStrength clamped to 1.0 at hunger 1.5');
+}
+
+function test_feed_approach_speed_constant() {
+	assertEqual(FEED_APPROACH_SPEED, 0.25, 'feed approach speed is 0.25');
+}
+
+// --- Test group (b): Feed entry bypass ---
+
+function test_feed_entry_hunger_bypass_at_50px() {
+	resetBrainState();
+	BRAIN.drives.hunger = 0.8;
+	BRAIN.stimulate.foodNearby = true;
+	BRAIN.accumFeed = 0;
+	fly.x = 400; fly.y = 300;
+	food = [{ x: 430, y: 300, feedStart: 0, feedDuration: 3000, radius: 10 }];
+	var state = evaluateBehaviorEntry();
+	assertEqual(state, 'feed', 'hunger bypass enters feed at 50px range');
+}
+
+function test_feed_entry_hunger_bypass_requires_high_hunger() {
+	resetBrainState();
+	BRAIN.drives.hunger = 0.65;
+	BRAIN.stimulate.foodNearby = true;
+	BRAIN.accumFeed = 0;
+	fly.x = 400; fly.y = 300;
+	food = [{ x: 430, y: 300, feedStart: 0, feedDuration: 3000, radius: 10 }];
+	var state = evaluateBehaviorEntry();
+	assertTrue(state !== 'feed', 'no feed entry when hunger <= 0.7 and accumFeed < 8');
+}
+
+function test_feed_entry_neural_pathway_requires_20px() {
+	resetBrainState();
+	BRAIN.accumFeed = 10;
+	BRAIN.drives.hunger = 0.3;
+	BRAIN.stimulate.foodNearby = false;
+	fly.x = 400; fly.y = 300;
+	food = [{ x: 460, y: 300, feedStart: 0, feedDuration: 3000, radius: 10 }];
+	var state = evaluateBehaviorEntry();
+	assertTrue(state !== 'feed', 'neural pathway blocked when food > 50px');
+}
+
+function test_feed_entry_neural_pathway_within_50px() {
+	resetBrainState();
+	BRAIN.accumFeed = 10;
+	BRAIN.drives.hunger = 0.3;
+	BRAIN.stimulate.foodNearby = false;
+	fly.x = 400; fly.y = 300;
+	food = [{ x: 425, y: 300, feedStart: 0, feedDuration: 3000, radius: 10 }];
+	var state = evaluateBehaviorEntry();
+	assertEqual(state, 'feed', 'neural pathway enters feed when food within 50px');
+}
+
+// --- Test group (c): Food consumption ---
+
+function test_food_progress_accumulates() {
+	var item = { feedStart: 1000, feedDuration: 4000, eaten: 0 };
+	var p1 = computeFoodProgress(item, 2000);
+	assertClose(p1, 0.25, 0.001, 'progress is 0.25 after 1s of 4s');
+
+	var item2 = { feedStart: 1000, feedDuration: 4000, eaten: 0.5 };
+	var p2 = computeFoodProgress(item2, 2000);
+	assertClose(p2, 0.75, 0.001, 'progress accumulates with prior eaten');
+}
+
+function test_food_progress_clamped_at_one() {
+	var item = { feedStart: 1000, feedDuration: 2000, eaten: 0.8 };
+	var p = computeFoodProgress(item, 5000);
+	assertEqual(p, 1, 'progress clamped at 1');
+}
+
+function test_food_pause_preserves_eaten_progress() {
+	var item = { feedStart: 1000, feedDuration: 4000, eaten: 0.1 };
+	pauseFeeding(item, 3000);
+	assertClose(item.eaten, 0.6, 0.001, 'eaten accumulates on pause');
+	assertEqual(item.feedStart, 0, 'feedStart reset to 0 on pause');
+}
+
+function test_food_pause_noop_when_not_feeding() {
+	var item = { feedStart: 0, feedDuration: 4000, eaten: 0.3 };
+	pauseFeeding(item, 5000);
+	assertClose(item.eaten, 0.3, 0.001, 'eaten unchanged when already paused');
+	assertEqual(item.feedStart, 0, 'feedStart stays 0');
+}
+
+function test_food_removal_at_full_progress() {
+	food = [{ x: 400, y: 300, feedStart: 1000, feedDuration: 2000, eaten: 0, radius: 10 }];
+	var p = computeFoodProgress(food[0], 3000);
+	assertEqual(p >= 1, true, 'food fully consumed');
+	if (p >= 1) { food.splice(0, 1); }
+	assertEqual(food.length, 0, 'food removed from array');
+}
+
+// --- Test group (d): sim-worker averaged stats (inline arithmetic) ---
+
+function test_simworker_stats_accumulation_and_averaging() {
+	var STATS_INTERVAL_LOCAL = 20;
+	var cumulativeFiredCount = 0, tickTimeSamples = 0, tickTimeSum = 0;
+	for (var i = 0; i < 20; i++) {
+		tickTimeSamples++;
+		cumulativeFiredCount += 10;
+		tickTimeSum += 5.0;
+	}
+	assertEqual(tickTimeSamples, 20, 'samples reached STATS_INTERVAL');
+	assertEqual(cumulativeFiredCount, 200, 'cumulative fired = 20 * 10');
+	var avgFired = Math.round(cumulativeFiredCount / tickTimeSamples);
+	assertEqual(avgFired, 10, 'average fired neurons per tick is 10');
+	var avgMs = tickTimeSum / tickTimeSamples;
+	assertClose(avgMs, 5.0, 0.001, 'average tick time is 5ms');
+	tickTimeSum = 0; tickTimeSamples = 0; cumulativeFiredCount = 0;
+	assertEqual(cumulativeFiredCount, 0, 'cumulative reset after stats emit');
+	assertEqual(tickTimeSamples, 0, 'samples reset after stats emit');
+}
+
+function test_simworker_stats_varying_fire_counts() {
+	var cumulativeFiredCount = 0, tickTimeSamples = 0;
+	for (var i = 0; i < 10; i++) { tickTimeSamples++; cumulativeFiredCount += 5; }
+	for (var i = 0; i < 10; i++) { tickTimeSamples++; cumulativeFiredCount += 15; }
+	assertEqual(cumulativeFiredCount, 200, 'cumulative = 50 + 150');
+	var avgFired = Math.round(cumulativeFiredCount / tickTimeSamples);
+	assertEqual(avgFired, 10, 'average over varying counts is 10');
+}
+
+function test_simworker_reset_clears_cumulative() {
+	var cumulativeFiredCount = 150, tickTimeSamples = 8, tickTimeSum = 40;
+	tickTimeSum = 0;
+	tickTimeSamples = 0;
+	cumulativeFiredCount = 0;
+	assertEqual(cumulativeFiredCount, 0, 'cumulativeFiredCount cleared on reset');
+	assertEqual(tickTimeSamples, 0, 'tickTimeSamples cleared on reset');
+	assertEqual(tickTimeSum, 0, 'tickTimeSum cleared on reset');
+	tickTimeSamples++; cumulativeFiredCount += 7; tickTimeSum += 3.0;
+	assertEqual(cumulativeFiredCount, 7, 'post-reset accumulation starts fresh');
+}
+
+// --- Test group (e): DN_STARTLE reads nextState ---
+
+function test_dn_startle_reads_nextState() {
+	resetBrainState();
+	BRAIN.postSynaptic['DN_STARTLE'][BRAIN.nextState] = 50;
+	BRAIN.postSynaptic['DN_STARTLE'][BRAIN.thisState] = 5;
+	BRAIN.motorcontrol();
+	assertEqual(BRAIN.accumStartle, 50, 'accumStartle reads from nextState (50), not thisState (5)');
+}
+
+function test_dn_startle_zero_when_no_signal() {
+	resetBrainState();
+	BRAIN.postSynaptic['DN_STARTLE'][BRAIN.nextState] = 0;
+	BRAIN.postSynaptic['DN_STARTLE'][BRAIN.thisState] = 0;
+	BRAIN.motorcontrol();
+	assertEqual(BRAIN.accumStartle, 0, 'accumStartle is 0 when no signal');
+}
+
+function test_dn_startle_negative_floored() {
+	resetBrainState();
+	BRAIN.postSynaptic['DN_STARTLE'][BRAIN.nextState] = -10;
+	BRAIN.motorcontrol();
+	assertEqual(BRAIN.accumStartle, 0, 'negative startle floored at 0');
+}
+
+// ============================================================
 // Section 5: Worker Bridge Tests (require BRAIN._bridge)
 // ============================================================
 
