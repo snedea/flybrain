@@ -1,312 +1,398 @@
-# Plan: T8.2
+# Plan: T8.3
+
+Canvas rendering of Claude's visual presence -- cursor, interaction indicators, attention trail, idle pulse, toolbar highlights.
 
 ## Dependencies
-- list: none (uses existing `node`, `jq`, and `claude` CLI -- no new packages)
+- list: none (vanilla JS, no packages)
 - commands: none
 
 ## File Operations (in execution order)
 
-### 1. CREATE agent/caretaker-policy.md
+### 1. CREATE svg/claude-cursor.svg
 - operation: CREATE
-- reason: Define the caretaker policy as a system prompt document that Claude Code receives via `--system-prompt`. This is the "brain" of the caretaker agent -- it tells Claude how to interpret fly state and what actions to take.
+- reason: Claude logo silhouette SVG used as the caretaker cursor on canvas. Rendered as a small (20x20) orange icon.
 
-#### Content Structure
+#### Content
+Create a minimal SVG file (viewBox="0 0 20 20") containing the Claude logo silhouette. Use a simplified "spark" or "asterisk" shape that is recognizable at small size. The shape is a stylized 6-pointed star/spark with rounded tips, filled solid (no stroke). Use `fill="#E3734B"` for the orange color. Keep the SVG under 1KB.
 
-The file is a markdown document (not code). It is consumed as a string by `claude -p --system-prompt "$(cat agent/caretaker-policy.md)"`. Write it in second-person imperative ("You are..."). It must contain these exact sections in this order:
-
-**Section 1: Role**
+Exact SVG content:
+```svg
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" width="20" height="20">
+  <path d="M10 0 C10.5 4, 12 6, 16 7 C12 8, 10.5 10, 10 14 C9.5 10, 8 8, 4 7 C8 6, 9.5 4, 10 0Z" fill="#E3734B"/>
+  <circle cx="10" cy="16.5" r="2" fill="#E3734B"/>
+</svg>
 ```
-You are a caretaker for a virtual Drosophila (fruit fly) in the FlyBrain simulation. You receive the fly's current state as JSON every ~5 seconds. You decide whether to take an action or wait. You must output exactly one JSON object per invocation -- no markdown, no explanation, no extra text.
+This produces a 4-pointed spark with a small dot below it -- a recognizable simplified Claude "spark" logo.
+
+### 2. CREATE js/caretaker-renderer.js
+- operation: CREATE
+- reason: Canvas overlay module that draws all Claude visual presence indicators. Called from the main draw loop and fed events from caretaker-bridge.js.
+
+#### Module Structure
+The file is an IIFE that exposes `window.CaretakerRenderer` with methods called from other files.
+
+#### State Variables (module-scoped)
+```javascript
+var cursorImg = null;            // HTMLImageElement for claude-cursor.svg
+var cursorLoaded = false;        // true once SVG image is decoded
+var attentionX = -1;             // current Claude attention point X (-1 = not active)
+var attentionY = -1;             // current Claude attention point Y
+var attentionTargetX = -1;       // target attention point X (lerps toward this)
+var attentionTargetY = -1;       // target attention point Y
+var trail = [];                  // array of {x, y, time} for attention trail
+var TRAIL_MAX = 40;              // max trail points
+var TRAIL_LIFETIME = 2000;       // trail point lifetime in ms
+
+var activeEffects = [];          // array of {type, x, y, startTime, params}
+                                 // type: 'ripple' | 'ring' | 'arrow' | 'toolbar'
+
+var idleStart = 0;               // Date.now() when Claude entered idle/observing
+var lastCommandTime = 0;         // Date.now() of last command received
+var caretakerConnected = false;  // whether caretaker WS is connected
+
+var CURSOR_SIZE = 20;            // px, rendered size of Claude cursor icon
+var CLAUDE_ORANGE = 'rgba(227, 115, 75, ';  // base color prefix for rgba
+var CLAUDE_ORANGE_HEX = '#E3734B';
 ```
 
-**Section 2: Output Format**
+#### Functions
 
-Specify the exact JSON output format. Two valid forms:
+- signature: `function init()`
+  - purpose: Load the Claude cursor SVG into an Image element for canvas drawing
+  - logic:
+    1. Create `new Image()`
+    2. Set `cursorImg.src = './svg/claude-cursor.svg'`
+    3. On `cursorImg.onload`, set `cursorLoaded = true`
+    4. Call `init()` at module load time (bottom of IIFE)
+  - calls: none
+  - returns: void
+  - error handling: On `cursorImg.onerror`, log warning `'[caretaker-renderer] Failed to load cursor SVG'` and leave `cursorLoaded = false`
 
-Action form:
-```json
-{"action": "<action_name>", "params": {<action_params>}, "reasoning": "<1-2 sentence explanation>"}
+- signature: `function onCommand(action, params)`
+  - purpose: Called by caretaker-bridge.js when a command is received from the agent. Records the command as a visual effect and updates attention point.
+  - logic:
+    1. Set `lastCommandTime = Date.now()`
+    2. Switch on `action`:
+       - `'place_food'`: Set `attentionTargetX = params.x`, `attentionTargetY = params.y`. Push `{type: 'ripple', x: params.x, y: params.y, startTime: Date.now()}` to `activeEffects`. Call `highlightToolbar('feed')`.
+       - `'touch'`: Compute `tx = params.x !== undefined ? params.x : fly.x`, `ty = params.y !== undefined ? params.y : fly.y`. Set `attentionTargetX = tx`, `attentionTargetY = ty`. Push `{type: 'ring', x: tx, y: ty, startTime: Date.now()}` to `activeEffects`. Call `highlightToolbar('touch')`.
+       - `'blow_wind'`: Set `attentionTargetX = fly.x`, `attentionTargetY = fly.y`. Push `{type: 'arrow', x: fly.x, y: fly.y, startTime: Date.now(), params: {strength: params.strength || 0.5, direction: params.direction || 0}}` to `activeEffects`. Call `highlightToolbar('air')`.
+       - `'set_light'`: Call `highlightToolbar('light')`. Set `attentionTargetX = fly.x`, `attentionTargetY = fly.y`.
+       - `'set_temp'`: Call `highlightToolbar('temp')`. Set `attentionTargetX = fly.x`, `attentionTargetY = fly.y`.
+       - `'clear_food'`: Call `highlightToolbar('feed')`. Set `attentionTargetX = fly.x`, `attentionTargetY = fly.y`.
+       - default: Set `attentionTargetX = fly.x`, `attentionTargetY = fly.y`.
+    3. If `attentionX < 0` (first command, cursor not yet placed), snap directly: `attentionX = attentionTargetX`, `attentionY = attentionTargetY`.
+  - calls: `highlightToolbar(toolName)`
+  - returns: void
+  - error handling: none
+
+- signature: `function setConnected(isConnected)`
+  - purpose: Track caretaker connection status. When connected, start idle timer. When disconnected, hide cursor.
+  - logic:
+    1. Set `caretakerConnected = isConnected`
+    2. If `isConnected` and `idleStart === 0`, set `idleStart = Date.now()`
+    3. If `!isConnected`, set `attentionX = -1`, `attentionY = -1`, clear `trail` array, clear `activeEffects` array
+  - calls: none
+  - returns: void
+  - error handling: none
+
+- signature: `function highlightToolbar(toolName)`
+  - purpose: Add temporary orange glow CSS class to a toolbar button when Claude uses that tool
+  - logic:
+    1. Find button: `var btn = document.querySelector('.tool-btn[data-tool="' + toolName + '"]')`
+    2. If `btn === null`, return
+    3. Add class: `btn.classList.add('claude-highlight')`
+    4. Remove after 1500ms: `setTimeout(function() { btn.classList.remove('claude-highlight'); }, 1500)`
+  - calls: none
+  - returns: void
+  - error handling: If button not found, return silently
+
+- signature: `function update(dt)`
+  - purpose: Update attention point position (lerp), prune expired trail points and effects. Called every frame from main update loop.
+  - logic:
+    1. If `!caretakerConnected` or `attentionX < 0`, return
+    2. Lerp attention position toward target:
+       - `var lerpSpeed = 0.08`
+       - `attentionX += (attentionTargetX - attentionX) * lerpSpeed`
+       - `attentionY += (attentionTargetY - attentionY) * lerpSpeed`
+    3. Snap if close: if `Math.abs(attentionX - attentionTargetX) < 0.5 && Math.abs(attentionY - attentionTargetY) < 0.5`, snap `attentionX = attentionTargetX`, `attentionY = attentionTargetY`
+    4. Add trail point: If `trail.length === 0` or distance from last trail point > 3px (`Math.hypot(attentionX - trail[trail.length-1].x, attentionY - trail[trail.length-1].y) > 3`), push `{x: attentionX, y: attentionY, time: Date.now()}`
+    5. Prune trail: Remove entries older than `TRAIL_LIFETIME` from front of array. Use while loop: `while (trail.length > 0 && Date.now() - trail[0].time > TRAIL_LIFETIME) trail.shift()`
+    6. Cap trail length: `while (trail.length > TRAIL_MAX) trail.shift()`
+    7. Prune expired effects: Loop `activeEffects` from end to start. Remove if:
+       - type `'ripple'`: elapsed > 800ms
+       - type `'ring'`: elapsed > 600ms
+       - type `'arrow'`: elapsed > 1200ms
+  - calls: none
+  - returns: void
+  - error handling: none
+
+- signature: `function drawOverlay(ctx)`
+  - purpose: Draw all Claude visual indicators on the main canvas. Called from main `draw()` after fly is rendered.
+  - logic:
+    1. If `!caretakerConnected`, return immediately
+    2. Call `drawTrail(ctx)`
+    3. Call `drawEffects(ctx)`
+    4. Call `drawCursor(ctx)`
+    5. Call `drawIdlePulse(ctx)`
+  - calls: `drawTrail(ctx)`, `drawEffects(ctx)`, `drawCursor(ctx)`, `drawIdlePulse(ctx)`
+  - returns: void
+  - error handling: none
+
+- signature: `function drawTrail(ctx)`
+  - purpose: Draw faint orange line showing Claude's recent attention path
+  - logic:
+    1. If `trail.length < 2`, return
+    2. `var now = Date.now()`
+    3. Loop `i = 1` to `trail.length - 1`:
+       - Compute `age = now - trail[i].time`
+       - Compute `alpha = (1 - age / TRAIL_LIFETIME) * 0.25` (faint, max 0.25 opacity)
+       - If `alpha <= 0`, continue
+       - `ctx.beginPath()`
+       - `ctx.moveTo(trail[i-1].x, trail[i-1].y)`
+       - `ctx.lineTo(trail[i].x, trail[i].y)`
+       - `ctx.strokeStyle = CLAUDE_ORANGE + alpha.toFixed(3) + ')'`
+       - `ctx.lineWidth = 1.5`
+       - `ctx.stroke()`
+  - calls: none
+  - returns: void
+  - error handling: none
+
+- signature: `function drawCursor(ctx)`
+  - purpose: Draw the Claude logo cursor at the current attention point
+  - logic:
+    1. If `attentionX < 0`, return
+    2. If `cursorLoaded`:
+       - `ctx.globalAlpha = 0.85`
+       - `ctx.drawImage(cursorImg, attentionX - CURSOR_SIZE / 2, attentionY - CURSOR_SIZE / 2, CURSOR_SIZE, CURSOR_SIZE)`
+       - `ctx.globalAlpha = 1.0`
+    3. If `!cursorLoaded` (fallback -- draw a small orange diamond):
+       - `ctx.beginPath()`
+       - `ctx.moveTo(attentionX, attentionY - 8)`
+       - `ctx.lineTo(attentionX + 6, attentionY)`
+       - `ctx.lineTo(attentionX, attentionY + 8)`
+       - `ctx.lineTo(attentionX - 6, attentionY)`
+       - `ctx.closePath()`
+       - `ctx.fillStyle = CLAUDE_ORANGE + '0.85)'`
+       - `ctx.fill()`
+  - calls: none
+  - returns: void
+  - error handling: none
+
+- signature: `function drawEffects(ctx)`
+  - purpose: Draw active interaction indicators (ripples, rings, arrows)
+  - logic:
+    1. `var now = Date.now()`
+    2. Loop over `activeEffects` array (forward loop, no removal here -- update() handles pruning):
+       - `var e = activeEffects[i]`
+       - `var elapsed = now - e.startTime`
+       - If `e.type === 'ripple'`: Draw orange expanding ripple/pulse for place_food
+         - Draw 2 concentric expanding rings
+         - Ring 1: `var p1 = elapsed / 800; var r1 = p1 * 35; var a1 = (1 - p1) * 0.6`
+         - Ring 2 (delayed 200ms): `var p2 = Math.max(0, (elapsed - 200)) / 800; var r2 = p2 * 35; var a2 = (1 - p2) * 0.4`
+         - For each ring (if progress <= 1): `ctx.beginPath(); ctx.arc(e.x, e.y, r, 0, Math.PI * 2); ctx.strokeStyle = CLAUDE_ORANGE + a.toFixed(3) + ')'; ctx.lineWidth = 2 * (1 - p); ctx.stroke()`
+       - If `e.type === 'ring'`: Draw orange ring for touch
+         - `var p = elapsed / 600; var r = 8 + p * 20; var a = (1 - p) * 0.7`
+         - `ctx.beginPath(); ctx.arc(e.x, e.y, r, 0, Math.PI * 2); ctx.strokeStyle = CLAUDE_ORANGE + a.toFixed(3) + ')'; ctx.lineWidth = 2.5 * (1 - p); ctx.stroke()`
+         - Also draw inner fill flash: `ctx.beginPath(); ctx.arc(e.x, e.y, 6 * (1 - p), 0, Math.PI * 2); ctx.fillStyle = CLAUDE_ORANGE + (a * 0.3).toFixed(3) + ')'; ctx.fill()`
+       - If `e.type === 'arrow'`: Draw orange wind arrow
+         - `var p = elapsed / 1200`
+         - Compute arrow direction from `e.params.direction` (degrees to radians): `var angle = e.params.direction * Math.PI / 180`
+         - Arrow length: `var len = 40 * e.params.strength`
+         - Arrow endpoint: `var ex = e.x + Math.cos(angle) * len`, `var ey = e.y + Math.sin(angle) * len`
+         - Arrow alpha: `var a = (1 - p) * 0.6`
+         - Draw shaft: `ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(ex, ey); ctx.strokeStyle = CLAUDE_ORANGE + a.toFixed(3) + ')'; ctx.lineWidth = 2.5; ctx.stroke()`
+         - Draw arrowhead (same pattern as main.js `drawWindArrow`):
+           - `var headLen = 8`
+           - `ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(ex - Math.cos(angle - 0.4) * headLen, ey - Math.sin(angle - 0.4) * headLen); ctx.moveTo(ex, ey); ctx.lineTo(ex - Math.cos(angle + 0.4) * headLen, ey - Math.sin(angle + 0.4) * headLen); ctx.strokeStyle = CLAUDE_ORANGE + a.toFixed(3) + ')'; ctx.lineWidth = 2.5; ctx.stroke()`
+  - calls: none
+  - returns: void
+  - error handling: none
+
+- signature: `function drawIdlePulse(ctx)`
+  - purpose: Draw gentle heartbeat glow around cursor when Claude is observing (no recent command)
+  - logic:
+    1. If `attentionX < 0`, return
+    2. `var timeSinceCommand = Date.now() - lastCommandTime`
+    3. If `timeSinceCommand < 3000`, return (only show pulse when idle for 3+ seconds)
+    4. Heartbeat uses a double-bump sine pattern:
+       - `var t = (Date.now() % 1500) / 1500` (1.5 second cycle)
+       - `var beat = 0`
+       - If `t < 0.15`: `beat = Math.sin(t / 0.15 * Math.PI)` (first bump)
+       - Else if `t < 0.3`: `beat = 0` (gap)
+       - Else if `t < 0.45`: `beat = Math.sin((t - 0.3) / 0.15 * Math.PI) * 0.6` (second bump, smaller)
+       - Else: `beat = 0` (rest)
+    5. If `beat > 0`:
+       - `var pulseRadius = CURSOR_SIZE / 2 + 4 + beat * 6`
+       - `var pulseAlpha = beat * 0.25`
+       - `ctx.beginPath()`
+       - `ctx.arc(attentionX, attentionY, pulseRadius, 0, Math.PI * 2)`
+       - `ctx.strokeStyle = CLAUDE_ORANGE + pulseAlpha.toFixed(3) + ')'`
+       - `ctx.lineWidth = 1.5`
+       - `ctx.stroke()`
+  - calls: none
+  - returns: void
+  - error handling: none
+
+#### Wiring / Integration (module export)
+At the bottom of the IIFE, expose:
+```javascript
+window.CaretakerRenderer = {
+    onCommand: onCommand,
+    setConnected: setConnected,
+    update: update,
+    drawOverlay: drawOverlay
+};
 ```
 
-Wait form (when no action needed):
-```json
-{"action": "wait", "params": {}, "reasoning": "<1-2 sentence explanation>"}
-```
+Call `init()` at module load time (inside the IIFE, after all function declarations).
 
-State that any output not matching this format will break the pipeline. No markdown fences, no preamble, no trailing text.
+### 3. MODIFY js/caretaker-bridge.js
+- operation: MODIFY
+- reason: Hook into command execution to notify CaretakerRenderer of each command, and notify on connection state changes.
+- anchor: `switch (action) {`
 
-**Section 3: Available Actions**
-
-List each action with its exact param schema:
-
-| Action | Params | Effect |
-|--------|--------|--------|
-| `place_food` | `{"x": <number>, "y": <number>}` | Places food at canvas coordinates. x >= 0, y >= 44 (toolbar height). |
-| `set_light` | `{"level": "bright"\|"dim"\|"dark"}` | Changes ambient light level. |
-| `set_temp` | `{"level": "neutral"\|"warm"\|"cool"}` | Changes temperature. |
-| `touch` | `{"x": <number>, "y": <number>}` or `{}` | Touches at coordinates, or fly center if omitted. |
-| `blow_wind` | `{"strength": <0-1>, "direction": <degrees>}` | Blows wind. Strength 0-1, direction in degrees. |
-| `clear_food` | `{}` | Removes all food from canvas. |
-
-**Section 4: State Schema**
-
-Document the exact JSON schema the agent receives as its prompt input:
-
-```
-{
-  "drives": {
-    "hunger": 0.0-1.0,    // increases over time, decreases when fed
-    "fear": 0.0-1.0,      // spikes on touch/wind, decays over ~10s
-    "fatigue": 0.0-1.0,   // increases with activity, decreases at rest
-    "curiosity": 0.0-1.0, // fluctuates randomly
-    "groom": 0.0-1.0      // grooming urge
-  },
-  "behavior": {
-    "current": "idle"|"walk"|"feed"|"groom"|"fly"|"rest"|"explore"|"startle"|"phototaxis",
-    "enterTime": <unix_ms>,   // Date.now() when behavior started
-    "groomLocation": <string> // body part being groomed, if grooming
-  },
-  "position": {
-    "x": <number>,        // canvas x coordinate
-    "y": <number>,        // canvas y coordinate (y >= 44 is below toolbar)
-    "facingDir": <radians>, // direction fly faces
-    "speed": <number>     // current movement speed
-  },
-  "firingStats": {
-    "firedNeurons": <number> // count of neurons that fired recently
-  },
-  "food": [               // array of food items on canvas
-    {"x": <number>, "y": <number>, "radius": <number>, "eaten": <0-1>}
-  ],
-  "environment": {
-    "lightLevel": 0|1|2,  // 0=bright, 1=dim, 2=dark
-    "temperature": 0|1|2  // 0=neutral, 1=warm, 2=cool
-  }
+#### Modification 1: Notify renderer on command
+After the `switch` block (after the closing `}` of the switch on line 71), add:
+```javascript
+if (typeof CaretakerRenderer !== 'undefined') {
+    CaretakerRenderer.onCommand(action, params);
 }
 ```
 
-**Section 5: Policy Rules**
+Exact anchor for placement: Insert AFTER line 71 (`}` closing the default case), BEFORE the closing `}` of `executeCommand()` function.
 
-Write each rule as a numbered item with exact thresholds and the action to take. These are evaluated in priority order (highest priority first):
-
-1. **Fear backoff**: If the `FEAR_BACKOFF` flag is present in the input metadata (set by run.sh when fear > 0.5 was detected in the last 30s), output `{"action": "wait", "params": {}, "reasoning": "Backing off -- fear spike detected within last 30s"}`. Do not take any action during backoff.
-
-2. **No stacking stressors**: Never issue `blow_wind`, `touch`, or `set_light` with level `"bright"` in the same decision cycle. If the environment already has `lightLevel: 0` (bright), do not also issue `touch` or `blow_wind`. If the fly's fear > 0.3, do not issue any of these three.
-
-3. **Fear > 0.3 -- comfort the fly**: If `drives.fear > 0.3` and `environment.temperature !== 0`, issue `{"action": "set_temp", "params": {"level": "neutral"}, "reasoning": "Fear elevated at <value>, setting temperature to neutral to reduce stress"}`.
-
-4. **Hunger > 0.6 -- feed the fly**: If `drives.hunger > 0.6` and `food.length === 0` (no food on canvas), place food near the fly but NOT on top of it. Compute food placement as:
-   - Pick a random cardinal offset: one of (+80, 0), (-80, 0), (0, +80), (0, -80)
-   - Add offset to fly position: `x = position.x + offsetX`, `y = position.y + offsetY`
-   - Clamp: `x = max(20, min(x, 800))`, `y = max(64, min(y, 560))`
-   - Issue `{"action": "place_food", "params": {"x": <computed_x>, "y": <computed_y>}, "reasoning": "Hunger at <value>, placing food ~80px from fly"}`
-   - If food already exists on canvas (`food.length > 0`), do NOT place more food. Wait instead.
-
-5. **Fatigue > 0.5 -- dim lights**: If `drives.fatigue > 0.5` and `environment.lightLevel === 0` (bright), issue `{"action": "set_light", "params": {"level": "dim"}, "reasoning": "Fatigue at <value>, dimming lights to encourage rest"}`.
-
-6. **Idle > 120s -- stimulate**: If `behavior.current === "idle"` and `(now - behavior.enterTime) / 1000 > 120` (where `now` is provided in input metadata), vary stimuli to spark curiosity. Alternate between:
-   - If `food.length === 0`: place food (same offset logic as rule 4)
-   - If food already exists: issue a light touch at the fly's position `{"action": "touch", "params": {}, "reasoning": "Idle for >120s, gentle touch to spark curiosity"}`
-   - Only issue the touch if fear < 0.3 (respect rule 2)
-
-7. **Default -- wait**: If no rule triggers, output `{"action": "wait", "params": {}, "reasoning": "All drives within normal range, observing"}`.
-
-**Section 6: Important Notes**
-
-- You receive a single JSON state snapshot. You output a single JSON action. No multi-turn conversation.
-- Clamp coordinates: x in [20, 800], y in [64, 560]. These are safe canvas bounds.
-- Prefer doing nothing over doing something harmful. When in doubt, wait.
-- Never place food at the fly's exact position -- always offset by at least 60px.
-- The `FEAR_BACKOFF` and `CURRENT_TIME` fields are injected by the launch script into your prompt, not part of the state JSON.
-
-### 2. CREATE agent/run.sh
-- operation: CREATE
-- reason: Shell script that starts the caretaker server, runs the Claude Code decision loop, and manages state between iterations (fear backoff tracking, log reading, command relay).
-
-#### Shebang and Settings
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
+The existing code ends:
+```javascript
+      default:
+        console.warn('[caretaker] Unknown action:', action);
+    }
+  }
 ```
 
-#### Constants
-```bash
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-POLICY="$SCRIPT_DIR/caretaker-policy.md"
-SERVER="$PROJECT_DIR/server/caretaker.js"
-LOG="$PROJECT_DIR/caretaker.log"
-DECISION_LOG="$PROJECT_DIR/caretaker-decisions.log"
-FIFO="/tmp/caretaker_cmd_pipe_$$"
-LOOP_INTERVAL=5
-FEAR_BACKOFF_DURATION=30
-SERVER_PID=""
-FEAR_SPIKE_TIME=0
+Change to:
+```javascript
+      default:
+        console.warn('[caretaker] Unknown action:', action);
+    }
+    if (typeof CaretakerRenderer !== 'undefined') {
+      CaretakerRenderer.onCommand(action, params);
+    }
+  }
 ```
 
-#### Function: cleanup()
-- signature: `cleanup()`
-- purpose: Kill server process, remove FIFO, close file descriptor
-- logic:
-  1. If `SERVER_PID` is non-empty and process exists (`kill -0 "$SERVER_PID" 2>/dev/null`), send `kill "$SERVER_PID"` and `wait "$SERVER_PID" 2>/dev/null`
-  2. Close fd 3 with `exec 3>&-` (suppress errors)
-  3. Remove FIFO with `rm -f "$FIFO"`
-  4. Print `"[caretaker] Shutdown complete"` to stderr
-- wiring: Registered as trap handler: `trap cleanup EXIT INT TERM`
+#### Modification 2: Notify renderer on connection state
+Anchor: `connected = true;` (line 81, inside ws.onopen)
 
-#### Function: check_deps()
-- signature: `check_deps()`
-- purpose: Verify required commands exist before starting
-- logic:
-  1. Check `command -v node >/dev/null 2>&1` -- if missing, print `"Error: node is required but not found"` to stderr and `exit 1`
-  2. Check `command -v jq >/dev/null 2>&1` -- if missing, print `"Error: jq is required but not found. Install with: brew install jq"` to stderr and `exit 1`
-  3. Check `command -v claude >/dev/null 2>&1` -- if missing, print `"Error: claude CLI is required but not found. Install Claude Code first."` to stderr and `exit 1`
-  4. Check `[[ -f "$POLICY" ]]` -- if missing, print `"Error: Policy file not found at $POLICY"` to stderr and `exit 1`
-  5. Check `[[ -f "$SERVER" ]]` -- if missing, print `"Error: Server not found at $SERVER"` to stderr and `exit 1`
-
-#### Function: start_server()
-- signature: `start_server()`
-- purpose: Create FIFO, start the caretaker server with stdin from FIFO, open FIFO for writing
-- logic:
-  1. `mkfifo "$FIFO"`
-  2. Start server in background: `node "$SERVER" < "$FIFO" &`
-  3. Capture PID: `SERVER_PID=$!`
-  4. Sleep 1 second to let server start and open FIFO for reading: `sleep 1`
-  5. Open FIFO for writing on fd 3: `exec 3>"$FIFO"`
-  6. Print `"[caretaker] Server started (PID $SERVER_PID)"` to stderr
-  7. Sleep 2 more seconds to let server fully initialize WebSocket: `sleep 2`
-  8. Print `"[caretaker] Waiting for browser connection..."` to stderr
-
-#### Function: get_latest_state()
-- signature: `get_latest_state()`
-- purpose: Read the most recent observation from caretaker.log and print the state JSON to stdout
-- logic:
-  1. If `[[ ! -f "$LOG" ]]`, print `""` (empty string) to stdout and return 1
-  2. Read the last observation line: `STATE_LINE=$(grep '"type":"observation"' "$LOG" | tail -1)`
-  3. If `STATE_LINE` is empty, print `""` to stdout and return 1
-  4. Extract the `.data` field: `echo "$STATE_LINE" | jq -r '.data'`
-  5. Return 0
-
-#### Function: check_fear_backoff()
-- signature: `check_fear_backoff(state_json)`
-- purpose: Check if fear > 0.5 in current state and update FEAR_SPIKE_TIME. Return 0 if in backoff, 1 if not.
-- logic:
-  1. Extract fear: `FEAR=$(echo "$1" | jq -r '.drives.fear')`
-  2. Get current time: `NOW=$(date +%s)`
-  3. If fear > 0.5 (use `bc` or awk: `echo "$FEAR > 0.5" | bc -l` returns 1): set `FEAR_SPIKE_TIME=$NOW`
-  4. Compute elapsed: `ELAPSED=$((NOW - FEAR_SPIKE_TIME))`
-  5. If `FEAR_SPIKE_TIME > 0` AND `ELAPSED < $FEAR_BACKOFF_DURATION`: return 0 (in backoff)
-  6. Else: return 1 (not in backoff)
-- note: Use awk for float comparison instead of bc since bc may not be available: `awk "BEGIN {exit !($FEAR > 0.5)}"`
-
-#### Function: send_command()
-- signature: `send_command(json_string)`
-- purpose: Write a command JSON line to the server via fd 3 and log it
-- logic:
-  1. `echo "$1" >&3`
-  2. Append to decision log: `echo "{\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"command\":$1}" >> "$DECISION_LOG"`
-
-#### Function: log_decision()
-- signature: `log_decision(state_json, response_json, in_backoff)`
-- purpose: Write a structured decision log entry
-- logic:
-  1. Construct JSON: `jq -n --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg backoff "$3" --argjson state "$1" --argjson response "$2" '{timestamp: $ts, backoff: ($backoff == "true"), state_summary: {hunger: $state.drives.hunger, fear: $state.drives.fear, fatigue: $state.drives.fatigue, behavior: $state.behavior.current}, response: $response}'`
-  2. Append to `$DECISION_LOG`
-
-#### Main Script Body
-- logic (executed sequentially):
-  1. Call `check_deps`
-  2. Register trap: `trap cleanup EXIT INT TERM`
-  3. Call `start_server`
-  4. Print `"[caretaker] Decision loop starting (interval: ${LOOP_INTERVAL}s)"` to stderr
-  5. Read policy file into variable: `POLICY_CONTENT=$(cat "$POLICY")`
-  6. Enter infinite loop: `while true; do ... done`
-
-#### Main Loop Body (inside `while true`)
-- logic (each iteration):
-  1. Sleep: `sleep "$LOOP_INTERVAL"`
-  2. Check server is still running: `if ! kill -0 "$SERVER_PID" 2>/dev/null; then echo "[caretaker] Server died, exiting" >&2; exit 1; fi`
-  3. Get latest state: `STATE=$(get_latest_state)` -- if return code is non-zero or STATE is empty, print `"[caretaker] No state available yet, waiting..."` to stderr and `continue`
-  4. Check fear backoff: call `check_fear_backoff "$STATE"`. Capture result in `IN_BACKOFF` variable (`true` or `false`).
-  5. Build the prompt string for Claude. The prompt is the state JSON plus metadata:
-     ```bash
-     CURRENT_TIME=$(date +%s%3N)
-     PROMPT="CURRENT_TIME: ${CURRENT_TIME}
-     FEAR_BACKOFF: ${IN_BACKOFF}
-
-     Current fly state:
-     ${STATE}"
-     ```
-  6. Call Claude Code:
-     ```bash
-     RESPONSE=$(command claude -p \
-       --system-prompt "$POLICY_CONTENT" \
-       --no-session-persistence \
-       --model haiku \
-       --max-budget-usd 0.01 \
-       2>/dev/null) || true
-     ```
-     Notes:
-     - Use `command claude` (not bare `claude`) to bypass shell function wrappers
-     - Use `--model haiku` for cost efficiency on a 5s loop (Haiku is fast and cheap for simple policy evaluation)
-     - Use `--max-budget-usd 0.01` as a safety cap per invocation
-     - Redirect stderr to /dev/null to suppress Claude CLI startup noise
-     - `|| true` prevents set -e from exiting on non-zero Claude exit code
-     - The prompt is passed as a positional argument (the state text) after all flags
-  7. Validate response is valid JSON with an `action` field:
-     ```bash
-     ACTION=$(echo "$RESPONSE" | jq -r '.action' 2>/dev/null)
-     if [[ -z "$ACTION" || "$ACTION" == "null" ]]; then
-       echo "[caretaker] Invalid response from Claude, skipping" >&2
-       continue
-     fi
-     ```
-  8. Log the decision: call `log_decision "$STATE" "$RESPONSE" "$IN_BACKOFF"`
-  9. If `ACTION` equals `"wait"`, print `"[caretaker] Action: wait -- $(echo "$RESPONSE" | jq -r '.reasoning')"` to stderr and `continue`
-  10. Validate action is in allowed set:
-      ```bash
-      case "$ACTION" in
-        place_food|set_light|set_temp|touch|blow_wind|clear_food) ;;
-        *) echo "[caretaker] Unknown action '$ACTION', skipping" >&2; continue ;;
-      esac
-      ```
-  11. Send command to server: `send_command "$RESPONSE"`
-  12. Print `"[caretaker] Action: $ACTION -- $(echo "$RESPONSE" | jq -r '.reasoning')"` to stderr
-
-#### Full Prompt Construction Detail
-
-The prompt passed to `claude -p` must be the positional argument (after all flags). The exact invocation:
-
-```bash
-RESPONSE=$(command claude -p \
-  --system-prompt "$POLICY_CONTENT" \
-  --no-session-persistence \
-  --model haiku \
-  --max-budget-usd 0.01 \
-  "$PROMPT" \
-  2>/dev/null) || true
+After `connected = true;` on line 81, add:
+```javascript
+if (typeof CaretakerRenderer !== 'undefined') { CaretakerRenderer.setConnected(true); }
 ```
 
-Where `$PROMPT` is the state string built in step 5.
+Anchor: `connected = false;` (line 88, inside ws.onclose)
 
-#### File Permissions
-- After creating `agent/run.sh`, make it executable: the builder must run `chmod +x agent/run.sh`
+After `connected = false;` on line 88, add:
+```javascript
+if (typeof CaretakerRenderer !== 'undefined') { CaretakerRenderer.setConnected(false); }
+```
+
+### 4. MODIFY js/main.js
+- operation: MODIFY
+- reason: Call CaretakerRenderer.update() in the update loop and CaretakerRenderer.drawOverlay() in the draw function.
+- anchor (draw function): `ctx.fillStyle = 'rgba(255,255,255,0.08)';`
+- anchor (update/loop): `if (typeof Brain3D !== 'undefined' && Brain3D.active) { Brain3D.update(); }`
+
+#### Modification 1: Add overlay drawing at end of draw()
+Find the debug dot block at the end of `draw()` (line 1840-1844):
+```javascript
+    // Small dot showing fly's "nose" target for debugging (very faint)
+    ctx.beginPath();
+    ctx.arc(fly.x, fly.y, 2, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    ctx.fill();
+```
+
+AFTER this block (after `ctx.fill();` on line 1844), insert:
+```javascript
+    if (typeof CaretakerRenderer !== 'undefined') { CaretakerRenderer.drawOverlay(ctx); }
+```
+
+#### Modification 2: Add CaretakerRenderer.update() in loop
+Find the loop function (line 1869). The existing code on line 1880-1881:
+```javascript
+    update(dt);
+    if (typeof Brain3D !== 'undefined' && Brain3D.active) { Brain3D.update(); }
+```
+
+AFTER the Brain3D update line (line 1881), insert:
+```javascript
+    if (typeof CaretakerRenderer !== 'undefined') { CaretakerRenderer.update(dt); }
+```
+
+### 5. MODIFY index.html
+- operation: MODIFY
+- reason: Load caretaker-renderer.js before caretaker-bridge.js so the renderer is available when commands arrive.
+- anchor: `<script src="./js/caretaker-bridge.js"></script>`
+
+Find line 99:
+```html
+<script src="./js/caretaker-bridge.js"></script>
+```
+
+Insert BEFORE this line:
+```html
+<script src="./js/caretaker-renderer.js"></script>
+```
+
+So the final order is:
+```html
+<script src="./js/main.js"></script>
+<script src="./js/caretaker-renderer.js"></script>
+<script src="./js/caretaker-bridge.js"></script>
+```
+
+### 6. MODIFY css/main.css
+- operation: MODIFY
+- reason: Add CSS class for toolbar button highlight when Claude uses a tool.
+- anchor: `.tool-btn.active {`
+
+Find the `.tool-btn.active` block (around line 237-241 based on the exploration data). AFTER the closing `}` of `.tool-btn.active`, add:
+
+```css
+.tool-btn.claude-highlight {
+    border-color: #E3734B;
+    box-shadow: 0 0 8px rgba(227, 115, 75, 0.4);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+```
+
+Note: The `box-shadow: 0 0 8px` is a subtle functional highlight, not a decorative glow per the pattern rules. It uses `rgba(227, 115, 75, 0.4)` -- barely visible, serves as a signal that Claude used this button. This is intentionally restrained. The transition ensures smooth fade-in; the 1500ms setTimeout in highlightToolbar() handles the fade-out by removing the class (which transitions back to no box-shadow).
 
 ## Verification
-- build: `node -c server/caretaker.js` (syntax check existing server -- should pass, confirms no accidental edits)
-- lint: `bash -n agent/run.sh` (bash syntax check on the new script)
-- test: no existing tests for this subsystem
-- smoke: Run `cat agent/caretaker-policy.md | head -5` and verify it starts with the role description. Run `bash -n agent/run.sh && echo OK` and verify it prints OK. Run `grep -c '"action"' agent/caretaker-policy.md` and verify count is > 5 (policy references actions multiple times). Verify `agent/run.sh` has executable permission with `test -x agent/run.sh && echo executable`.
+- build: No build step (vanilla JS). Verify no syntax errors: `node -e "var fs=require('fs'); fs.readFileSync('js/caretaker-renderer.js','utf8');"` (exits 0 if file is valid UTF-8)
+- lint: No lint configured. Manual check: open `index.html` in browser and check console for JS errors.
+- test: No existing test suite covers rendering. Verify manually.
+- smoke:
+  1. Open `index.html` in a browser
+  2. Verify no console errors on page load (CaretakerRenderer should init silently, cursor SVG should load)
+  3. Start the caretaker server: `node server/caretaker.js`
+  4. Verify `[caretaker] Connected` appears in browser console
+  5. Send a test command via stdin to the server: `echo '{"action":"place_food","params":{"x":400,"y":300},"reasoning":"test"}' | node -e "process.stdin.pipe(process.stdout)"` (or use the agent loop)
+  6. When a `place_food` command arrives, verify:
+     - Orange ripple animation appears at the food coordinates
+     - Claude cursor (orange spark icon) appears and lerps to that position
+     - "Feed" toolbar button briefly glows with orange border
+     - Faint orange trail line follows cursor movement
+  7. After 3+ seconds with no commands, verify the cursor shows a gentle heartbeat pulse
+  8. When the WebSocket disconnects, verify all Claude visual indicators disappear
 
 ## Constraints
-- Do NOT modify any existing files (`server/caretaker.js`, `js/caretaker-bridge.js`, `index.html`, `package.json`). T8.1 is complete and these files must not change.
-- Do NOT create any files outside the `agent/` directory. The only two files to create are `agent/caretaker-policy.md` and `agent/run.sh`.
-- Do NOT install any new npm packages or system dependencies.
-- Do NOT use `--system-prompt-file` -- it does not exist in the Claude CLI. Use `--system-prompt "$POLICY_CONTENT"` where `POLICY_CONTENT` is read via `cat`.
-- The policy file (`caretaker-policy.md`) must be pure prose/markdown -- no shell code, no executable content. It is consumed as a system prompt string.
-- `run.sh` must use `command claude` (not bare `claude`) to avoid shell function interference.
-- The FIFO path must include `$$` (PID) to avoid collisions if multiple instances run: `/tmp/caretaker_cmd_pipe_$$`.
-- Use `--model haiku` for cost efficiency. The caretaker policy is simple enough for Haiku and runs every 5 seconds.
-- All float comparisons in bash must use `awk` (not `bc`), since `bc` is not guaranteed on macOS.
-- Do not add the `agent/` directory to `.gitignore` -- these files should be committed.
-- The `caretaker-policy.md` must NOT contain single quotes that would break `--system-prompt "$POLICY_CONTENT"` shell expansion. Use double quotes or rephrase. Actually: since `POLICY_CONTENT` is in double quotes, single quotes inside are fine. Avoid unescaped backticks, dollar signs, and double quotes inside the policy file, OR ensure the builder reads the policy into a variable before expansion. Safest approach: the policy file should avoid `$`, backticks, and unescaped double quotes. Use words instead of special characters where possible.
+- Do NOT modify `server/caretaker.js` -- it is the server relay, not a rendering concern
+- Do NOT modify `js/fly-logic.js`, `js/connectome.js`, `js/brain-worker-bridge.js`, or `js/neuro-renderer.js` -- this task is purely cosmetic overlay rendering
+- Do NOT add any npm dependencies or build steps
+- Do NOT use gradients, glassmorphism, neon glows, or decorative effects beyond the specified indicators (per pattern #1)
+- The ONLY allowed box-shadow is `0 0 8px rgba(227, 115, 75, 0.4)` on the toolbar highlight (functional, not decorative)
+- The ONLY allowed transitions are `border-color 0.2s ease` and `box-shadow 0.2s ease` (per pattern #1)
+- All canvas rendering uses `rgba(227, 115, 75, ...)` with varying alpha -- no other colors for Claude indicators
+- The CaretakerRenderer module must be fully defensive: all references to `fly`, `BRAIN`, `behavior` etc. are accessed as globals from main.js. Guard with `typeof` checks where appropriate.
+- The overlay is purely cosmetic -- it must NOT modify any simulation state (`BRAIN`, `fly`, `food`, `behavior`, etc.)
+- The `claude-highlight` CSS class must coexist with the existing `active` class (they are independent -- a button can have both)

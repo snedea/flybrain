@@ -1,42 +1,41 @@
-# Build Claims -- T8.2
+# Build Claims -- T8.3
 
 ## Files Changed
-- [CREATE] agent/caretaker-policy.md -- Caretaker policy document defining the Claude Code system prompt with role, output format, available actions, state schema, 7 priority-ordered policy rules, and safety notes
-- [CREATE] agent/run.sh -- Bash launch script that starts caretaker server via FIFO, runs a 5s decision loop calling Claude Code with the policy, tracks fear backoff state, validates and relays commands, logs decisions
+- [CREATE] svg/claude-cursor.svg -- Claude logo silhouette SVG (4-pointed spark + dot, 20x20, filled #E3734B)
+- [CREATE] js/caretaker-renderer.js -- Canvas overlay IIFE module exposing window.CaretakerRenderer with onCommand, setConnected, update, drawOverlay methods
+- [MODIFY] js/caretaker-bridge.js -- Added CaretakerRenderer.onCommand() call after executeCommand switch block; added CaretakerRenderer.setConnected(true/false) in ws.onopen and ws.onclose
+- [MODIFY] js/main.js -- Added CaretakerRenderer.drawOverlay(ctx) at end of draw() (line 1845); added CaretakerRenderer.update(dt) in loop() after Brain3D.update (line 1883)
+- [MODIFY] index.html -- Added script tag for caretaker-renderer.js before caretaker-bridge.js (line 99)
+- [MODIFY] css/main.css -- Added .tool-btn.claude-highlight class with orange border and box-shadow after .tool-btn.active block (line 271)
 
 ## Verification Results
-- Build: PASS (node -c server/caretaker.js -- existing server syntax unchanged)
-- Lint: PASS (bash -n agent/run.sh -- no syntax errors)
-- Tests: SKIPPED (no existing test suite for agent subsystem)
-- Smoke: PASS (policy starts with role description, 8 action references found (>5), run.sh is executable)
+- Build: PASS (node -e "new Function(require('fs').readFileSync('js/caretaker-renderer.js','utf8'))" -- syntax valid)
+- Tests: PASS (node tests/run-node.js -- 99 passed / 0 failed / 99 total)
+- Lint: SKIPPED (no lint configured)
 
 ## Claims
-- [ ] agent/caretaker-policy.md contains all 6 sections: Role, Output Format, Available Actions, State Schema, Policy Rules, Important Notes
-- [ ] Policy defines 7 priority-ordered rules: (1) fear backoff, (2) no stacking stressors, (3) fear > 0.3 comfort, (4) hunger > 0.6 feed, (5) fatigue > 0.5 dim lights, (6) idle > 120s stimulate, (7) default wait
-- [ ] Policy output format requires raw JSON only (no markdown fences, no preamble)
-- [ ] Policy specifies food placement offset of 80px in cardinal directions with clamping to [20,800] x [64,560]
-- [ ] Policy forbids placing food at fly's exact position (minimum 60px offset)
-- [ ] Policy forbids stacking stressors (no simultaneous wind + touch + bright)
-- [ ] agent/run.sh has executable permission (chmod +x applied)
-- [ ] run.sh checks for node, jq, and claude CLI dependencies before starting
-- [ ] run.sh creates a PID-namespaced FIFO at /tmp/caretaker_cmd_pipe_$$ to avoid collisions
-- [ ] run.sh starts server with FIFO stdin and opens fd 3 for writing commands
-- [ ] run.sh cleanup trap kills server, closes fd 3, and removes FIFO on EXIT/INT/TERM
-- [ ] run.sh decision loop sleeps LOOP_INTERVAL (5s), reads latest state from caretaker.log via grep + jq
-- [ ] run.sh tracks FEAR_SPIKE_TIME and enforces 30s backoff when fear > 0.5 detected
-- [ ] run.sh uses awk (not bc) for float comparisons (macOS compatibility)
-- [ ] run.sh invokes claude with: command claude -p --system-prompt, --no-session-persistence, --model haiku, --max-budget-usd 0.01
-- [ ] run.sh validates Claude response is valid JSON with an action field before relaying
-- [ ] run.sh validates action is in allowed set (place_food, set_light, set_temp, touch, blow_wind, clear_food) via case statement
-- [ ] run.sh logs decisions to caretaker-decisions.log with timestamp, backoff state, state summary, and response
-- [ ] No existing files were modified (server/caretaker.js, js/caretaker-bridge.js, index.html, package.json untouched)
-- [ ] No files created outside agent/ directory (except .buildloop/build-claims.md)
+- [ ] svg/claude-cursor.svg is a valid SVG with viewBox="0 0 20 20", containing a 4-pointed spark path and circle, both fill="#E3734B"
+- [ ] js/caretaker-renderer.js is an IIFE that exposes window.CaretakerRenderer with exactly 4 public methods: onCommand, setConnected, update, drawOverlay
+- [ ] init() loads the cursor SVG into an Image element at module load time, with onerror fallback logging
+- [ ] onCommand() handles all 7 action types (place_food, touch, blow_wind, set_light, set_temp, clear_food, default) per plan specification
+- [ ] onCommand() pushes 'ripple' effect for place_food, 'ring' for touch, 'arrow' for blow_wind, and calls highlightToolbar with correct tool names
+- [ ] setConnected(false) clears attentionX/Y to -1 and empties trail and activeEffects arrays, hiding all indicators
+- [ ] update() lerps attention position toward target at speed 0.08, snaps within 0.5px, manages trail points (max 40, lifetime 2000ms), prunes expired effects by type-specific durations (ripple 800ms, ring 600ms, arrow 1200ms)
+- [ ] drawOverlay() renders trail, effects, cursor, and idle pulse in that order; returns immediately if not connected
+- [ ] drawTrail() draws faint orange line segments with alpha based on age (max 0.25 opacity)
+- [ ] drawCursor() renders SVG image at 0.85 globalAlpha, with diamond fallback if SVG fails to load
+- [ ] drawEffects() renders ripple (2 concentric expanding rings), ring (expanding ring + inner fill flash), and arrow (shaft + arrowhead) effects all in Claude orange
+- [ ] drawIdlePulse() shows heartbeat glow (double-bump sine, 1.5s cycle) only after 3+ seconds of no commands
+- [ ] highlightToolbar() adds 'claude-highlight' CSS class to matching .tool-btn[data-tool] for 1500ms
+- [ ] All CaretakerRenderer calls in caretaker-bridge.js and main.js are guarded with typeof !== 'undefined' checks
+- [ ] caretaker-renderer.js is loaded before caretaker-bridge.js in index.html (line 99 vs 100)
+- [ ] .tool-btn.claude-highlight CSS uses only the allowed box-shadow (0 0 8px rgba(227,115,75,0.4)) and transitions (border-color 0.2s, box-shadow 0.2s)
+- [ ] The overlay is purely cosmetic -- no simulation state (BRAIN, fly, food, behavior) is modified by any CaretakerRenderer function
+- [ ] All canvas rendering uses rgba(227, 115, 75, ...) exclusively for Claude indicators
+- [ ] Existing 99 tests continue to pass with no regressions
 
 ## Gaps and Assumptions
-- The claude CLI flag --no-session-persistence is assumed to exist based on the plan; not verified at runtime
-- The --max-budget-usd flag is assumed to exist in the current Claude Code CLI version
-- date +%s%3N for millisecond timestamps may not work on all macOS versions (GNU date vs BSD date) -- on BSD date it may output literal %3N. This would affect the CURRENT_TIME metadata but not break the loop.
-- The policy file contains no dollar signs, backticks, or unescaped double quotes that would break shell expansion via --system-prompt "$POLICY_CONTENT"
-- The FIFO + backgrounded node approach assumes node opens stdin for reading immediately; a 1s sleep is used as buffer but may be insufficient on slow machines
-- No end-to-end integration test was run (requires browser + WebSocket connection)
-- The policy instructs the LLM to pick a "random" cardinal direction, but LLM randomness is not truly random -- it may favor certain directions
+- Browser rendering not tested (no headless browser in CI); SVG loading, canvas drawing, and CSS highlight are verified by code inspection only
+- The `fly` global variable is referenced in onCommand() without a typeof guard; if onCommand fires before main.js initializes `fly`, it would throw. In practice this cannot happen because caretaker-bridge.js waits for BRAIN to be defined before connecting, and fly is initialized before BRAIN.
+- The `CLAUDE_ORANGE_HEX` variable is declared but unused in the module (plan specified it as state but no function references it)
+- No automated test covers the renderer itself; verification is syntax check + existing test suite regression check

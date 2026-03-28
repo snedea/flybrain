@@ -69,6 +69,9 @@
       default:
         console.warn('[caretaker] Unknown action:', action);
     }
+    if (typeof CaretakerRenderer !== 'undefined') {
+      CaretakerRenderer.onCommand(action, params);
+    }
   }
 
   function connect() {
@@ -79,6 +82,7 @@
     }
     ws.onopen = function() {
       connected = true;
+      if (typeof CaretakerRenderer !== 'undefined') { CaretakerRenderer.setConnected(true); }
       console.log('[caretaker] Connected to ' + WS_URL);
       stateTimer = setInterval(sendState, STATE_INTERVAL);
       sendState();
@@ -86,6 +90,7 @@
     ws.onmessage = function(event) { executeCommand(event.data); };
     ws.onclose = function() {
       connected = false;
+      if (typeof CaretakerRenderer !== 'undefined') { CaretakerRenderer.setConnected(false); }
       if (stateTimer !== null) { clearInterval(stateTimer); stateTimer = null; }
       console.log('[caretaker] Disconnected, reconnecting in ' + (RECONNECT_DELAY / 1000) + 's');
       reconnectTimer = setTimeout(connect, RECONNECT_DELAY);

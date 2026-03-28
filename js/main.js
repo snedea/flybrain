@@ -1842,6 +1842,7 @@ function draw() {
 	ctx.arc(fly.x, fly.y, 2, 0, Math.PI * 2);
 	ctx.fillStyle = 'rgba(255,255,255,0.08)';
 	ctx.fill();
+	if (typeof CaretakerRenderer !== 'undefined') { CaretakerRenderer.drawOverlay(ctx); }
 }
 
 // --- Resize (with high-DPI support) ---
@@ -1879,6 +1880,7 @@ function loop(timestamp) {
 	if (dt > 100) dt = 100;
 	update(dt);
 	if (typeof Brain3D !== 'undefined' && Brain3D.active) { Brain3D.update(); }
+	if (typeof CaretakerRenderer !== 'undefined') { CaretakerRenderer.update(dt); }
 	draw();
 	requestAnimationFrame(loop);
 }
