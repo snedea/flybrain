@@ -248,6 +248,109 @@ function openDb(dbPath) {
       return { date: dateStr, composite_score: composite, total_feeds: totalFeeds, avg_hunger: avgHunger, fear_incidents: fearIncidents, avg_response_time: avgResponseTime };
     },
 
+    getAnalyticsSummary: function(dateStr) {
+      var dayStart = dateStr + 'T00:00:00.000Z';
+      var dayEnd = dateStr + 'T23:59:59.999Z';
+
+      var scoreRow = db.prepare(
+        'SELECT composite_score, total_feeds, avg_hunger, fear_incidents FROM daily_scores WHERE date = ?'
+      ).get(dateStr);
+
+      var feedsToday = db.prepare(
+        'SELECT COUNT(*) as cnt FROM actions WHERE action = \'place_food\' AND timestamp >= ? AND timestamp <= ?'
+      ).get(dayStart, dayEnd).cnt;
+
+      var fearToday = db.prepare(
+        'SELECT COUNT(*) as cnt FROM incidents WHERE type = \'scared_the_fly\' AND timestamp >= ? AND timestamp <= ?'
+      ).get(dayStart, dayEnd).cnt;
+
+      var obsCount = db.prepare(
+        'SELECT COUNT(*) as cnt FROM observations WHERE timestamp >= ? AND timestamp <= ?'
+      ).get(dayStart, dayEnd).cnt;
+
+      // Compute avg response time dynamically from raw data
+      var hungerBreaches = db.prepare(
+        'SELECT id, timestamp FROM observations WHERE hunger > 0.7 AND timestamp >= ? AND timestamp <= ? ORDER BY id ASC'
+      ).all(dayStart, dayEnd);
+
+      var foodPlacements = db.prepare(
+        'SELECT timestamp FROM actions WHERE action = \'place_food\' AND timestamp >= ? AND timestamp <= ? ORDER BY timestamp ASC'
+      ).all(dayStart, dayEnd);
+
+      var responseTimes = [];
+      for (var i = 0; i < hungerBreaches.length; i++) {
+        var breachTime = new Date(hungerBreaches[i].timestamp).getTime();
+        for (var j = 0; j < foodPlacements.length; j++) {
+          var foodTime = new Date(foodPlacements[j].timestamp).getTime();
+          if (foodTime >= breachTime) {
+            responseTimes.push((foodTime - breachTime) / 1000);
+            break;
+          }
+        }
+      }
+      var avgResponseTime = null;
+      if (responseTimes.length > 0) {
+        var sum = 0;
+        for (var rt = 0; rt < responseTimes.length; rt++) sum += responseTimes[rt];
+        avgResponseTime = Math.round((sum / responseTimes.length) * 10) / 10;
+      }
+
+      // Feeding frequency: feeds per connected hour
+      var feedsPerHour = 0;
+      if (obsCount > 0) {
+        var connectedHoursEst = Math.max(1, obsCount * 10 / 3600);
+        feedsPerHour = Math.round((feedsToday / connectedHoursEst) * 100) / 100;
+      }
+
+      // Active hours from observation gaps
+      var obsTimes = db.prepare(
+        'SELECT timestamp FROM observations WHERE timestamp >= ? AND timestamp <= ? ORDER BY id ASC'
+      ).all(dayStart, dayEnd);
+
+      var connectedSeconds = 0;
+      if (obsTimes.length >= 2) {
+        connectedSeconds += 10; // first observation interval
+        for (var ot = 0; ot < obsTimes.length - 1; ot++) {
+          var gap = (new Date(obsTimes[ot + 1].timestamp).getTime() - new Date(obsTimes[ot].timestamp).getTime()) / 1000;
+          if (gap <= 60) connectedSeconds += gap;
+        }
+      }
+      var connectedHours = obsTimes.length >= 2 ? Math.round(connectedSeconds / 360) / 10 : 0;
+
+      return {
+        composite_score: scoreRow ? scoreRow.composite_score : null,
+        total_feeds: feedsToday,
+        avg_hunger: scoreRow ? scoreRow.avg_hunger : null,
+        fear_incidents: fearToday,
+        avg_response_time: avgResponseTime,
+        feeds_per_hour: feedsPerHour,
+        connected_hours: connectedHours
+      };
+    },
+
+    getHungerTimeline: function(limit) {
+      if (limit === undefined) limit = 120;
+      var observations = db.prepare(
+        'SELECT timestamp, hunger FROM observations ORDER BY id DESC LIMIT ?'
+      ).all(limit);
+      observations.reverse();
+
+      var windowStart, windowEnd;
+      if (observations.length > 0) {
+        windowStart = observations[0].timestamp;
+        windowEnd = observations[observations.length - 1].timestamp;
+      } else {
+        windowStart = new Date().toISOString();
+        windowEnd = windowStart;
+      }
+
+      var feedMarkers = db.prepare(
+        'SELECT timestamp FROM actions WHERE action = \'place_food\' AND timestamp >= ? AND timestamp <= ? ORDER BY timestamp ASC'
+      ).all(windowStart, windowEnd);
+
+      return { observations: observations, feedMarkers: feedMarkers };
+    },
+
     close: function() {
       db.close();
     },

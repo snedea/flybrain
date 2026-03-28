@@ -1,558 +1,383 @@
-# Plan: T8.7
-
-Left sidebar -- Chat Box. Add a chat input below the activity feed. User sends questions to Claude with DB context. Chat history persisted in chat_messages table.
+# Plan: T8.8
 
 ## Dependencies
-- list: [@anthropic-ai/sdk] (Claude API client for Node.js)
-- commands: ["cd /Users/name/homelab/flybrain && npm install @anthropic-ai/sdk"]
-- env: ANTHROPIC_API_KEY must be set in the environment before starting the server (add to example.env as placeholder)
+- list: none (all dependencies already installed -- better-sqlite3, ws, @anthropic-ai/sdk)
+- commands: none
 
 ## File Operations (in execution order)
 
-### 1. CREATE agent/chat-policy.md
-- operation: CREATE
-- reason: System prompt for chat mode -- tells Claude how to answer user questions about the fly using DB context
-
-#### Content
-The file must contain exactly this system prompt (no frontmatter, just markdown):
-
-```
-# Chat Mode -- FlyBrain Caretaker
-
-## Role
-
-You are the AI caretaker for a virtual Drosophila (fruit fly) in the FlyBrain simulation. The user is asking you questions about your caretaking -- why you took certain actions, what the fly needs, how it's doing. You have access to database context injected below.
-
-## How to Answer
-
-- Reference specific timestamps, action names, and drive values from the provided context.
-- If the context shows you scared the fly, own it. If you forgot to feed it, explain why.
-- Be conversational but data-backed. Quote numbers: "At 14:32:05, hunger was 0.87 and I placed food at (320, 280)."
-- If you don't have enough context to answer, say so honestly.
-- Keep answers concise -- 2-4 sentences for simple questions, up to a paragraph for complex ones.
-- Use the fly's drive values, behavior states, and incident history to support your answers.
-
-## Context Format
-
-You will receive context blocks labeled:
-- **Recent Observations**: Last N state snapshots (drives, behavior, position)
-- **Recent Actions**: Last N caretaker actions with reasoning
-- **Recent Incidents**: Last N incidents (scared_the_fly, forgot_to_feed)
-- **User's Current View**: What the user sees in the UI right now (if provided)
-
-## Important
-
-- Do not output JSON. Respond in natural language.
-- Do not make up data. Only reference what is in the provided context.
-- Current date is injected in the context header -- use it for relative time references.
-```
-
-### 2. MODIFY server/db.js
+### 1. MODIFY server/db.js
 - operation: MODIFY
-- reason: Add query methods for chat context (recent observations, actions, incidents) and chat history retrieval
-- anchor: `getRecentActivity: function(limit) {`
+- reason: Add two new query methods for the analytics endpoints: getAnalyticsSummary and getHungerTimeline
+- anchor: `close: function() {`
 
 #### Functions
 
-Add these methods to the returned object from `openDb()`, after the `getRecentActivity` method and before the `computeDailyScore` method.
-
-- signature: `getRecentObservations: function(limit)`
-  - purpose: Fetch last N observations with parsed drives/behavior for chat context
+- signature: `getAnalyticsSummary: function(dateStr)`
+  - purpose: Return today's caretaker metrics for the analytics panel
   - logic:
-    1. If limit is undefined, set limit to 20
-    2. Execute SQL: `SELECT timestamp, hunger, fear, fatigue, curiosity, groom, behavior, pos_x, pos_y, food_count, light_level, temperature FROM observations ORDER BY id DESC LIMIT ?` with param limit
-    3. Reverse the result array (so entries are in chronological order, oldest first)
-    4. Return the reversed array
-  - returns: Array of row objects in chronological order (oldest first)
+    1. Compute dayStart = dateStr + 'T00:00:00.000Z' and dayEnd = dateStr + 'T23:59:59.999Z'
+    2. Query daily_scores for the given date: `SELECT composite_score, total_feeds, avg_hunger, fear_incidents FROM daily_scores WHERE date = ?` using dateStr. Store result as `scoreRow` (may be null).
+    3. Query total feeds today: `SELECT COUNT(*) as cnt FROM actions WHERE action = 'place_food' AND timestamp >= ? AND timestamp <= ?` using dayStart, dayEnd. Store as `feedsToday`.
+    4. Query fear incidents today: `SELECT COUNT(*) as cnt FROM incidents WHERE type = 'scared_the_fly' AND timestamp >= ? AND timestamp <= ?` using dayStart, dayEnd. Store as `fearToday`.
+    5. Query observation count today: `SELECT COUNT(*) as cnt FROM observations WHERE timestamp >= ? AND timestamp <= ?` using dayStart, dayEnd. Store as `obsCount`.
+    6. Compute avg response time dynamically (not from the buggy daily_scores.avg_response_time column):
+       - Query all hunger-threshold-breach observations: `SELECT id, timestamp FROM observations WHERE hunger > 0.7 AND timestamp >= ? AND timestamp <= ? ORDER BY id ASC` using dayStart, dayEnd. Store as `hungerBreaches`.
+       - Query all place_food actions: `SELECT timestamp FROM actions WHERE action = 'place_food' AND timestamp >= ? AND timestamp <= ? ORDER BY timestamp ASC` using dayStart, dayEnd. Store as `foodPlacements`.
+       - For each hungerBreach, find the first foodPlacement whose timestamp is >= the breach timestamp. Compute delta in seconds. Collect all deltas into an array `responseTimes`.
+       - If responseTimes.length > 0, compute avgResponseTime = sum of responseTimes / responseTimes.length, rounded to 1 decimal. Else avgResponseTime = null.
+    7. Compute feeding frequency: feedsPerHour = feedsToday / max(1, obsCount * 10 / 3600). Round to 2 decimals. This converts observation count (at 10s intervals) to approximate connected hours. If obsCount is 0, feedsPerHour = 0.
+    8. Compute active hours estimate:
+       - Query: `SELECT timestamp FROM observations WHERE timestamp >= ? AND timestamp <= ? ORDER BY id ASC` using dayStart, dayEnd. Store as `obsTimes`.
+       - Iterate obsTimes. For each consecutive pair, compute gap = (new Date(obsTimes[i+1].timestamp).getTime() - new Date(obsTimes[i].timestamp).getTime()) / 1000. If gap <= 60 seconds, add gap to `connectedSeconds`. (Gaps > 60s indicate disconnection.)
+       - If obsTimes.length >= 2, add 10 to connectedSeconds for the first observation interval.
+       - Compute connectedHours = Math.round(connectedSeconds / 360) / 10 (round to 1 decimal, in hours).
+       - If obsTimes.length < 2, connectedHours = 0.
+    9. Return object: `{ composite_score: scoreRow ? scoreRow.composite_score : null, total_feeds: feedsToday, avg_hunger: scoreRow ? scoreRow.avg_hunger : null, fear_incidents: fearToday, avg_response_time: avgResponseTime, feeds_per_hour: feedsPerHour, connected_hours: connectedHours }`
+  - calls: db.prepare().get() and db.prepare().all() (inline, not cached statements -- these are called infrequently)
+  - returns: object with keys composite_score, total_feeds, avg_hunger, fear_incidents, avg_response_time, feeds_per_hour, connected_hours
+  - error handling: If any query returns null/empty, use fallback values (null for scores, 0 for counts)
 
-- signature: `getRecentActions: function(limit)`
-  - purpose: Fetch last N caretaker actions for chat context
+- signature: `getHungerTimeline: function(limit)`
+  - purpose: Return recent observations (hunger + timestamp) and food placement timestamps for sparkline chart
   - logic:
-    1. If limit is undefined, set limit to 20
-    2. Execute SQL: `SELECT timestamp, action, params, reasoning FROM actions ORDER BY id DESC LIMIT ?` with param limit
-    3. Reverse the result array
-    4. Return the reversed array
-  - returns: Array of row objects in chronological order
-
-- signature: `getRecentIncidents: function(limit)`
-  - purpose: Fetch last N incidents for chat context
-  - logic:
-    1. If limit is undefined, set limit to 20
-    2. Execute SQL: `SELECT timestamp, type, severity, description FROM incidents ORDER BY id DESC LIMIT ?` with param limit
-    3. Reverse the result array
-    4. Return the reversed array
-  - returns: Array of row objects in chronological order
-
-- signature: `getChatHistory: function(limit)`
-  - purpose: Fetch last N chat messages for conversation history display
-  - logic:
-    1. If limit is undefined, set limit to 50
-    2. Execute SQL: `SELECT id, timestamp, role, message FROM chat_messages ORDER BY id DESC LIMIT ?` with param limit
-    3. Reverse the result array
-    4. Return the reversed array
-  - returns: Array of row objects in chronological order
+    1. If limit is undefined, set limit = 120.
+    2. Query observations: `SELECT timestamp, hunger FROM observations ORDER BY id DESC LIMIT ?` using limit. Store as `observations`. Call `observations.reverse()` to get chronological order.
+    3. Determine time window: if observations.length > 0, set windowStart = observations[0].timestamp, windowEnd = observations[observations.length - 1].timestamp. Else windowStart = new Date().toISOString(), windowEnd = windowStart.
+    4. Query food placements within that window: `SELECT timestamp FROM actions WHERE action = 'place_food' AND timestamp >= ? AND timestamp <= ? ORDER BY timestamp ASC` using windowStart, windowEnd. Store as `feedMarkers`.
+    5. Return object: `{ observations: observations, feedMarkers: feedMarkers }`
+  - calls: db.prepare().all()
+  - returns: object with keys observations (array of {timestamp, hunger}) and feedMarkers (array of {timestamp})
+  - error handling: If no observations, return { observations: [], feedMarkers: [] }
 
 #### Wiring / Integration
-These are added as properties on the object returned by `openDb()`, between line 173 (end of `getRecentActivity`) and line 176 (start of `computeDailyScore`). Each uses `db.prepare(...).all(limit)` pattern consistent with `getRecentActivity`.
+- Both methods are added to the returned object from `openDb()`, right before the `close` method. Insert them as new properties of the returned object literal.
+- Anchor for insertion point: the line `close: function() {` at db.js:251. Add both methods BEFORE this line, each followed by a comma.
 
-### 3. MODIFY server/caretaker.js
+### 2. MODIFY server/caretaker.js
 - operation: MODIFY
-- reason: Add HTTP POST /chat endpoint that queries DB for context, calls Claude API, persists messages, returns response. Also add GET /chat/history endpoint.
-
-#### Imports / Dependencies
-At the top of the file (after existing require statements on lines 1-6), add:
-```
-var Anthropic = require('@anthropic-ai/sdk');
-var chatPolicyPath = path.join(__dirname, '..', 'agent', 'chat-policy.md');
-var chatPolicyContent = fs.readFileSync(chatPolicyPath, 'utf-8');
-var anthropic = new Anthropic();
-```
-
-The `Anthropic` constructor reads `ANTHROPIC_API_KEY` from `process.env` automatically.
-
-#### Functions
-
-- signature: `function buildChatContext(userMessage)`
-  - purpose: Query DB for recent observations, actions, incidents and format them as a context string for Claude
-  - logic:
-    1. Get current UTC date string: `new Date().toISOString().slice(0, 19) + 'Z'`
-    2. Call `caretakerDb.getRecentObservations(20)` -- store as `observations`
-    3. Call `caretakerDb.getRecentActions(20)` -- store as `actions`
-    4. Call `caretakerDb.getRecentIncidents(20)` -- store as `incidents`
-    5. Build context string by concatenating these sections:
-       - `"Current date: " + currentDate + "\n\n"`
-       - `"## Recent Observations (last " + observations.length + ")\n\n"` followed by each observation formatted as: `"- " + obs.timestamp + " | behavior=" + obs.behavior + " hunger=" + (obs.hunger != null ? obs.hunger.toFixed(2) : "?") + " fear=" + (obs.fear != null ? obs.fear.toFixed(2) : "?") + " fatigue=" + (obs.fatigue != null ? obs.fatigue.toFixed(2) : "?") + " curiosity=" + (obs.curiosity != null ? obs.curiosity.toFixed(2) : "?") + " food_count=" + obs.food_count + "\n"`
-       - `"\n## Recent Actions (last " + actions.length + ")\n\n"` followed by each action formatted as: `"- " + act.timestamp + " | " + act.action + " params=" + act.params + " reason: " + act.reasoning + "\n"`
-       - `"\n## Recent Incidents (last " + incidents.length + ")\n\n"` followed by each incident formatted as: `"- " + inc.timestamp + " | " + inc.type + " [" + inc.severity + "] " + inc.description + "\n"`
-       - If no entries in a section, write `"(none)\n"`
-    6. Return the context string
-  - returns: string
-
-- signature: `async function handleChatRequest(userMessage, viewContext)`
-  - purpose: Send user message + DB context to Claude API, persist both messages, return assistant response
-  - logic:
-    1. Build context string by calling `buildChatContext(userMessage)`
-    2. Build system prompt: concatenate `chatPolicyContent` + `"\n\n---\n\n"` + context string
-    3. If `viewContext` is not null and not undefined, append `"\n\n## User's Current View\n\n" + JSON.stringify(viewContext)` to the system prompt
-    4. Call `caretakerDb.getChatHistory(20)` to get recent history
-    5. Build `messages` array for the Anthropic API. For each row in history, push `{ role: row.role, content: row.message }`. Then push `{ role: 'user', content: userMessage }`.
-    6. Call Claude API: `var response = await anthropic.messages.create({ model: 'claude-sonnet-4-20250514', max_tokens: 512, system: systemPrompt, messages: messages })`
-    7. Extract the assistant text: `var assistantMessage = response.content[0].text`
-    8. Get current timestamp: `var ts = new Date().toISOString()`
-    9. Call `caretakerDb.insertChatMessage(ts, 'user', userMessage)`
-    10. Call `caretakerDb.insertChatMessage(ts, 'assistant', assistantMessage)`
-    11. Return object: `{ role: 'assistant', message: assistantMessage, timestamp: ts }`
-  - calls: `buildChatContext(userMessage)`, `caretakerDb.getChatHistory(20)`, `anthropic.messages.create(...)`, `caretakerDb.insertChatMessage(...)`
-  - returns: `{ role: string, message: string, timestamp: string }`
-  - error handling: If the anthropic.messages.create call throws, catch the error and return `{ role: 'assistant', message: 'Sorry, I could not process that question. Error: ' + err.message, timestamp: new Date().toISOString(), error: true }`
-
-#### Wiring / Integration
-
-Modify the HTTP server request handler (the `http.createServer` callback at line 112) to add two new routes before the 404 fallback.
-
+- reason: Add two GET endpoint handlers for /analytics/summary and /analytics/hunger-timeline
 - anchor: `res.writeHead(404);`
 
-The existing server handler currently has:
-```javascript
-var server = http.createServer(function(req, res) {
-  if (req.method === 'GET' && req.url === '/state') {
-    ...
-    return;
-  }
-  res.writeHead(404);
-  res.end('Not found');
-});
-```
+#### Functions (route handlers -- inline in the http.createServer callback)
 
-Replace the section from `res.writeHead(404);` through `res.end('Not found');` with:
+- Handler 1: GET /analytics/summary
+  - signature: inline `if (req.method === 'GET' && req.url === '/analytics/summary')` block
+  - purpose: Return today's analytics summary JSON
+  - logic:
+    1. Compute today = new Date().toISOString().slice(0, 10)
+    2. Call caretakerDb.getAnalyticsSummary(today) and store result as `summary`
+    3. res.writeHead(200, { 'Content-Type': 'application/json' })
+    4. res.end(JSON.stringify(summary))
+    5. return
+  - error handling: Wrap in try/catch. On error, res.writeHead(500, ...), res.end(JSON.stringify({ error: 'Internal error' }))
 
-```javascript
-  if (req.method === 'POST' && req.url === '/chat') {
-    var body = '';
-    req.on('data', function(chunk) { body += chunk; });
-    req.on('end', function() {
-      var parsed;
-      try { parsed = JSON.parse(body); } catch (e) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Invalid JSON' }));
-        return;
-      }
-      if (!parsed.message || typeof parsed.message !== 'string' || parsed.message.trim() === '') {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'message field is required' }));
-        return;
-      }
-      handleChatRequest(parsed.message.trim(), parsed.context || null)
-        .then(function(result) {
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(result));
-        })
-        .catch(function(err) {
-          process.stderr.write('[caretaker] chat error: ' + err.message + '\n');
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Internal error' }));
-        });
-    });
-    return;
-  }
-  if (req.method === 'GET' && req.url === '/chat/history') {
-    var history = caretakerDb.getChatHistory(50);
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(history));
-    return;
-  }
-  res.writeHead(404);
-  res.end('Not found');
-```
+- Handler 2: GET /analytics/hunger-timeline
+  - signature: inline `if (req.method === 'GET' && req.url === '/analytics/hunger-timeline')` block
+  - purpose: Return recent hunger observations and feed marker timestamps
+  - logic:
+    1. Call caretakerDb.getHungerTimeline(120) and store result as `timeline`
+    2. res.writeHead(200, { 'Content-Type': 'application/json' })
+    3. res.end(JSON.stringify(timeline))
+    4. return
+  - error handling: Wrap in try/catch. On error, res.writeHead(500, ...), res.end(JSON.stringify({ error: 'Internal error' }))
 
-Also add CORS headers: Modify the `http.createServer` callback to handle OPTIONS preflight and add CORS headers on all responses. At the very start of the callback (before the GET /state check), add:
+#### Wiring / Integration
+- Insert both route handlers BEFORE the 404 handler. The anchor line is `res.writeHead(404);` at caretaker.js:233. Place the two new `if` blocks immediately before this line, following the exact same pattern as the existing GET /state, POST /chat, and GET /chat/history handlers.
 
-```javascript
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204);
-    res.end();
-    return;
-  }
-```
+### 3. CREATE js/caretaker-analytics.js
+- operation: CREATE
+- reason: New frontend module for the analytics panel -- fetches data from server, renders sparkline SVGs, handles collapse/expand
 
-Anchor for this insertion: `if (req.method === 'GET' && req.url === '/state') {`
+#### Imports / Dependencies
+- No imports. This is a browser IIFE like caretaker-sidebar.js. Accesses DOM and fetch API.
 
-Insert the CORS lines immediately before that `if` statement.
+#### Module Structure
+- Wrap entire file in `(function() { ... })();`
+- Expose `window.CaretakerAnalytics = { init: init, refresh: refresh }` at the end of the IIFE
+
+#### Variables (module-level inside IIFE)
+- `var API_URL = 'http://' + (location.hostname || 'localhost') + ':7600';`
+- `var analyticsSection = null;`
+- `var analyticsContent = null;`
+- `var analyticsToggle = null;`
+- `var refreshTimer = null;`
+- `var REFRESH_INTERVAL = 30000;`
+
+#### Functions
+
+- signature: `function init()`
+  - purpose: Bind DOM elements, set up toggle, trigger initial fetch, start refresh timer
+  - logic:
+    1. Set analyticsSection = document.getElementById('analytics-section')
+    2. If analyticsSection is null, return (panel not in DOM)
+    3. Set analyticsContent = document.getElementById('analytics-content')
+    4. Set analyticsToggle = document.getElementById('analytics-toggle')
+    5. If analyticsToggle is not null, add click event listener that calls togglePanel()
+    6. Call refresh()
+    7. Set refreshTimer = setInterval(refresh, REFRESH_INTERVAL)
+  - returns: void
+
+- signature: `function togglePanel()`
+  - purpose: Expand/collapse the analytics content area
+  - logic:
+    1. If analyticsContent is null, return
+    2. var isCollapsed = analyticsContent.classList.contains('collapsed')
+    3. If isCollapsed: analyticsContent.classList.remove('collapsed'), analyticsToggle.textContent = 'Hide'
+    4. Else: analyticsContent.classList.add('collapsed'), analyticsToggle.textContent = 'Show'
+  - returns: void
+
+- signature: `function refresh()`
+  - purpose: Fetch both analytics endpoints and render all metrics
+  - logic:
+    1. Call Promise.all([fetch(API_URL + '/analytics/summary').then(r => r.json()), fetch(API_URL + '/analytics/hunger-timeline').then(r => r.json())])
+    2. In the .then handler, receive [summary, timeline]
+    3. Call renderMetrics(summary, timeline)
+    4. In the .catch handler, log warning to console: console.warn('[analytics] fetch error:', err.message)
+  - calls: renderMetrics(summary, timeline)
+  - returns: void
+
+- signature: `function renderMetrics(summary, timeline)`
+  - purpose: Build the HTML content for all 6 metrics inside analyticsContent
+  - logic:
+    1. If analyticsContent is null, return
+    2. Build HTML string `var html = ''`
+    3. Append score metric: `html += renderScoreGauge(summary.composite_score)`
+    4. Append hunger sparkline: `html += renderHungerSparkline(timeline.observations, timeline.feedMarkers)`
+    5. Append fear incidents: `html += renderMetricRow('Fear Incidents', summary.fear_incidents !== null ? summary.fear_incidents : 0, '/today', 'error')`
+    6. Append avg response time: `html += renderMetricRow('Avg Response', summary.avg_response_time !== null ? summary.avg_response_time.toFixed(1) + 's' : 'N/A', '', null)`
+    7. Append feeding frequency: `html += renderMetricRow('Feed Rate', summary.feeds_per_hour !== null ? summary.feeds_per_hour.toFixed(1) : '0', '/hr', null)`
+    8. Append active hours: `html += renderMetricRow('Active Time', summary.connected_hours !== null ? summary.connected_hours.toFixed(1) : '0', 'hrs', null)`
+    9. Set analyticsContent.innerHTML = html
+  - calls: renderScoreGauge, renderHungerSparkline, renderMetricRow
+  - returns: void
+
+- signature: `function renderScoreGauge(score)`
+  - purpose: Render the composite caretaker score (0-100) as a colored number with label
+  - logic:
+    1. If score is null, set displayScore = '--', color = 'var(--text-muted)'
+    2. Else, set displayScore = Math.round(score), determine color: if score >= 80 then 'var(--success)', else if score >= 50 then 'var(--warning)', else 'var(--error)'
+    3. Return string: `'<div class="analytics-metric analytics-score"><div class="analytics-score-value" style="color:' + color + '">' + displayScore + '</div><div class="analytics-metric-label">Caretaker Score</div></div>'`
+  - returns: HTML string
+
+- signature: `function renderHungerSparkline(observations, feedMarkers)`
+  - purpose: Render an inline SVG sparkline of hunger values over time, with vertical lines at feed events
+  - logic:
+    1. If observations is null or observations.length === 0, return `'<div class="analytics-metric"><div class="analytics-metric-label">Hunger Timeline</div><div class="analytics-sparkline-empty">No data yet</div></div>'`
+    2. Set SVG dimensions: var W = 240, H = 40
+    3. Build array of {x, y} points:
+       - var startTime = new Date(observations[0].timestamp).getTime()
+       - var endTime = new Date(observations[observations.length - 1].timestamp).getTime()
+       - var timeRange = Math.max(1, endTime - startTime)
+       - For each observation at index i: x = ((new Date(observations[i].timestamp).getTime() - startTime) / timeRange) * W, y = H - (observations[i].hunger * H). Clamp y to [0, H].
+    4. Build polyline points string: join all points as 'x,y' separated by spaces
+    5. Build feed marker lines: for each feedMarker, compute markerX = ((new Date(feedMarker.timestamp).getTime() - startTime) / timeRange) * W. If markerX >= 0 and markerX <= W, create `'<line x1="' + markerX + '" y1="0" x2="' + markerX + '" y2="' + H + '" stroke="var(--success)" stroke-width="1" opacity="0.6"/>'`
+    6. Build threshold line at hunger=0.7: var threshY = H - (0.7 * H). Create `'<line x1="0" y1="' + threshY + '" x2="' + W + '" y2="' + threshY + '" stroke="var(--warning)" stroke-width="0.5" stroke-dasharray="3,3" opacity="0.5"/>'`
+    7. Assemble SVG: `'<svg viewBox="0 0 ' + W + ' ' + H + '" class="analytics-sparkline-svg" preserveAspectRatio="none">' + thresholdLine + feedMarkerLines + '<polyline points="' + pointsStr + '" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>'`
+    8. Return string: `'<div class="analytics-metric"><div class="analytics-metric-label">Hunger Timeline <span class="analytics-legend"><span class="analytics-legend-marker" style="background:var(--success)"></span>fed <span class="analytics-legend-marker" style="background:var(--warning)"></span>0.7</span></div><div class="analytics-sparkline-container">' + svg + '</div></div>'`
+  - returns: HTML string
+
+- signature: `function renderMetricRow(label, value, unit, colorKey)`
+  - purpose: Render a single metric row with label and value
+  - logic:
+    1. var colorStyle = ''
+    2. If colorKey is not null: colorStyle = ' style="color:var(--' + colorKey + ')"'
+    3. Return string: `'<div class="analytics-metric"><div class="analytics-metric-value"' + colorStyle + '>' + value + '<span class="analytics-metric-unit">' + unit + '</span></div><div class="analytics-metric-label">' + label + '</div></div>'`
+  - returns: HTML string
 
 ### 4. MODIFY index.html
 - operation: MODIFY
-- reason: Add chat box HTML below the activity feed inside the caretaker sidebar
+- reason: Add analytics section HTML inside the sidebar, add script tag for caretaker-analytics.js
 
-- anchor: `<div class="activity-feed" id="activity-feed-list"></div>`
-
-Replace:
+#### Change 1: Add analytics section HTML
+- anchor: `</div>` closing tag of `<div class="chat-section" id="chat-section">` at line 98 (the `</div>` right before `</div>` of `#caretaker-sidebar`)
+- After the closing `</div>` of `.chat-section` (line 98) and before the closing `</div>` of `#caretaker-sidebar` (line 99), insert:
 ```html
-        <div class="activity-feed" id="activity-feed-list"></div>
-    </div>
-```
-
-With:
-```html
-        <div class="activity-feed" id="activity-feed-list"></div>
-        <div class="chat-section" id="chat-section">
-            <div class="chat-history" id="chat-history"></div>
-            <div class="chat-input-row">
-                <input type="text" class="chat-input" id="chat-input" placeholder="Ask about the fly..." autocomplete="off" />
-                <button class="chat-send-btn" id="chat-send-btn">Send</button>
+        <div class="analytics-section" id="analytics-section">
+            <div class="analytics-section-header">
+                <span class="analytics-section-title">Analytics</span>
+                <button class="analytics-toggle-btn" id="analytics-toggle">Hide</button>
             </div>
+            <div class="analytics-content" id="analytics-content"></div>
         </div>
-    </div>
 ```
 
-The `</div>` at the end is the closing `</div>` for `#caretaker-sidebar`.
+#### Change 2: Add script tag
+- anchor: `<script type="text/javascript" src="./js/caretaker-sidebar.js?v=17"></script>` at line 127
+- After this line, insert: `    <script type="text/javascript" src="./js/caretaker-analytics.js?v=17"></script>`
+- The new script loads after caretaker-sidebar.js and before caretaker-bridge.js.
 
 ### 5. MODIFY css/main.css
 - operation: MODIFY
-- reason: Add chat section styles (chat history area, input row, message bubbles)
+- reason: Add styles for the analytics section, sparkline charts, metric rows, toggle, and collapsed state
+- anchor: `/* --- Hamburger toggle (hidden on desktop) --- */` at line 1274
 
-- anchor: `.activity-feed::-webkit-scrollbar-thumb:hover {`
-
-Insert the following CSS immediately after the `.activity-feed::-webkit-scrollbar-thumb:hover` rule block (after line 1025, before `.activity-entry {` on line 1028):
+#### Styles to insert
+- Insert the following CSS block BEFORE the line `/* --- Hamburger toggle (hidden on desktop) --- */` at css/main.css:1274:
 
 ```css
-
-.chat-section {
+/* --- Caretaker Analytics Panel --- */
+.analytics-section {
     display: flex;
     flex-direction: column;
     border-top: 1px solid var(--border);
     flex-shrink: 0;
-    max-height: 45%;
-    min-height: 120px;
-}
-
-.chat-history {
-    flex: 1;
+    max-height: 50%;
     overflow-y: auto;
-    padding: 0.5rem;
     scrollbar-width: thin;
     scrollbar-color: rgba(136, 146, 164, 0.3) transparent;
-    font-size: 0.8rem;
 }
 
-.chat-history::-webkit-scrollbar {
+.analytics-section::-webkit-scrollbar {
     width: 6px;
 }
 
-.chat-history::-webkit-scrollbar-track {
+.analytics-section::-webkit-scrollbar-track {
     background: transparent;
 }
 
-.chat-history::-webkit-scrollbar-thumb {
+.analytics-section::-webkit-scrollbar-thumb {
     background: rgba(136, 146, 164, 0.3);
     border-radius: 3px;
 }
 
-.chat-msg {
-    padding: 0.35rem 0.5rem;
-    border-radius: var(--radius);
-    margin-bottom: 0.35rem;
-    line-height: 1.4;
-    word-wrap: break-word;
-}
-
-.chat-msg-user {
-    background: var(--accent-subtle);
-    color: var(--text);
-    text-align: right;
-}
-
-.chat-msg-assistant {
-    background: rgba(42, 58, 92, 0.4);
-    color: var(--text);
-}
-
-.chat-msg-error {
-    background: rgba(248, 113, 113, 0.15);
-    color: var(--error);
-}
-
-.chat-msg-time {
-    font-size: 0.7rem;
-    color: var(--text-muted);
-    margin-bottom: 0.15rem;
-}
-
-.chat-input-row {
+.analytics-section-header {
     display: flex;
-    gap: 0.35rem;
-    padding: 0.5rem;
-    border-top: 1px solid var(--border);
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0.75rem;
     flex-shrink: 0;
 }
 
-.chat-input {
-    flex: 1;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
+.analytics-section-title {
     color: var(--text);
-    padding: 0.4rem 0.6rem;
     font-size: 0.8rem;
-    font-family: system-ui, -apple-system, sans-serif;
-    outline: none;
+    font-weight: 600;
 }
 
-.chat-input:focus {
+.analytics-toggle-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-family: system-ui, -apple-system, sans-serif;
+}
+
+.analytics-toggle-btn:hover {
+    color: var(--text);
     border-color: var(--accent);
 }
 
-.chat-input::placeholder {
+.analytics-content {
+    padding: 0 0.75rem 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.analytics-content.collapsed {
+    display: none;
+}
+
+.analytics-metric {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.analytics-score {
+    align-items: center;
+    padding: 0.5rem 0;
+}
+
+.analytics-score-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+}
+
+.analytics-metric-value {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+}
+
+.analytics-metric-unit {
+    font-size: 0.7rem;
     color: var(--text-muted);
+    font-weight: 400;
+    margin-left: 0.15rem;
 }
 
-.chat-send-btn {
-    background: var(--accent);
-    color: #fff;
-    border: none;
-    border-radius: var(--radius);
-    padding: 0.4rem 0.75rem;
-    font-size: 0.8rem;
-    cursor: pointer;
-    font-family: system-ui, -apple-system, sans-serif;
-    white-space: nowrap;
+.analytics-metric-label {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
 }
 
-.chat-send-btn:hover {
-    background: var(--accent-hover);
+.analytics-legend {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.65rem;
+    margin-left: auto;
 }
 
-.chat-send-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.chat-loading {
+.analytics-legend-marker {
     display: inline-block;
+    width: 8px;
+    height: 3px;
+    border-radius: 1px;
+}
+
+.analytics-sparkline-container {
+    width: 100%;
+    height: 40px;
+    background: var(--bg);
+    border-radius: var(--radius);
+    padding: 0.25rem;
+    box-sizing: border-box;
+}
+
+.analytics-sparkline-svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.analytics-sparkline-empty {
+    font-size: 0.75rem;
     color: var(--text-muted);
-    font-size: 0.8rem;
-    padding: 0.35rem 0.5rem;
+    padding: 0.5rem 0;
+    text-align: center;
 }
-
-.chat-loading::after {
-    content: '...';
-    animation: chatDots 1.2s steps(4, end) infinite;
-}
-
-@keyframes chatDots {
-    0%, 20% { content: ''; }
-    40% { content: '.'; }
-    60% { content: '..'; }
-    80%, 100% { content: '...'; }
-}
-```
-
-### 6. MODIFY js/caretaker-sidebar.js
-- operation: MODIFY
-- reason: Add chat UI logic -- send messages via HTTP POST to /chat endpoint, display chat history, load history on init
-
-- anchor: `function init() {`
-
-#### Strategy
-
-Extend the existing IIFE to add chat functionality. The modifications are:
-
-**A. Add chat variables at the top of the IIFE (after `var userScrolled = false;` on line 4):**
-
-```javascript
-  var chatHistory = null;
-  var chatInput = null;
-  var chatSendBtn = null;
-  var chatLoading = false;
-  var CHAT_API_URL = 'http://' + (location.hostname || 'localhost') + ':7600';
-```
-
-**B. Add chat functions before the `init()` call on line 151:**
-
-- signature: `function formatChatTime(isoString)`
-  - purpose: Format ISO timestamp to short time string
-  - logic: Same as existing `formatTime` function -- `var d = new Date(isoString); return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });`
-  - returns: string
-
-- signature: `function appendChatMessage(role, message, timestamp, isError)`
-  - purpose: Create and append a chat message element to the chat history div
-  - logic:
-    1. If `chatHistory` is null, return
-    2. Create a `div` element
-    3. Set className to `'chat-msg chat-msg-' + (isError ? 'error' : role)`
-    4. Set innerHTML to `'<div class="chat-msg-time">' + (role === 'user' ? 'You' : 'Claude') + ' -- ' + formatChatTime(timestamp) + '</div>' + '<div>' + escapeHtml(message) + '</div>'`
-    5. Append to `chatHistory`
-    6. Set `chatHistory.scrollTop = chatHistory.scrollHeight` to auto-scroll to bottom
-  - returns: void
-
-- signature: `function escapeHtml(str)`
-  - purpose: Escape HTML entities to prevent XSS
-  - logic:
-    1. Create a `div` element: `var d = document.createElement('div')`
-    2. Set `d.textContent = str`
-    3. Return `d.innerHTML`
-  - returns: string
-
-- signature: `function sendChatMessage()`
-  - purpose: Read input value, POST to /chat, display response
-  - logic:
-    1. If `chatInput` is null or `chatLoading` is true, return
-    2. Read `var msg = chatInput.value.trim()`
-    3. If `msg === ''`, return
-    4. Set `chatInput.value = ''`
-    5. Call `appendChatMessage('user', msg, new Date().toISOString(), false)`
-    6. Set `chatLoading = true`
-    7. Set `chatSendBtn.disabled = true`
-    8. Create a loading indicator: `var loadingEl = document.createElement('div'); loadingEl.className = 'chat-loading'; loadingEl.textContent = 'Thinking'; chatHistory.appendChild(loadingEl); chatHistory.scrollTop = chatHistory.scrollHeight;`
-    9. Build the request body: `var body = JSON.stringify({ message: msg, context: null })`
-    10. Call `fetch(CHAT_API_URL + '/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body })`
-    11. In the `.then(function(res) { return res.json(); })` handler:
-    12. In the next `.then(function(data) { ... })`:
-        - Remove `loadingEl` from `chatHistory` if it is still a child
-        - If `data.error` is truthy, call `appendChatMessage('assistant', data.error, new Date().toISOString(), true)`
-        - Else call `appendChatMessage('assistant', data.message, data.timestamp, false)`
-        - Set `chatLoading = false`
-        - Set `chatSendBtn.disabled = false`
-        - Call `chatInput.focus()`
-    13. In the `.catch(function(err) { ... })`:
-        - Remove `loadingEl` from `chatHistory` if it is still a child
-        - Call `appendChatMessage('assistant', 'Connection error: ' + err.message, new Date().toISOString(), true)`
-        - Set `chatLoading = false`
-        - Set `chatSendBtn.disabled = false`
-  - calls: `appendChatMessage`, `fetch`, `escapeHtml` (via appendChatMessage)
-  - returns: void
-
-- signature: `function loadChatHistory()`
-  - purpose: Fetch existing chat history from server on sidebar open and populate the chat history div
-  - logic:
-    1. If `chatHistory` is null, return
-    2. Call `fetch(CHAT_API_URL + '/chat/history')`
-    3. In `.then(function(res) { return res.json(); })`:
-    4. In `.then(function(messages) { ... })`:
-        - Set `chatHistory.innerHTML = ''`
-        - Loop through `messages` array. For each msg, call `appendChatMessage(msg.role, msg.message, msg.timestamp, false)`
-    5. In `.catch(function(err) { ... })`:
-        - `console.warn('[chat] Failed to load history:', err.message)`
-  - calls: `fetch`, `appendChatMessage`
-  - returns: void
-
-**C. Modify the `init()` function to also initialize chat elements:**
-
-Inside `init()`, after the existing `feedList.addEventListener('scroll', ...)` block (after line 39), add:
-
-```javascript
-    chatHistory = document.getElementById('chat-history');
-    chatInput = document.getElementById('chat-input');
-    chatSendBtn = document.getElementById('chat-send-btn');
-
-    if (chatSendBtn) {
-      chatSendBtn.addEventListener('click', sendChatMessage);
-    }
-    if (chatInput) {
-      chatInput.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault();
-          sendChatMessage();
-        }
-      });
-    }
-
-    loadChatHistory();
-```
-
-**D. Add `loadChatHistory` to the exported `window.CaretakerSidebar` object:**
-
-- anchor: `window.CaretakerSidebar = {`
-
-Add `loadChatHistory: loadChatHistory` to the object so it becomes:
-```javascript
-  window.CaretakerSidebar = {
-    init: init,
-    onAction: onAction,
-    onIncident: onIncident,
-    onHistory: onHistory,
-    toggle: toggle,
-    isOpen: isOpen,
-    loadChatHistory: loadChatHistory
-  };
-```
-
-### 7. MODIFY example.env (or CREATE if it does not exist)
-- operation: CREATE (only if the file does not exist; if it exists, MODIFY to add the key)
-- reason: Document the ANTHROPIC_API_KEY requirement
-
-Check if `/Users/name/homelab/flybrain/example.env` exists. If not, create it. If it does, append to it.
-
-Add this line:
-```
-ANTHROPIC_API_KEY=sk-ant-your-key-here
 ```
 
 ## Verification
-- build: `cd /Users/name/homelab/flybrain && npm install`
-- lint: no linter configured (vanilla JS project)
-- test: no existing tests
+- build: No build step (vanilla JS project). Verify server starts: `cd /Users/name/homelab/flybrain && node server/caretaker.js` (should print `[caretaker] WebSocket server on port 7600` to stderr, then Ctrl-C)
+- lint: No linter configured in project
+- test: No existing tests
 - smoke:
-  1. Start server: `cd /Users/name/homelab/flybrain && ANTHROPIC_API_KEY=test node server/caretaker.js` -- verify it starts without errors on port 7600
-  2. Test chat history endpoint: `curl -s http://localhost:7600/chat/history` -- expect `[]` (empty JSON array)
-  3. Test chat endpoint rejects missing message: `curl -s -X POST http://localhost:7600/chat -H 'Content-Type: application/json' -d '{}'` -- expect `{"error":"message field is required"}`
-  4. Verify the sidebar HTML has the chat-section div: `grep 'chat-section' index.html` -- expect a match
-  5. Verify the CSS has chat styles: `grep 'chat-input-row' css/main.css` -- expect a match
-  6. Verify agent/chat-policy.md exists and is non-empty: `test -s agent/chat-policy.md && echo OK`
-  7. Kill the test server after smoke tests
+  1. Start server: `cd /Users/name/homelab/flybrain && node server/caretaker.js &`
+  2. Test analytics/summary endpoint: `curl -s http://localhost:7600/analytics/summary` -- expect JSON with keys composite_score, total_feeds, avg_hunger, fear_incidents, avg_response_time, feeds_per_hour, connected_hours (values may be null/0 if DB is empty)
+  3. Test analytics/hunger-timeline endpoint: `curl -s http://localhost:7600/analytics/hunger-timeline` -- expect JSON with keys observations (array) and feedMarkers (array)
+  4. Kill server: `kill %1`
+  5. Open index.html in browser with server running. Open the left sidebar. Verify the Analytics section appears below the chat section with a "Hide" toggle button. Click "Hide" to collapse, "Show" to expand. Metrics should display (or show fallback values if DB is empty).
 
 ## Constraints
-- Do NOT modify SPEC.md, TASKS.md, CLAUDE.md, or any files in .buildloop/ other than current-plan.md
-- Do NOT add a WebSocket-based chat channel -- use HTTP POST for chat (request/response pattern fits better than streaming for this use case, and avoids multiplexing complexity on the single browserSocket)
-- Do NOT install express or any HTTP framework -- use the existing `http.createServer` in caretaker.js
-- Do NOT modify the caretaker-bridge.js WebSocket message routing -- chat goes over HTTP, not WS
-- Do NOT change the existing activity feed behavior or CSS
-- The `chat_messages` table and `insertChatMessage` method already exist in db.js -- do NOT recreate them
-- Use `claude-sonnet-4-20250514` as the model for chat responses (fast, cost-effective for conversational Q&A)
-- The `@anthropic-ai/sdk` constructor reads ANTHROPIC_API_KEY from process.env automatically -- do NOT hardcode any API keys
-- Persist both user and assistant messages to DB only AFTER successful API response (pattern #5 from known patterns -- never persist before API success)
-- Do NOT add error retry logic or exponential backoff -- a simple try/catch with error message display is sufficient
-- The activity feed `flex: 1` must remain so it fills remaining space above the chat section
-- Chat section `max-height: 45%` prevents it from consuming the entire sidebar
+- Do NOT modify SPEC.md, CLAUDE.md, TASKS.md, or any .buildloop/ files (other than this plan)
+- Do NOT add any npm dependencies
+- Do NOT modify caretaker-bridge.js -- analytics uses polling (setInterval), not WebSocket push
+- Do NOT fix the buggy avg_response_time column in computeDailyScore() -- the analytics endpoint computes real response time dynamically from raw observation/action data instead
+- Do NOT change the version query param (?v=17) on existing script/CSS tags -- only the new script tag uses ?v=17 to match the current version
+- All CSS colors must use existing CSS custom properties (--bg, --surface, --border, --text, --text-muted, --accent, --success, --warning, --error). No hardcoded hex values in new styles except within var() references.
+- All SVG marker/def IDs must be prefixed with 'analytics-' to avoid namespace collisions (pattern #7 from known patterns)
+- The analytics panel must handle empty DB gracefully -- show "No data yet" or fallback values, never broken SVGs or NaN

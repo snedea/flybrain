@@ -230,6 +230,31 @@ var server = http.createServer(function(req, res) {
     res.end(JSON.stringify(history));
     return;
   }
+  if (req.method === 'GET' && req.url === '/analytics/summary') {
+    try {
+      var today = new Date().toISOString().slice(0, 10);
+      var summary = caretakerDb.getAnalyticsSummary(today);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(summary));
+    } catch (err) {
+      process.stderr.write('[caretaker] analytics/summary error: ' + err.message + '\n');
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Internal error' }));
+    }
+    return;
+  }
+  if (req.method === 'GET' && req.url === '/analytics/hunger-timeline') {
+    try {
+      var timeline = caretakerDb.getHungerTimeline(120);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(timeline));
+    } catch (err) {
+      process.stderr.write('[caretaker] analytics/hunger-timeline error: ' + err.message + '\n');
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Internal error' }));
+    }
+    return;
+  }
   res.writeHead(404);
   res.end('Not found');
 });

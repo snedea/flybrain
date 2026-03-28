@@ -1,95 +1,66 @@
-# Scout Report: T8.6
+# Scout Report: T8.8
 
 ## Key Facts (read this first)
 
-- **Tech stack**: Vanilla JS (no build step, no framework), Node.js server with `ws` + `better-sqlite3`, HTML5 canvas, CSS custom properties.
-- **Existing WebSocket**: One WebSocket per browser tab (`browserSocket` variable in `server/caretaker.js`). Currently only sends `command` messages to browser. T8.6 adds two new outbound message types: `activity_action` and `activity_incident`.
-- **No left sidebar exists yet**: `#left-panel` is actually the BOTTOM panel (confusingly named). A new `#caretaker-sidebar` element must be created, modeled after the existing `.education-panel` (right-side overlay) but on the left.
-- **`#sidebarToggle` exists but is desktop-hidden**: The hamburger button (`id="sidebarToggle"`) is in the toolbar but `display: none` on desktop. It currently opens the bottom drawer on mobile. The planner must decide: repurpose it for the activity sidebar on desktop, or add a new "Activity" button.
-- **DB has all needed data**: `actions` and `incidents` tables in `better-sqlite3`. Schema fully defined in `server/db.js`. Need to add `getRecentActivity(limit)` query for initial history on WebSocket connect.
+- **Tech stack**: Vanilla JS (no build step), Node.js WebSocket server (`server/caretaker.js`), SQLite via better-sqlite3 (`server/db.js`). No npm packages on the frontend -- all plain `<script>` tags.
+- **`js/caretaker-analytics.js` does not exist** -- must be created as a new file following the IIFE pattern used in `caretaker-sidebar.js`.
+- **Sidebar HTML lives in `index.html`** and is laid out as a flex column: header -> `.activity-feed` -> `.chat-section`. Analytics panel must be appended after `.chat-section` inside `#caretaker-sidebar`.
+- **`avg_response_time` in `daily_scores` is currently bogus** -- `computeDailyScore()` stores `forgotIncidents` (a count) in that field, not an actual time. The analytics endpoint will need to compute real response time dynamically from DB, or document this gap.
+- **CSS version query param is `?v=17`** -- the new analytics script tag must use `?v=18` (or match whatever bump is applied to other assets) to avoid stale cache.
 
 ## Relevant Files
 
-| File | Role for T8.6 |
-|------|--------------|
-| `server/caretaker.js` | ADD: broadcast `activity_action` on `insertAction`, broadcast `activity_incident` on `insertIncident`; send recent history on new WS connection |
-| `server/db.js` | ADD: `getRecentActivity(limit)` query merging actions + incidents sorted by timestamp desc |
-| `index.html` | ADD: `<div id="caretaker-sidebar">` HTML structure; add `<script src="./js/caretaker-sidebar.js">` |
-| `css/main.css` | ADD: `#caretaker-sidebar` layout (fixed left, slide-in/out, z-index 22); activity feed entry styles; make `#sidebarToggle` visible on desktop |
-| `js/caretaker-sidebar.js` | CREATE: receives WS messages (routed from caretaker-bridge), renders feed entries, handles click-to-expand, auto-scroll logic |
-| `js/caretaker-bridge.js` | MODIFY: route `activity_action` and `activity_incident` WS message types to `CaretakerSidebar` (similar to how it routes `command` to `executeCommand`) |
-| `js/main.js` | MODIFY: wire `#sidebarToggle` to toggle `#caretaker-sidebar` on desktop (or add new toggle button handler) |
+| File | Notes |
+|------|-------|
+| `js/caretaker-sidebar.js` | Pattern to follow for analytics IIFE -- init, fetch, render. Exposes `window.CaretakerSidebar`. |
+| `server/caretaker.js` | HTTP server with existing GET/POST endpoints. New analytics endpoints go here. Pattern: sync `if (req.method === 'GET' && req.url === ...)` blocks. |
+| `server/db.js` | Schema and query methods. `daily_scores` table has `composite_score, total_feeds, avg_hunger, fear_incidents, avg_response_time`. `observations` has per-row `hunger, fear, timestamp`. Needs new query methods for analytics. |
+| `index.html` | Sidebar HTML structure, script load order. Add analytics section div + new `<script>` tag. Version param is `?v=17`. |
+| `css/main.css` | CSS variables: `--bg`, `--surface`, `--border`, `--text`, `--text-muted`, `--accent` (#E3734B), `--radius`. Add sparkline + analytics panel styles in the Caretaker section (around line 951). |
+| `js/caretaker-bridge.js` | Dispatches WebSocket messages to `CaretakerSidebar` -- if analytics needs real-time updates, a hook must be added here for `CaretakerAnalytics`. |
 
 ## Architecture Notes
 
-**WebSocket message flow (current)**:
-```
-Browser -> server: { type: 'state', data: {...} }   (every 1s)
-Server  -> browser: { type: 'command', action, params }  (on stdin cmd)
-```
+**Sidebar layout**: `.caretaker-sidebar` is `display:flex; flex-direction:column`. `.activity-feed` has `flex:1` (takes remaining space). `.chat-section` is `flex-shrink:0; max-height:45%`. Analytics panel should be `flex-shrink:0` with a fixed or max-height, collapsible via a toggle (matching the expandable pattern in the task description).
 
-**After T8.6**:
-```
-Server -> browser: { type: 'activity_action', id, timestamp, action, params, reasoning, flyState }
-Server -> browser: { type: 'activity_incident', id, timestamp, incidentType, severity, description }
-Server -> browser: { type: 'activity_history', entries: [...] }  (on connect, last 50)
-```
+**Data sources**:
+- `GET /analytics/summary` -- today's `daily_scores` row + computed metrics (feeds today, avg hunger today, fear incidents today, avg response time). Returns JSON.
+- `GET /analytics/hunger-timeline` -- last N observations (hunger + timestamp) + last N food actions (timestamp) for feed markers. Returns JSON.
+- Both endpoints are simple synchronous SQLite reads -- no async needed in server code (better-sqlite3 is sync).
 
-**Layout pattern to follow** (`education-panel`):
-```css
-position: fixed;
-top: 44px;       /* below toolbar */
-left: 0;         /* instead of right: 0 */
-bottom: 0;       /* or bottom: 180px to avoid bottom panel overlap */
-width: 280px;
-transform: translateX(-100%);  /* hidden by default */
-transition: transform 0.3s ease;
-z-index: 22;
-```
+**Observations frequency**: `OBSERVATION_INTERVAL_MS = 10000` (10s). For a 24h chart that's up to ~8640 points; use last 100-200 for a readable sparkline (last ~30 minutes).
 
-**`caretaker-bridge.js` routing hook** (line 102): `ws.onmessage = function(event) { executeCommand(event.data); }` -- must be extended to also dispatch activity messages to `CaretakerSidebar`.
+**Active hours (connected vs disconnected)**: No explicit connection log table. Infer from observation timestamp gaps > 60s = "disconnected". The endpoint can compute this from `observations` gaps.
 
-**`getLayoutBounds()` in main.js (line 76)**: returns `left: 0` hardcoded. The canvas uses `window.innerWidth` for fly bounds. If sidebar overlays (not pushes) the canvas, no changes needed to `getLayoutBounds` or fly boundary logic.
+**SVG sparklines**: Inline SVG `<polyline>` with `viewBox="0 0 W H"`. Map data values to SVG coordinates. Feed markers = vertical `<line>` elements at the corresponding x-position. No external library needed.
 
-**Color coding per task spec**:
-- green (`--success: #4ade80`) = `action = 'place_food'`
-- blue (`--neuron-sensory: #3b82f6`) = `action IN ('set_light', 'set_temp')`
-- yellow (`--warning: #fbbf24`) = incident severity `'medium'` or warning-level actions
-- red (`--error: #f87171`) = incident severity `'high'`
-
-**Icon approach**: Use Unicode symbols (no image assets): food=`🍎` → use `◉`, wind=`~`, light=`☀`, temp=`⟳`, touch=`✦`, incident=`⚠`, scared=`!`... Or simple text labels to stay consistent with existing no-emoji style.
+**Real-time updates**: Analytics can be polled (e.g. every 30s with `setInterval`) rather than pushed via WebSocket, since this is aggregate data not a live event stream. No change needed to `caretaker-bridge.js` for the initial implementation.
 
 ## Suggested Approach
 
-1. **`server/db.js`**: Add `getRecentActivity(limit)` that does a UNION of `actions` (mapped to `{kind:'action', ...}`) and `incidents` (mapped to `{kind:'incident', ...}`), ordered by timestamp DESC, LIMIT N.
+1. **`server/db.js`**: Add two new query methods:
+   - `getAnalyticsSummary(dateStr)` -- returns `daily_scores` row for date (or computes if missing), plus active connection estimate.
+   - `getHungerTimeline(limit)` -- returns last N observations (timestamp, hunger) + last M place_food actions (timestamp) joined or separately.
 
-2. **`server/caretaker.js`**:
-   - Add a `broadcastToSidebar(obj)` helper (reuses `browserSocket.send` pattern)
-   - In `handleStdinCommand`, after `caretakerDb.insertAction(...)`, call `broadcastToSidebar({ type: 'activity_action', ... })`
-   - In `detectIncidents`, after each `caretakerDb.insertIncident(...)`, call `broadcastToSidebar({ type: 'activity_incident', ... })`
-   - In `wss.on('connection')`, call `broadcastToSidebar({ type: 'activity_history', entries: caretakerDb.getRecentActivity(50) })`
+2. **`server/caretaker.js`**: Add two new GET routes:
+   - `GET /analytics/summary` -- calls `getAnalyticsSummary(today)`.
+   - `GET /analytics/hunger-timeline` -- calls `getHungerTimeline(120)`.
 
-3. **`js/caretaker-sidebar.js`** (new file, IIFE pattern matching existing files):
-   - `window.CaretakerSidebar = { init, addAction, addIncident, loadHistory, toggle }`
-   - `addEntry(entry)` renders a feed row, prepends to list, handles auto-scroll-if-at-bottom
-   - Click on entry toggles `.expanded` class showing reasoning text
-   - `toggle()` adds/removes `.sidebar-open` class on `#caretaker-sidebar`
+3. **`js/caretaker-analytics.js`**: New IIFE file. On `init()`:
+   - Find/bind DOM elements (analytics section, toggle, chart containers).
+   - `fetch('/analytics/summary')` + `fetch('/analytics/hunger-timeline')`.
+   - Render 6 metrics: score gauge, hunger sparkline with feed markers, fear incidents per hour bar, avg response time, feeding frequency, active hours.
+   - `setInterval(refresh, 30000)` for live-ish updates.
+   - Expose `window.CaretakerAnalytics = { init, refresh }`.
 
-4. **`js/caretaker-bridge.js`**: Extend `ws.onmessage` handler to check `msg.type` before calling `executeCommand` -- if `activity_*`, dispatch to `CaretakerSidebar`.
+4. **`index.html`**: Add `.analytics-section` div after `.chat-section` inside `#caretaker-sidebar`. Add `<script src="./js/caretaker-analytics.js?v=18">`.
 
-5. **`css/main.css`**: Add sidebar styles. Use slide transform pattern from landscape mobile `#left-panel` code as reference (lines 1128-1144 of current CSS).
-
-6. **`index.html`**: Insert `#caretaker-sidebar` div before `</body>`, add `<script>` tag after `caretaker-bridge.js`.
-
-7. **`js/main.js`**: Make `#sidebarToggle` visible on desktop; update its click handler to toggle `#caretaker-sidebar` instead of (or in addition to) the bottom panel.
+5. **`css/main.css`**: Add styles for `.analytics-section`, `.analytics-toggle`, `.sparkline-container`, `.metric-row`, `.metric-value`, `.metric-label`. Keep the dark theme using existing CSS variables.
 
 ## Risks and Constraints (read this last)
 
-- **`#sidebarToggle` repurposing conflict**: On mobile, the button opens the bottom drawer. On desktop, it should open the activity sidebar. Handler in `main.js` (line 508-516) needs to differentiate by calling `isMobile()`. Don't break existing mobile drawer behavior.
-- **Canvas fly bounds use `window.innerWidth`**: If sidebar overlays (not pushes layout), no issue. If sidebar pushes canvas right, fly can walk under the sidebar and food placement coords will be wrong. Recommend overlay approach (same as education-panel).
-- **`bottom: 180px` vs `bottom: 0`**: Sidebar should end at `bottom: 180px` on desktop so it doesn't cover the bottom panel. On mobile it's less critical (bottom panel is 120px and sidebar won't be shown).
-- **Auto-scroll race**: If user is scrolling through history while new entries arrive, naive prepend+scroll breaks UX. Track whether user has scrolled away from top (feed is newest-first), pause auto-scroll if so.
-- **file:// context**: `caretaker-bridge.js` already skips WebSocket in `file://` context (line 116). `CaretakerSidebar` must handle `undefined` state gracefully (no crash if never connected).
-- **Z-index**: `#left-panel` is z-index 20 (bottom panel), `education-panel` is z-index 25. New sidebar should be z-index 22 to layer correctly.
-- **Server only has one browserSocket**: Only one browser client expected. The broadcast pattern is already `browserSocket.send(...)` -- no multi-client concern.
-- **Initial history on page load**: If the server was running before the browser connects, the history query needs to handle empty DB gracefully (no actions/incidents yet).
+- **`avg_response_time` is currently wrong** in `daily_scores` (stores `forgotIncidents` count, not seconds). Need to decide: (a) fix `computeDailyScore()` to compute real response time, or (b) compute it on-the-fly in the analytics endpoint. Option (b) is safer -- avoids touching the scheduled score computation and migration concerns. The real computation: for each `place_food` action, find the most recent observation where `hunger > 0.7` before it, compute delta in seconds.
+- **Sidebar height**: The sidebar is `bottom: 180px` on desktop (leaves room for the left panel at the bottom). Adding a 3rd section risks making the sidebar too tall for small screens. Use `max-height` + `overflow-y: hidden` on the analytics panel with a collapse toggle.
+- **Empty database**: On first run with no data, all analytics will be zero/null. The renderer must handle null/empty gracefully (show "No data yet" placeholder, not a broken SVG).
+- **Version bump**: `index.html` uses `?v=17` on all asset URLs. The new script tag needs `?v=18` (or increment all to v=18 in the same commit to avoid mixed cache state).
+- **Script load order**: `caretaker-analytics.js` should load after `caretaker-sidebar.js` and before `caretaker-bridge.js` (or after -- analytics doesn't depend on bridge events for initial load).

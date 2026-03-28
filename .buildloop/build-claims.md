@@ -1,52 +1,37 @@
-# Build Claims -- T8.7
+# Build Claims -- T8.8
 
 ## Files Changed
-- [CREATE] agent/chat-policy.md -- System prompt for chat mode telling Claude how to answer user questions about the fly using DB context
-- [MODIFY] server/db.js -- Added 4 query methods: getRecentObservations, getRecentActions, getRecentIncidents, getChatHistory
-- [MODIFY] server/caretaker.js -- Added Anthropic SDK import, buildChatContext(), handleChatRequest(), CORS headers, POST /chat and GET /chat/history endpoints
-- [MODIFY] index.html -- Added chat-section div with chat-history, chat-input, and chat-send-btn below activity feed inside caretaker sidebar
-- [MODIFY] css/main.css -- Added 120+ lines of chat styles: .chat-section, .chat-history, .chat-msg variants, .chat-input-row, .chat-send-btn, .chat-loading with animation
-- [MODIFY] js/caretaker-sidebar.js -- Added chat variables, escapeHtml, appendChatMessage, sendChatMessage, loadChatHistory functions; init() now initializes chat elements and binds Enter/click; exported loadChatHistory on window.CaretakerSidebar
-- [CREATE] example.env -- Documents ANTHROPIC_API_KEY requirement with placeholder value
-- [MODIFY] package.json (via npm install) -- Added @anthropic-ai/sdk dependency
+- [MODIFY] server/db.js -- Added getAnalyticsSummary(dateStr) and getHungerTimeline(limit) query methods before close()
+- [MODIFY] server/caretaker.js -- Added GET /analytics/summary and GET /analytics/hunger-timeline route handlers before the 404 handler
+- [CREATE] js/caretaker-analytics.js -- New IIFE frontend module: fetches analytics data, renders score gauge, hunger sparkline SVG, and 4 metric rows; 30s auto-refresh; collapse/expand toggle. Exposes window.CaretakerAnalytics
+- [MODIFY] index.html -- Added analytics-section div inside #caretaker-sidebar after chat-section; added script tag for caretaker-analytics.js between caretaker-sidebar.js and caretaker-bridge.js
+- [MODIFY] css/main.css -- Added 120 lines of analytics panel styles (section, header, toggle, metrics, sparkline, legend, scrollbar) before the hamburger toggle section
 
 ## Verification Results
-- Build: PASS (cd /Users/name/homelab/flybrain && npm install -- "up to date, audited 44 packages, found 0 vulnerabilities")
+- Build: PASS (node -c js/caretaker-analytics.js -- syntax OK; node server/caretaker.js starts and listens on port 7600)
 - Tests: SKIPPED (no test framework configured)
 - Lint: SKIPPED (no linter configured)
-- Smoke Test 1: PASS (server starts on port 7600 with ANTHROPIC_API_KEY=test)
-- Smoke Test 2: PASS (GET /chat/history returns 200 with empty array [])
-- Smoke Test 3: PASS (POST /chat with {} returns 400 {"error":"message field is required"})
-- Smoke Test 4: PASS (grep 'chat-section' index.html finds match)
-- Smoke Test 5: PASS (grep 'chat-input-row' css/main.css finds match)
-- Smoke Test 6: PASS (agent/chat-policy.md exists and is non-empty)
+- Smoke: PASS (curl http://localhost:7600/analytics/summary returns JSON with keys: composite_score, total_feeds, avg_hunger, fear_incidents, avg_response_time, feeds_per_hour, connected_hours; curl http://localhost:7600/analytics/hunger-timeline returns JSON with keys: observations (array of 120), feedMarkers (array of 3))
 
 ## Claims
-- [ ] POST /chat endpoint accepts JSON body with {message: string, context?: object}, validates message is non-empty string, returns 400 on invalid input
-- [ ] POST /chat calls Claude API (claude-sonnet-4-20250514, max_tokens 512) with chat-policy.md as system prompt plus DB context (last 20 observations, actions, incidents)
-- [ ] POST /chat includes last 20 chat_messages from DB as conversation history in the messages array sent to Claude
-- [ ] POST /chat persists both user and assistant messages to chat_messages table ONLY after successful API response
-- [ ] POST /chat returns {role: 'assistant', message: string, timestamp: string} on success, or {error: true, message: string} on API failure
-- [ ] GET /chat/history returns last 50 chat messages in chronological order as JSON array
-- [ ] CORS headers (Access-Control-Allow-Origin: *, Methods, Headers) are set on all HTTP responses; OPTIONS preflight returns 204
-- [ ] db.js getRecentObservations(limit) returns rows in chronological order (oldest first) with drives, behavior, position, food_count
-- [ ] db.js getRecentActions(limit) returns rows in chronological order with timestamp, action, params, reasoning
-- [ ] db.js getRecentIncidents(limit) returns rows in chronological order with timestamp, type, severity, description
-- [ ] db.js getChatHistory(limit) returns rows in chronological order with id, timestamp, role, message
-- [ ] index.html contains chat-section div with chat-history, chat-input, and chat-send-btn inside the caretaker-sidebar
-- [ ] CSS styles: chat-section max-height 45%, min-height 120px; activity-feed flex:1 unchanged; chat messages have user/assistant/error variants
-- [ ] JS: sendChatMessage() POSTs to http://{hostname}:7600/chat, shows loading indicator, displays response or error
-- [ ] JS: loadChatHistory() fetches GET /chat/history on init and populates chat-history div
-- [ ] JS: Enter key sends message, input is cleared on send, button disabled during loading
-- [ ] JS: escapeHtml() prevents XSS by using textContent/innerHTML DOM technique
-- [ ] agent/chat-policy.md contains system prompt instructing Claude to reference timestamps, be data-backed, not output JSON, not make up data
-- [ ] Anthropic constructor reads ANTHROPIC_API_KEY from process.env automatically -- no hardcoded keys
-- [ ] handleChatRequest catches API errors and returns error object instead of throwing
+- [ ] GET /analytics/summary returns JSON with all 7 required keys (composite_score, total_feeds, avg_hunger, fear_incidents, avg_response_time, feeds_per_hour, connected_hours)
+- [ ] GET /analytics/hunger-timeline returns JSON with observations array (timestamp + hunger per entry) and feedMarkers array (timestamp per entry)
+- [ ] avg_response_time is computed dynamically from raw observation/action data (hunger > 0.7 breaches matched to subsequent place_food actions), NOT from the buggy daily_scores.avg_response_time column
+- [ ] connected_hours is computed by analyzing observation timestamp gaps (gaps <= 60s count as connected time)
+- [ ] feeds_per_hour is computed as feedsToday / estimated connected hours from observation count
+- [ ] Frontend analytics panel renders inside #caretaker-sidebar after the chat-section with a "Hide"/"Show" toggle
+- [ ] Sparkline SVG renders hunger values as polyline, feed markers as vertical green lines, and a dashed 0.7 threshold line
+- [ ] Score gauge displays composite_score with color coding: green >= 80, yellow >= 50, red < 50, "--" for null
+- [ ] Analytics auto-refreshes every 30 seconds via setInterval
+- [ ] Empty database is handled gracefully: null scores show "--", zero counts show "0", empty timeline shows "No data yet"
+- [ ] All CSS uses existing custom properties (--bg, --surface, --border, --text, --text-muted, --accent, --success, --warning, --error, --radius) -- no hardcoded hex colors
+- [ ] caretaker-analytics.js loads after caretaker-sidebar.js and before caretaker-bridge.js
+- [ ] No new npm dependencies added
+- [ ] caretaker-bridge.js was NOT modified -- analytics uses polling, not WebSocket push
 
 ## Gaps and Assumptions
-- Claude API call was not tested end-to-end (would require a real ANTHROPIC_API_KEY); only the error path and input validation were smoke-tested
-- Chat history alternation: if the DB has consecutive same-role messages (e.g., two user messages), the Anthropic API may reject them -- no deduplication or role-alternation enforcement is implemented
-- The viewContext parameter is always null from the frontend (plan says "if provided"); no UI sends it
-- No rate limiting on the /chat endpoint -- rapid user messages could hit API rate limits
-- The existing activity feed CSS (flex: 1) was not modified; the chat section relies on max-height: 45% to share space, which was not visually verified in a browser
-- No maximum message length validation on user input
+- Browser rendering not tested (only server endpoints and JS syntax verified via CLI)
+- The collapse/expand toggle state is not persisted across page reloads (starts expanded)
+- Response time of 873s in test data seems high -- this is correct given the test DB has many hunger > 0.7 observations with infrequent feeding; the dynamic computation is faithful to the data
+- Mobile responsive behavior of analytics panel not specifically tested (inherits sidebar's existing responsive layout)
+- The API_URL in caretaker-analytics.js uses location.hostname which may not work if the page is served from a different origin than the caretaker server on port 7600

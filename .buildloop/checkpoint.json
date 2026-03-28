@@ -1,6 +1,6 @@
 {
-  "task_id": "T8.7",
-  "task_desc": "Left sidebar -- Chat Box. Add a chat input below the activity feed. User types a question (\"why didn't you feed the fly when it was hungry?\", \"what do you think the fly needs next?\"), it's sent to Claude with relevant database context (last N observations, recent actions, incident history around the time in question). Claude responds with data-backed answers referencing specific timestamps. Chat history persisted in chat_messages table. Files: `js/caretaker-sidebar.js` (chat UI), `server/caretaker.js` (chat endpoint -- queries DB, builds context, calls Claude), `agent/chat-policy.md` (system prompt for chat mode).",
+  "task_id": "T8.8",
+  "task_desc": "Left sidebar -- Analytics Panel. Add expandable analytics section below chat with sparkline charts (inline SVG). Metrics: caretaker score (composite 0-100), hunger timeline with feed markers, fear incidents per hour, avg response time (hunger > 0.7 to food placement), feeding frequency, active hours (connected vs disconnected). Data from daily_scores + real-time observations via WebSocket. Files: `js/caretaker-analytics.js` (charts), `server/caretaker.js` (analytics query endpoints), `css/main.css` (chart styles).",
   "completed_stage": "builder",
-  "timestamp": "2026-03-28T03:01:27.381392+00:00"
+  "timestamp": "2026-03-28T03:09:45.178750+00:00"
 }
