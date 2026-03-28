@@ -1,0 +1,56 @@
+name: FlyBrain
+options:
+  bundleIdPrefix: com.snedea
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "16.2"
+  generateEmptyDirectories: true
+
+targets:
+  FlyBrain:
+    type: application
+    platform: iOS
+    deploymentTarget:
+      iOS: "17.0"
+    sources:
+      - path: FlyBrain
+        type: group
+    settings:
+      base:
+        SWIFT_VERSION: "5.0"
+        PRODUCT_BUNDLE_IDENTIFIER: com.snedea.flybrain
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        INFOPLIST_FILE: FlyBrain/Info.plist
+        GENERATE_INFOPLIST_FILE: false
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    postBuildScripts:
+      - name: "Copy Web Assets"
+        script: |
+          set -euo pipefail
+          WEB_ROOT="${SRCROOT}/.."
+          DEST="${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}"
+
+          # Copy index.html
+          cp "${WEB_ROOT}/index.html" "${DEST}/index.html"
+
+          # Copy css/
+          mkdir -p "${DEST}/css"
+          rsync -a --delete "${WEB_ROOT}/css/" "${DEST}/css/"
+
+          # Copy js/ (includes js/vendor/)
+          mkdir -p "${DEST}/js"
+          rsync -a --delete "${WEB_ROOT}/js/" "${DEST}/js/"
+
+          # Copy svg/
+          mkdir -p "${DEST}/svg"
+          rsync -a --delete "${WEB_ROOT}/svg/" "${DEST}/svg/"
+
+          # Copy data/ (only connectome.bin.gz and neuron_meta.json -- exclude large CSVs)
+          mkdir -p "${DEST}/data"
+          cp "${WEB_ROOT}/data/connectome.bin.gz" "${DEST}/data/connectome.bin.gz"
+          cp "${WEB_ROOT}/data/neuron_meta.json" "${DEST}/data/neuron_meta.json"
+
+          echo "Web assets copied to ${DEST}"
+        basedOnDependencyAnalysis: false
+        inputFiles: []
+        outputFiles: []

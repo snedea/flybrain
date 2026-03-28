@@ -3,3 +3,9 @@ extract_weights_to_json.py
 .vscode/
 node_modules/
 caretaker.log
+
+# Xcode
+ios/FlyBrain.xcodeproj/xcuserdata/
+ios/FlyBrain.xcodeproj/project.xcworkspace/xcuserdata/
+ios/build/
+DerivedData/

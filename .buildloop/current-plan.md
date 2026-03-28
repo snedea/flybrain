@@ -1,254 +1,368 @@
-# Plan: T8.4
+# Plan: T9.1
 
 ## Dependencies
-- list: [duckdb (already installed at /opt/homebrew/bin/duckdb v1.5.1), jq (already required by agent/run.sh), claude CLI (already required by agent/run.sh)]
-- commands: [] (no new installs needed)
+- list: [xcodegen v2.45.3 (already installed at /opt/homebrew/bin/xcodegen), Xcode 16.2 (already installed at /Applications/Xcode.app)]
+- commands: none -- all tools are already installed
+
+## CRITICAL: xcode-select is misconfigured
+Every `xcodebuild`, `xcrun`, or `xcodegen` CLI invocation MUST be prefixed with:
+```
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+```
+Build phase shell scripts run inside Xcode itself and do NOT need this prefix.
 
 ## File Operations (in execution order)
 
-### 1. CREATE tools/query-log.sh
+### 1. CREATE js/vendor/three.min.js
 - operation: CREATE
-- reason: New shell script that loads caretaker.log into DuckDB, uses Claude Code to generate SQL from natural language questions, runs the SQL, and presents interpreted results
+- reason: Vendorize Three.js v0.128.0 so the app works offline and in the iOS bundle without CDN access
 
-#### Structure
-
-The script has these sections in order: shebang + set flags, constants, dependency checks, argument validation, DuckDB schema setup, schema extraction, SQL generation via Claude, SQL execution, result interpretation via Claude, output.
-
-#### Constants
+#### Download Command
 ```bash
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-LOG_FILE="$PROJECT_DIR/caretaker.log"
-DUCKDB_SETUP=""  # will hold the SQL that creates views, built in build_schema()
+mkdir -p /Users/name/homelab/flybrain/js/vendor
+curl -fsSL "https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js" -o /Users/name/homelab/flybrain/js/vendor/three.min.js
 ```
+
+#### Verification
+- File must be non-empty (expect ~600KB)
+- Run: `head -1 /Users/name/homelab/flybrain/js/vendor/three.min.js` -- should contain `// threejs.org/license` or similar header comment
+
+### 2. CREATE js/vendor/OrbitControls.js
+- operation: CREATE
+- reason: Vendorize OrbitControls from the same pinned Three.js version (UMD global-script version, NOT the ESM jsm version)
+
+#### Download Command
+```bash
+curl -fsSL "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js" -o /Users/name/homelab/flybrain/js/vendor/OrbitControls.js
+```
+
+#### Verification
+- File must be non-empty (expect ~30KB)
+- Run: `head -5 /Users/name/homelab/flybrain/js/vendor/OrbitControls.js` -- should reference `THREE.OrbitControls`
+
+### 3. MODIFY index.html
+- operation: MODIFY
+- reason: (a) Update viewport meta to disable user scaling on mobile, (b) Replace CDN script tags with local vendor paths
+
+#### Change 1: Viewport meta
+- anchor: `<meta name="viewport" content="width=device-width,initial-scale=1">`
+- Replace the entire line with:
+  ```html
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  ```
+
+#### Change 2: Three.js CDN -> local vendor
+- anchor: `<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>`
+- Replace with:
+  ```html
+  <!-- Three.js v0.128.0 (vendored) -- do NOT upgrade one without the other -->
+  <script src="./js/vendor/three.min.js"></script>
+  ```
+
+#### Change 3: OrbitControls CDN -> local vendor
+- anchor: `<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>`
+- Replace with:
+  ```html
+  <script src="./js/vendor/OrbitControls.js"></script>
+  ```
+
+### 4. CREATE ios/FlyBrain/FlyBrainApp.swift
+- operation: CREATE
+- reason: SwiftUI app entry point (@main)
+
+#### Content (exact):
+```swift
+import SwiftUI
+
+@main
+struct FlyBrainApp: App {
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+                .ignoresSafeArea()
+        }
+    }
+}
+```
+
+### 5. CREATE ios/FlyBrain/ContentView.swift
+- operation: CREATE
+- reason: UIViewRepresentable wrapping WKWebView with all required configuration
+
+#### Imports
+```swift
+import SwiftUI
+import WebKit
+```
+
+#### Structs / Types
+
+**WebView: UIViewRepresentable**
+- purpose: Wrap WKWebView for SwiftUI with all iOS-specific configuration
 
 #### Functions
 
-- signature: `check_deps()`
-  - purpose: Verify required CLI tools are available
+- signature: `func makeUIView(context: Context) -> WKWebView`
+  - purpose: Create and configure the WKWebView instance
   - logic:
-    1. Check `command -v duckdb` exists, if not print `"Error: duckdb is required but not found. Install with: brew install duckdb"` to stderr and exit 1
-    2. Check `command -v claude` exists, if not print `"Error: claude CLI is required but not found."` to stderr and exit 1
-    3. Check `command -v jq` exists, if not print `"Error: jq is required but not found. Install with: brew install jq"` to stderr and exit 1
-  - calls: none
-  - returns: nothing (exits on failure)
-  - error handling: exit 1 with descriptive message for each missing tool
-
-- signature: `validate_args()`
-  - purpose: Check that a question argument was provided and log file exists
-  - logic:
-    1. If `$#` is 0, print usage message to stderr: `"Usage: tools/query-log.sh \"your question about the caretaker log\""` followed by example queries (one per line): `"  Examples:"`, `"    tools/query-log.sh \"how many times did Claude forget to feed the fly?\""`, `"    tools/query-log.sh \"what was the fly's average hunger today?\""`, `"    tools/query-log.sh \"show me all incidents\""`, `"    tools/query-log.sh \"how many times did Claude scare the fly?\""`. Then exit 1.
-    2. If `$LOG_FILE` does not exist or is empty (test with `[[ ! -s "$LOG_FILE" ]]`), print `"Error: No caretaker log found at $LOG_FILE"` followed by `"Run the caretaker agent first: bash agent/run.sh"` to stderr and exit 1.
-  - calls: none
-  - returns: nothing (exits on failure)
-  - error handling: exit 1 with usage or missing-log message
-
-- signature: `build_schema()`
-  - purpose: Build the DuckDB SQL preamble that creates views from the JSON Lines log
-  - logic:
-    1. Set the variable `DUCKDB_SETUP` to the following multi-line SQL string (use a heredoc assigned to the variable):
-    ```sql
-    CREATE VIEW raw_log AS
-    SELECT * FROM read_json_auto('${LOG_FILE}', format='newline_delimited', union_by_name=true);
-
-    CREATE VIEW observations AS
-    SELECT
-      timestamp::TIMESTAMP AS ts,
-      data.drives.hunger AS hunger,
-      data.drives.fear AS fear,
-      data.drives.fatigue AS fatigue,
-      data.drives.curiosity AS curiosity,
-      data.drives.groom AS groom,
-      data.behavior.current AS behavior,
-      data.position.x AS pos_x,
-      data.position.y AS pos_y,
-      data.position.speed AS speed,
-      data.environment.lightLevel AS light_level,
-      data.environment.temperature AS temperature,
-      len(data.food) AS food_count
-    FROM raw_log
-    WHERE type = 'observation';
-
-    CREATE VIEW actions AS
-    SELECT
-      timestamp::TIMESTAMP AS ts,
-      action,
-      params,
-      reasoning
-    FROM raw_log
-    WHERE type = 'action';
-
-    CREATE VIEW incidents AS
-    SELECT
-      timestamp::TIMESTAMP AS ts,
-      incident,
-      action,
-      fearBefore AS fear_before,
-      fearAfter AS fear_after,
-      hunger
-    FROM raw_log
-    WHERE type = 'incident';
-    ```
-    Note: `${LOG_FILE}` must be interpolated into the SQL string (it is a shell variable holding the absolute path). Use double quotes around the heredoc delimiter to allow variable expansion (i.e., `DUCKDB_SETUP=$(cat <<EOF` not `<<'EOF'`).
-  - calls: none
-  - returns: nothing (sets DUCKDB_SETUP variable)
-  - error handling: none needed (static SQL construction)
-
-- signature: `get_schema_info()`
-  - purpose: Run DuckDB to extract view schemas and sample data for Claude's context
-  - logic:
-    1. Build a SQL string that consists of `$DUCKDB_SETUP` followed by these queries separated by newlines:
-       ```sql
-       SELECT 'OBSERVATIONS_SCHEMA' AS label;
-       DESCRIBE observations;
-       SELECT 'OBSERVATIONS_SAMPLE' AS label;
-       SELECT * FROM observations LIMIT 3;
-       SELECT 'OBSERVATIONS_COUNT' AS label;
-       SELECT count(*) AS total_observations FROM observations;
-       SELECT 'ACTIONS_SCHEMA' AS label;
-       DESCRIBE actions;
-       SELECT 'ACTIONS_SAMPLE' AS label;
-       SELECT * FROM actions LIMIT 3;
-       SELECT 'ACTIONS_COUNT' AS label;
-       SELECT count(*) AS total_actions FROM actions;
-       SELECT 'INCIDENTS_SCHEMA' AS label;
-       DESCRIBE incidents;
-       SELECT 'INCIDENTS_SAMPLE' AS label;
-       SELECT * FROM incidents LIMIT 5;
-       SELECT 'INCIDENTS_COUNT' AS label;
-       SELECT count(*) AS total_incidents FROM incidents;
-       SELECT 'TIME_RANGE' AS label;
-       SELECT min(timestamp::TIMESTAMP) AS earliest, max(timestamp::TIMESTAMP) AS latest FROM raw_log;
+    1. Create a `WKWebViewConfiguration` instance
+    2. Set `configuration.preferences.javaScriptEnabled = true` (default, but explicit)
+    3. Set `configuration.setValue(true, forKey: "allowUniversalAccessFromFileURLs")` to ensure Web Workers can load from file:// same-origin
+    4. Create a `WKUserScript` with source:
+       ```javascript
+       document.documentElement.style.webkitTouchCallout='none';
+       document.documentElement.style.webkitUserSelect='none';
        ```
-    2. Run `duckdb -markdown -c "$FULL_SQL"` (in-memory mode, no database file argument) and capture stdout into a variable `SCHEMA_INFO`
-    3. If duckdb exits non-zero, print `"Error: Failed to read caretaker log with DuckDB. The log file may be malformed."` to stderr and exit 1
-  - calls: `duckdb` CLI
-  - returns: nothing (sets SCHEMA_INFO variable)
-  - error handling: check duckdb exit code, exit 1 on failure
+       injection time: `.atDocumentStart`, forMainFrameOnly: `false`
+    5. Add the user script to `configuration.userContentController`
+    6. Create `WKWebView(frame: .zero, configuration: configuration)`
+    7. Set `webView.scrollView.bounces = false`
+    8. Set `webView.scrollView.isScrollEnabled = false`
+    9. Set `webView.scrollView.contentInsetAdjustmentBehavior = .never`
+    10. Set `webView.allowsLinkPreview = false`
+    11. Set `webView.isOpaque = false`
+    12. Set `webView.backgroundColor = .black`
+    13. Locate `index.html` in the app bundle: `guard let indexURL = Bundle.main.url(forResource: "index", withExtension: "html") else { fatalError("index.html not found in bundle") }`
+    14. Get the parent directory of indexURL: `let webDir = indexURL.deletingLastPathComponent()`
+    15. Call `webView.loadFileURL(indexURL, allowingReadAccessTo: webDir)` -- webDir is the directory containing index.html plus all subdirectories (css/, js/, svg/, data/), granting same-origin access for Workers
+    16. Return `webView`
+  - returns: `WKWebView`
+  - error handling: `fatalError` if index.html is not found (build phase guarantees it exists)
 
-- signature: `generate_sql(question, schema_info)`
-  - purpose: Call Claude Code to generate a DuckDB SQL query from the natural language question
-  - logic:
-    1. Build a prompt string (store in variable `GEN_PROMPT`) using a heredoc with the following exact content:
-       ```
-       You are a DuckDB SQL expert. Generate a single DuckDB SQL query to answer the user's question about a virtual fly caretaker log.
+- signature: `func updateUIView(_ uiView: WKWebView, context: Context)`
+  - purpose: No-op, required by protocol
+  - logic: empty body
+  - returns: void
 
-       Available views (created from a JSON Lines log file):
+#### Full struct:
+```swift
+struct ContentView: View {
+    var body: some View {
+        WebView()
+            .ignoresSafeArea()
+    }
+}
 
-       ${SCHEMA_INFO}
+struct WebView: UIViewRepresentable {
+    func makeUIView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        config.preferences.javaScriptEnabled = true
+        config.setValue(true, forKey: "allowUniversalAccessFromFileURLs")
 
-       Key domain knowledge:
-       - "observations" has one row per ~1-second state snapshot of the fly (drives, behavior, position)
-       - "actions" has one row per caretaker action (place_food, set_light, set_temp, touch, blow_wind, clear_food)
-       - "incidents" has one row per detected incident (scared_the_fly, forgot_to_feed)
-       - "forgot to feed" = incident type 'forgot_to_feed' (hunger > 0.9 with no food present)
-       - "scared the fly" = incident type 'scared_the_fly' (fear spike after a Claude action)
-       - Drives (hunger, fear, fatigue, curiosity, groom) range from 0.0 to 1.0
-       - light_level: 0=bright, 1=dim, 2=dark
-       - temperature: 0=neutral, 1=warm, 2=cool
-       - All timestamps are ISO 8601
+        let script = WKUserScript(
+            source: "document.documentElement.style.webkitTouchCallout='none';document.documentElement.style.webkitUserSelect='none';",
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: false
+        )
+        config.userContentController.addUserScript(script)
 
-       User's question: ${QUESTION}
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.scrollView.bounces = false
+        webView.scrollView.isScrollEnabled = false
+        webView.scrollView.contentInsetAdjustmentBehavior = .never
+        webView.allowsLinkPreview = false
+        webView.isOpaque = false
+        webView.backgroundColor = .black
 
-       Output ONLY the SQL query. No explanation, no markdown fences, no comments. Just the SQL.
-       ```
-    2. Call: `GENERATED_SQL=$(command claude -p --no-session-persistence --model haiku --max-budget-usd 0.01 "$GEN_PROMPT" 2>/dev/null)`
-    3. If the exit code is non-zero or `GENERATED_SQL` is empty, print `"Error: Failed to generate SQL query from Claude."` to stderr and exit 1
-    4. Strip markdown code fences if present: pipe `GENERATED_SQL` through `sed` to remove lines matching `^\`\`\`.*` (i.e., `GENERATED_SQL=$(echo "$GENERATED_SQL" | sed '/^```/d')`)
-    5. Trim leading/trailing whitespace: `GENERATED_SQL=$(echo "$GENERATED_SQL" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | sed '/^$/d')`
-  - calls: `command claude -p`, `sed`
-  - returns: nothing (sets GENERATED_SQL variable)
-  - error handling: check claude exit code and empty output, exit 1 on failure
+        guard let indexURL = Bundle.main.url(forResource: "index", withExtension: "html") else {
+            fatalError("index.html not found in bundle")
+        }
+        let webDir = indexURL.deletingLastPathComponent()
+        webView.loadFileURL(indexURL, allowingReadAccessTo: webDir)
 
-- signature: `run_query(sql)`
-  - purpose: Execute the generated SQL against the DuckDB views and capture results
-  - logic:
-    1. Build the full SQL: `FULL_QUERY="${DUCKDB_SETUP}\n${GENERATED_SQL}"`
-    2. Run: `QUERY_RESULTS=$(echo -e "$FULL_QUERY" | duckdb -markdown 2>&1)`
-    3. Store the exit code: `QUERY_EXIT=$?`
-    4. If `QUERY_EXIT` is non-zero, print to stderr: `"Error: SQL query failed. Generated SQL was:"` followed by `"$GENERATED_SQL"` followed by `"DuckDB output:"` followed by `"$QUERY_RESULTS"`. Then exit 1.
-  - calls: `duckdb` CLI
-  - returns: nothing (sets QUERY_RESULTS variable)
-  - error handling: check duckdb exit code, print the failed SQL and error output for debugging, exit 1
+        return webView
+    }
 
-- signature: `interpret_results(question, sql, results)`
-  - purpose: Call Claude Code to produce a natural language answer from the SQL results
-  - logic:
-    1. Build prompt (store in `INTERP_PROMPT`):
-       ```
-       Answer the user's question based on these query results from a virtual fly caretaker log.
+    func updateUIView(_ uiView: WKWebView, context: Context) {}
+}
+```
 
-       Question: ${QUESTION}
+### 6. CREATE ios/FlyBrain/Info.plist
+- operation: CREATE
+- reason: App metadata -- bundle ID, name, deployment target, launch screen config
 
-       SQL that was run:
-       ${GENERATED_SQL}
+#### Content (exact):
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>FlyBrain</string>
+    <key>CFBundleDisplayName</key>
+    <string>FlyBrain</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>UILaunchScreen</key>
+    <dict>
+        <key>UIColorName</key>
+        <string>LaunchBG</string>
+    </dict>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>UIRequiresFullScreen</key>
+    <false/>
+</dict>
+</plist>
+```
 
-       Results:
-       ${QUERY_RESULTS}
+### 7. CREATE ios/project.yml
+- operation: CREATE
+- reason: xcodegen spec that generates the Xcode project -- avoids hand-editing pbxproj
 
-       Give a concise, direct answer. If the results are empty, say so. Use specific numbers from the results.
-       ```
-    2. Call: `ANSWER=$(command claude -p --no-session-persistence --model haiku --max-budget-usd 0.01 "$INTERP_PROMPT" 2>/dev/null)`
-    3. If the exit code is non-zero or `ANSWER` is empty, fall back to printing raw results: set `ANSWER="$QUERY_RESULTS"`
-  - calls: `command claude -p`
-  - returns: nothing (sets ANSWER variable)
-  - error handling: on failure, gracefully fall back to raw query results (no exit, just degrade)
+#### Content (exact):
+```yaml
+name: FlyBrain
+options:
+  bundleIdPrefix: com.snedea
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "16.2"
+  generateEmptyDirectories: true
 
-#### Main Flow
-The main body of the script (after the function definitions) executes in this exact order:
-1. `QUESTION="$1"` -- capture the first argument
-2. `check_deps`
-3. `validate_args "$@"` -- pass all args for the `$#` check
-4. `build_schema`
-5. `get_schema_info` -- populates SCHEMA_INFO
-6. Print to stderr: `"Analyzing caretaker log..."`
-7. `generate_sql` -- populates GENERATED_SQL
-8. Print to stderr: `"Running query..."`
-9. `run_query` -- populates QUERY_RESULTS
-10. `interpret_results` -- populates ANSWER
-11. Print to stdout: empty line, then `"$ANSWER"`
+targets:
+  FlyBrain:
+    type: application
+    platform: iOS
+    deploymentTarget:
+      iOS: "17.0"
+    sources:
+      - path: FlyBrain
+        type: group
+    settings:
+      base:
+        SWIFT_VERSION: "5.0"
+        PRODUCT_BUNDLE_IDENTIFIER: com.snedea.flybrain
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        INFOPLIST_FILE: FlyBrain/Info.plist
+        GENERATE_INFOPLIST_FILE: false
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    postBuildScripts:
+      - name: "Copy Web Assets"
+        script: |
+          set -euo pipefail
+          WEB_ROOT="${SRCROOT}/.."
+          DEST="${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}"
 
-#### Shebang and Flags
-- First line: `#!/usr/bin/env bash`
-- Second line: `set -euo pipefail`
+          # Copy index.html
+          cp "${WEB_ROOT}/index.html" "${DEST}/index.html"
 
-#### File Permissions
-- After creating the file, run `chmod +x tools/query-log.sh`
+          # Copy css/
+          mkdir -p "${DEST}/css"
+          rsync -a --delete "${WEB_ROOT}/css/" "${DEST}/css/"
 
-### 2. MODIFY package.json
+          # Copy js/ (includes js/vendor/)
+          mkdir -p "${DEST}/js"
+          rsync -a --delete "${WEB_ROOT}/js/" "${DEST}/js/"
+
+          # Copy svg/
+          mkdir -p "${DEST}/svg"
+          rsync -a --delete "${WEB_ROOT}/svg/" "${DEST}/svg/"
+
+          # Copy data/ (only connectome.bin.gz and neuron_meta.json -- exclude large CSVs)
+          mkdir -p "${DEST}/data"
+          cp "${WEB_ROOT}/data/connectome.bin.gz" "${DEST}/data/connectome.bin.gz"
+          cp "${WEB_ROOT}/data/neuron_meta.json" "${DEST}/data/neuron_meta.json"
+
+          echo "Web assets copied to ${DEST}"
+        basedOnDependencyAnalysis: false
+        inputFiles: []
+        outputFiles: []
+```
+
+### 8. Generate the Xcode project
+- operation: COMMAND (not a file create -- run after writing project.yml)
+
+#### Command:
+```bash
+cd /Users/name/homelab/flybrain/ios && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer /opt/homebrew/bin/xcodegen generate --spec project.yml
+```
+
+#### Expected output:
+- `ios/FlyBrain.xcodeproj/` directory created
+- Console output: `Generated FlyBrain project at ...`
+
+### 9. MODIFY .gitignore
 - operation: MODIFY
-- reason: Add a convenience npm script for the query tool
-- anchor: `"caretaker": "node server/caretaker.js"`
+- reason: Exclude Xcode build artifacts and user-specific project settings from git
 
-#### Wiring / Integration
-- Add a new script entry after the `"caretaker"` line:
-  ```json
-  "query-log": "bash tools/query-log.sh"
-  ```
-- The `"caretaker"` line needs a trailing comma added before the new entry. The result should be:
-  ```json
-  "scripts": {
-    "caretaker": "node server/caretaker.js",
-    "query-log": "bash tools/query-log.sh"
-  },
-  ```
+#### Append to end of file:
+```
+# Xcode
+ios/FlyBrain.xcodeproj/xcuserdata/
+ios/FlyBrain.xcodeproj/project.xcworkspace/xcuserdata/
+ios/build/
+DerivedData/
+```
 
 ## Verification
-- build: `bash -n tools/query-log.sh` (syntax check only -- no runtime deps needed)
-- lint: `shellcheck tools/query-log.sh || true` (shellcheck may not be installed; non-blocking)
-- test: no existing tests for shell scripts
-- smoke: Run `bash tools/query-log.sh` with no arguments and verify it prints the usage message with examples and exits with code 1. Verify the exit code with `echo $?`. Then run `bash tools/query-log.sh "test question"` and verify it prints the "No caretaker log found" error (since caretaker.log does not exist) and exits with code 1.
+
+### Build (copy-paste ready):
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project /Users/name/homelab/flybrain/ios/FlyBrain.xcodeproj -scheme FlyBrain -destination 'platform=iOS Simulator,name=iPhone 16' -quiet build
+```
+Expected: `BUILD SUCCEEDED`
+
+### Lint:
+No linter configured for this project. Skip.
+
+### Test:
+No existing tests for Swift code. Skip.
+
+### Smoke test -- verify web assets in build product:
+```bash
+BUILD_DIR=$(DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project /Users/name/homelab/flybrain/ios/FlyBrain.xcodeproj -scheme FlyBrain -showBuildSettings 2>/dev/null | grep -m1 'BUILT_PRODUCTS_DIR' | awk '{print $3}')
+APP_PATH="${BUILD_DIR}/FlyBrain.app"
+echo "--- Checking bundle contents ---"
+test -f "${APP_PATH}/index.html" && echo "PASS: index.html" || echo "FAIL: index.html"
+test -f "${APP_PATH}/js/vendor/three.min.js" && echo "PASS: three.min.js" || echo "FAIL: three.min.js"
+test -f "${APP_PATH}/js/vendor/OrbitControls.js" && echo "PASS: OrbitControls.js" || echo "FAIL: OrbitControls.js"
+test -f "${APP_PATH}/js/main.js" && echo "PASS: main.js" || echo "FAIL: main.js"
+test -f "${APP_PATH}/js/sim-worker.js" && echo "PASS: sim-worker.js" || echo "FAIL: sim-worker.js"
+test -f "${APP_PATH}/css/main.css" && echo "PASS: main.css" || echo "FAIL: main.css"
+test -f "${APP_PATH}/svg/center.svg" && echo "PASS: center.svg" || echo "FAIL: center.svg"
+test -f "${APP_PATH}/data/connectome.bin.gz" && echo "PASS: connectome.bin.gz" || echo "FAIL: connectome.bin.gz"
+test -f "${APP_PATH}/data/neuron_meta.json" && echo "PASS: neuron_meta.json" || echo "FAIL: neuron_meta.json"
+test ! -f "${APP_PATH}/data/connections.csv.gz" && echo "PASS: connections.csv.gz excluded" || echo "FAIL: connections.csv.gz should be excluded"
+test ! -f "${APP_PATH}/data/neurons.csv.gz" && echo "PASS: neurons.csv.gz excluded" || echo "FAIL: neurons.csv.gz should be excluded"
+```
+
+### Smoke test -- verify index.html changes:
+```bash
+grep -q 'maximum-scale=1.0, user-scalable=no' /Users/name/homelab/flybrain/index.html && echo "PASS: viewport meta" || echo "FAIL: viewport meta"
+grep -q 'js/vendor/three.min.js' /Users/name/homelab/flybrain/index.html && echo "PASS: local three.js path" || echo "FAIL: local three.js path"
+grep -q 'js/vendor/OrbitControls.js' /Users/name/homelab/flybrain/index.html && echo "PASS: local OrbitControls path" || echo "FAIL: local OrbitControls path"
+grep -qv 'cdn.jsdelivr.net' /Users/name/homelab/flybrain/index.html && echo "PASS: no CDN refs" || echo "FAIL: CDN refs still present"
+```
+
+### Smoke test -- Simulator launch:
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun simctl boot "iPhone 16" 2>/dev/null || true
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun simctl install "iPhone 16" "${APP_PATH}"
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun simctl launch "iPhone 16" com.snedea.flybrain
+```
+Expected: app launches without crash. The connectome loading, fly walking, and neuron panel rendering require visual inspection in the Simulator UI -- the builder should open Simulator.app and observe.
 
 ## Constraints
-- Do NOT modify server/caretaker.js, js/caretaker-bridge.js, agent/run.sh, agent/caretaker-policy.md, or any file in js/, css/, or server/ (except package.json)
-- Do NOT install any new npm or system packages
-- Do NOT create a .env file or any configuration files
-- The tools/ directory does not exist yet -- it must be created by writing the file (the Write tool will create parent directories)
-- Use `command claude` (not bare `claude`) inside the script to match the pattern in agent/run.sh
-- Use `--model haiku` and `--max-budget-usd 0.01` for Claude calls to keep costs low, matching agent/run.sh conventions
-- Use `--no-session-persistence` for all Claude calls to avoid session file accumulation
-- DuckDB must be invoked in in-memory mode (no database file argument) -- just `duckdb` not `duckdb some.db`
-- Use `-markdown` flag for DuckDB output to get readable table formatting
-- The script must work with both existing and fresh (empty/nonexistent) caretaker.log files (graceful error for missing/empty log)
-- All stderr output from Claude calls must be suppressed with `2>/dev/null` to keep the UX clean
-- The JSONL log path is always `$PROJECT_DIR/caretaker.log` (matching `server/caretaker.js:8` which writes to `path.join(__dirname, '..', 'caretaker.log')`)
+- Do NOT modify any existing JS files (js/*.js) -- only index.html is modified
+- Do NOT modify css/main.css -- touch/layout changes are deferred to T9.2
+- Do NOT hand-edit the .pbxproj file -- use xcodegen exclusively
+- Do NOT add web asset files as Xcode source groups -- they are copied via the build phase shell script
+- Do NOT include data/connections.csv.gz, data/neurons.csv.gz, data/coordinates.csv.gz, or data/classification.csv.gz in the build phase -- these are build-script-only files
+- The `allowingReadAccessTo:` parameter MUST point to the directory containing index.html (which is the .app bundle root after the copy), NOT `Bundle.main.bundleURL` -- since assets are copied flat into the .app root, the parent of index.html IS the .app root, so `indexURL.deletingLastPathComponent()` is correct and equivalent
+- Every `xcodebuild`/`xcrun`/`xcodegen` CLI call MUST be prefixed with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`
+- Three.js CDN URL for OrbitControls MUST use `examples/js/controls/OrbitControls.js` (UMD global), NOT `examples/jsm/controls/OrbitControls.js` (ES module)
+- Do NOT create an Assets.xcassets catalog or AppIcon -- that is T9.3's scope
+- The caretaker WebSocket bridge (js/caretaker-bridge.js) will silently fail in iOS (no localhost server) -- this is expected and safe, do not add special handling

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 
 <head>
-    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>FlyBrain</title>
     <link rel="stylesheet" type="text/css" href="./css/main.css?v=7">
 </head>
@@ -86,8 +86,9 @@
     </div>
     <div id="brain3d-overlay" style="display:none;"></div>
     <div id="brain3d-tooltip" style="display:none;"></div>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <!-- Three.js v0.128.0 (vendored) -- do NOT upgrade one without the other -->
+    <script src="./js/vendor/three.min.js"></script>
+    <script src="./js/vendor/OrbitControls.js"></script>
     <script type="text/javascript" src="./js/constants.js?v=7"></script>
     <script type="text/javascript" src="./js/connectome.js?v=7"></script>
     <script type="text/javascript" src="./js/brain-worker-bridge.js?v=7"></script>
