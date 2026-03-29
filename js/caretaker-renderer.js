@@ -12,6 +12,8 @@
   var activeEffects = [];
 
   var idleStart = 0;
+  var idlePulseX = -1;
+  var idlePulseY = -1;
   var lastCommandTime = 0;
   var caretakerConnected = false;
 
@@ -94,6 +96,8 @@
       attentionY = -1;
       trail = [];
       activeEffects = [];
+      idlePulseX = -1;
+      idlePulseY = -1;
     }
   }
 
@@ -109,12 +113,17 @@
     // Only show cursor when Claude recently acted (within 3s of a command)
     var idleTime = Date.now() - lastCommandTime;
     if (lastCommandTime === 0 || idleTime > 3000) {
-      // Fade out: clear attention so cursor/trail stop drawing
+      if (lastCommandTime > 0 && attentionX >= 0) {
+        idlePulseX = attentionX;
+        idlePulseY = attentionY;
+      }
       attentionX = -1;
       attentionY = -1;
       trail = [];
       return;
     }
+    idlePulseX = -1;
+    idlePulseY = -1;
     if (attentionX < 0) return;
     var lerpSpeed = 0.08;
     attentionX += (attentionTargetX - attentionX) * lerpSpeed;
@@ -144,6 +153,7 @@
       drawTrail(ctx);
       drawCursor(ctx);
     }
+    drawIdlePulse(ctx);
   }
 
   function drawTrail(ctx) {
@@ -223,7 +233,7 @@
         ctx.fill();
       } else if (e.type === 'arrow') {
         p = elapsed / 1200;
-        angle = e.params.direction * Math.PI / 180;
+        angle = e.params.direction;
         len = 40 * e.params.strength;
         ex = e.x + Math.cos(angle) * len;
         ey = e.y + Math.sin(angle) * len;
@@ -248,9 +258,7 @@
   }
 
   function drawIdlePulse(ctx) {
-    if (attentionX < 0) return;
-    var timeSinceCommand = Date.now() - lastCommandTime;
-    if (timeSinceCommand < 3000) return;
+    if (idlePulseX < 0) return;
     var t = (Date.now() % 1500) / 1500;
     var beat = 0;
     if (t < 0.15) {
@@ -266,7 +274,7 @@
       var pulseRadius = CURSOR_SIZE / 2 + 4 + beat * 6;
       var pulseAlpha = beat * 0.25;
       ctx.beginPath();
-      ctx.arc(attentionX, attentionY, pulseRadius, 0, Math.PI * 2);
+      ctx.arc(idlePulseX, idlePulseY, pulseRadius, 0, Math.PI * 2);
       ctx.strokeStyle = CLAUDE_ORANGE + pulseAlpha.toFixed(3) + ')';
       ctx.lineWidth = 1.5;
       ctx.stroke();

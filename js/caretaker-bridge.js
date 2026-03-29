@@ -34,6 +34,11 @@
     var tempMap = { neutral: 0, warm: 1, cool: 2 };
     switch (action) {
       case 'place_food':
+        if (typeof params.x !== 'number' || typeof params.y !== 'number' ||
+            !isFinite(params.x) || !isFinite(params.y)) {
+          console.warn('[caretaker] place_food: invalid x/y', params.x, params.y);
+          break;
+        }
         var fx = Math.max(0, Math.min(window.innerWidth, params.x));
         var fy = Math.max(44, Math.min(window.innerHeight, params.y));
         food.push({ x: fx, y: fy, radius: 10, feedStart: 0, feedDuration: 0, eaten: 0 });
@@ -45,10 +50,12 @@
           BRAIN.stimulate.lightLevel = lightStates[li];
           document.getElementById('lightBtn').textContent = 'Light: ' + lightLabels[li];
         } else if (typeof params.level === 'number' && params.level >= 0 && params.level <= 2) {
-          var li2 = params.level;
+          var li2 = Math.floor(params.level);
           lightStateIndex = li2;
           BRAIN.stimulate.lightLevel = lightStates[li2];
           document.getElementById('lightBtn').textContent = 'Light: ' + lightLabels[li2];
+        } else {
+          console.warn('[caretaker] set_light: invalid level (expected bright/dim/dark or 0-2):', params.level);
         }
         break;
       case 'set_temp':
@@ -58,19 +65,27 @@
           BRAIN.stimulate.temperature = tempStates[ti];
           document.getElementById('tempBtn').textContent = 'Temp: ' + tempLabels[ti];
         } else if (typeof params.level === 'number' && params.level >= 0 && params.level <= 2) {
-          var ti2 = params.level;
+          var ti2 = Math.floor(params.level);
           tempStateIndex = ti2;
           BRAIN.stimulate.temperature = tempStates[ti2];
           document.getElementById('tempBtn').textContent = 'Temp: ' + tempLabels[ti2];
+        } else {
+          console.warn('[caretaker] set_temp: invalid level (expected warm/neutral/cool or 0-2):', params.level);
         }
         break;
       case 'touch':
-        applyTouchTool(params.x !== undefined ? params.x : fly.x, params.y !== undefined ? params.y : fly.y);
+        var tx = typeof params.x === 'number' && isFinite(params.x)
+          ? Math.max(0, Math.min(window.innerWidth, params.x)) : fly.x;
+        var ty = typeof params.y === 'number' && isFinite(params.y)
+          ? Math.max(44, Math.min(window.innerHeight, params.y)) : fly.y;
+        applyTouchTool(tx, ty);
         break;
       case 'blow_wind':
         BRAIN.stimulate.wind = true;
-        BRAIN.stimulate.windStrength = Math.min(1, Math.max(0, params.strength || 0.5));
-        BRAIN.stimulate.windDirection = params.direction || 0;
+        BRAIN.stimulate.windStrength = Math.min(1, Math.max(0,
+          typeof params.strength === 'number' && isFinite(params.strength) ? params.strength : 0.5));
+        BRAIN.stimulate.windDirection = typeof params.direction === 'number' && isFinite(params.direction)
+          ? params.direction : 0;
         windResetTime = Date.now() + 2000;
         break;
       case 'clear_food':

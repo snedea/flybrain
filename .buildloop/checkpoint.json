@@ -1,6 +1,6 @@
 {
   "task_id": "T12.1",
   "task_desc": "Fix caretaker-renderer idle pulse, arrow angle, and caretaker-bridge input validation. Three bugs in the caretaker visual layer: (1) caretaker-renderer.js idle pulse is never drawn because the condition at line 251 checks attentionX < 0 which is the idle state, but the pulse draw block is inside a branch that skips when idle -- restructure so idle pulse draws when the cursor has been stationary for > 3 seconds; (2) caretaker-renderer.js line 226 converts wind direction from degrees to radians (direction * PI / 180) but caretaker-bridge.js line 73 already sends direction in radians from Math.atan2 -- remove the double conversion; (3) caretaker-bridge.js executeCommand() has no bounds checking on incoming parameters -- add validation for place_food (x/y within canvas bounds), set_light (value in [bright, dim, dark]), set_temp (value in [warm, neutral, cool]), touch (x/y within canvas), blow_wind (x/y within canvas, intensity 0-1). Files: js/caretaker-renderer.js (idle pulse, arrow angle), js/caretaker-bridge.js (input validation in executeCommand).",
-  "completed_stage": "scout",
-  "timestamp": "2026-03-29T20:18:01.388870+00:00"
+  "completed_stage": "builder",
+  "timestamp": "2026-03-29T23:03:07.337058+00:00"
 }
