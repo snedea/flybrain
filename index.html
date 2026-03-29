@@ -3,7 +3,7 @@
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>FlyBrain</title>
-    <link rel="stylesheet" type="text/css" href="./css/main.css?v=23">
+    <link rel="stylesheet" type="text/css" href="./css/main.css?v=24">
 </head>
 
 <body>
@@ -15,6 +15,8 @@
             <button class="tool-btn" data-tool="air">Air</button>
             <button class="tool-btn" data-tool="light" id="lightBtn">Light: Bright</button>
             <button class="tool-btn" data-tool="temp" id="tempBtn">Temp: Neutral</button>
+            <button class="tool-btn" data-tool="danger">Danger</button>
+            <button class="tool-btn" data-tool="water">Water</button>
             <button class="tool-btn" id="brain3dBtn" aria-pressed="false">Brain 3D</button>
             <button class="tool-btn" id="activityToggle">Activity</button>
             <button class="tool-btn" id="learnBtn">Learn</button>
@@ -45,6 +47,9 @@
         <div class="help-item"><strong>Air</strong> -- Click and drag near the fly to blow wind. Drag distance controls wind strength.</div>
         <div class="help-item"><strong>Light</strong> -- Cycles through Bright, Dim, and Dark. The fly exhibits phototaxis toward light.</div>
         <div class="help-item"><strong>Temp</strong> -- Cycles through Neutral, Warm, and Cool. Warm makes the fly more active and avoidant. Cool makes it exploratory.</div>
+        <div class="help-item"><strong>Danger</strong> -- Click near the fly to emit a danger odor. The fly detects noxious chemicals via olfactory neurons and triggers an avoidance/flight response.</div>
+        <div class="help-item"><strong>Water</strong> -- Click on the canvas to place a water droplet. The fly drinks when thirsty, reducing its thirst drive.</div>
+        <div class="help-item"><strong>Bitter food</strong> -- 10% of placed food is randomly bitter (shown in green). If the fly contacts bitter food, it triggers rejection and aversive learning.</div>
     </div>
     <div id="left-panel">
         <div id="connectome-panel">
@@ -80,6 +85,10 @@
             <div class="drive-row">
                 <span class="drive-label">Groom</span>
                 <div class="drive-bar-bg"><div class="drive-bar" id="driveGroom"></div></div>
+            </div>
+            <div class="drive-row">
+                <span class="drive-label">Thirst</span>
+                <div class="drive-bar-bg"><div class="drive-bar" id="driveThirst"></div></div>
             </div>
         </div>
     </div>
@@ -136,19 +145,19 @@
     <!-- Three.js v0.128.0 (vendored) -- do NOT upgrade one without the other -->
     <script src="./js/vendor/three.min.js"></script>
     <script src="./js/vendor/OrbitControls.js"></script>
-    <script type="text/javascript" src="./js/constants.js?v=23"></script>
-    <script type="text/javascript" src="./js/connectome.js?v=23"></script>
-    <script type="text/javascript" src="./js/brain-worker-bridge.js?v=23"></script>
-    <script type="text/javascript" src="./js/neuro-renderer.js?v=23"></script>
-    <script type="text/javascript" src="./js/fly-logic.js?v=23"></script>
-    <script type="text/javascript" src="./js/brain3d.js?v=23"></script>
-    <script type="text/javascript" src="./js/education.js?v=23"></script>
-    <script type="text/javascript" src="./js/main.js?v=23"></script>
-    <script type="text/javascript" src="./js/caretaker-renderer.js?v=23"></script>
-    <script type="text/javascript" src="./js/caretaker-sidebar.js?v=23"></script>
-    <script type="text/javascript" src="./js/caretaker-analytics.js?v=23"></script>
-    <script type="text/javascript" src="./js/caretaker-calendar.js?v=23"></script>
-    <script type="text/javascript" src="./js/caretaker-bridge.js?v=23"></script>
+    <script type="text/javascript" src="./js/constants.js?v=24"></script>
+    <script type="text/javascript" src="./js/connectome.js?v=24"></script>
+    <script type="text/javascript" src="./js/brain-worker-bridge.js?v=24"></script>
+    <script type="text/javascript" src="./js/neuro-renderer.js?v=24"></script>
+    <script type="text/javascript" src="./js/fly-logic.js?v=24"></script>
+    <script type="text/javascript" src="./js/brain3d.js?v=24"></script>
+    <script type="text/javascript" src="./js/education.js?v=24"></script>
+    <script type="text/javascript" src="./js/main.js?v=24"></script>
+    <script type="text/javascript" src="./js/caretaker-renderer.js?v=24"></script>
+    <script type="text/javascript" src="./js/caretaker-sidebar.js?v=24"></script>
+    <script type="text/javascript" src="./js/caretaker-analytics.js?v=24"></script>
+    <script type="text/javascript" src="./js/caretaker-calendar.js?v=24"></script>
+    <script type="text/javascript" src="./js/caretaker-bridge.js?v=24"></script>
 </body>
 
 </html>

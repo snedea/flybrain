@@ -136,6 +136,8 @@ BRAIN.stimulate = {
 	touchLocation: null,   // 'head', 'thorax', 'abdomen', 'leg'
 	foodNearby: false,
 	foodContact: false,
+	bitterContact: false,
+	waterContact: false,
 	dangerOdor: false,
 	wind: false,
 	windStrength: 0,       // 0-1
@@ -155,6 +157,7 @@ BRAIN.drives = {
 	fatigue: 0.0,
 	curiosity: 0.5,
 	groom: 0.1,
+	thirst: 0.4,
 };
 
 // Track whether the fly is currently performing certain behaviors
@@ -175,6 +178,12 @@ BRAIN.updateDrives = function () {
 	d.hunger += 0.005;
 	if (BRAIN._isFeeding) {
 		d.hunger -= 0.3;
+	}
+
+	// Thirst: increases over time (slower than hunger), decreases on water contact
+	d.thirst += 0.003;
+	if (BRAIN.stimulate.waterContact) {
+		d.thirst -= 0.4;
 	}
 
 	// Fear: spikes on touch/wind, decays exponentially
@@ -322,7 +331,17 @@ BRAIN.update = function () {
 		BRAIN.dendriteAccumulate('GUS_GRN_SWEET');
 	}
 
-	// Danger odor (NOTE: connectome weights are wired but no user interaction currently sets BRAIN.stimulate.dangerOdor)
+	// Bitter food contact (gustatory -- aversion)
+	if (BRAIN.stimulate.bitterContact) {
+		BRAIN.dendriteAccumulate('GUS_GRN_BITTER');
+	}
+
+	// Water contact (gustatory -- thirst reduction)
+	if (BRAIN.stimulate.waterContact) {
+		BRAIN.dendriteAccumulate('GUS_GRN_WATER');
+	}
+
+	// Danger odor
 	if (BRAIN.stimulate.dangerOdor) {
 		BRAIN.dendriteAccumulate('OLF_ORN_DANGER');
 	}

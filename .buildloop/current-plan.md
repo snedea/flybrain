@@ -1,250 +1,343 @@
-# Plan: T12.1
+# Plan: T13.1
 
-Fix three bugs: (1) idle pulse never drawn, (2) wind arrow double radian conversion, (3) missing input validation in executeCommand.
+Wire unused connectome pathways (danger odor, bitter taste, water taste) to user interactions.
 
 ## Dependencies
-- list: none
+- list: none (vanilla JS, no packages)
 - commands: none
 
 ## File Operations (in execution order)
 
-### 1. MODIFY js/caretaker-renderer.js
+### 1. MODIFY js/connectome.js
 - operation: MODIFY
-- reason: Fix idle pulse not drawing (bug 1) and wind arrow double radian conversion (bug 2)
+- reason: Add `bitterContact` and `waterContact` stimulus flags and wire them into BRAIN.update() sensory processing; also add `thirst` drive
 
-#### Bug 1: Idle pulse never draws
+#### anchor: `BRAIN.stimulate = {`
 
-**Root cause:** Two problems prevent the idle pulse from ever appearing:
-1. `update()` (line 111) sets `attentionX = -1` when idle > 3s, destroying the position that `drawIdlePulse()` needs
-2. `drawOverlay()` (line 140) never calls `drawIdlePulse()` at all
+Add two new boolean fields to `BRAIN.stimulate`:
+```
+bitterContact: false,
+waterContact: false,
+```
+Place them after the `foodContact: false,` line (line 138).
 
-**Fix approach:** Add `idlePulseX`/`idlePulseY` variables to remember the cursor position when transitioning to idle. Modify `update()` to save position before clearing. Wire `drawIdlePulse()` into `drawOverlay()`. Make `drawIdlePulse()` use the saved position.
+#### anchor: `BRAIN.drives = {`
 
-##### Change 1a: Add idle pulse position variables
-- anchor: `var idleStart = 0;`
-- After line `var idleStart = 0;` (line 14), add two new variable declarations:
+Add a `thirst` drive:
+```
+thirst: 0.4,
+```
+Place it after `curiosity: 0.5,` (line 157). Initial value 0.4 (starts moderately thirsty).
+
+#### anchor: `BRAIN.updateDrives = function () {`
+
+In the `updateDrives` function body, add thirst logic:
+1. After the hunger block (`if (BRAIN._isFeeding) { d.hunger -= 0.3; }`), add:
 ```js
-var idlePulseX = -1;
-var idlePulseY = -1;
+// Thirst: increases over time (slower than hunger), decreases on water contact
+d.thirst += 0.003;
+if (BRAIN.stimulate.waterContact) {
+    d.thirst -= 0.4;
+}
+```
+2. The existing clamp loop at the end (`for (var key in d)`) already handles clamping `thirst` to [0, 1] since it iterates all keys. No change needed there.
+
+#### anchor: `// Food contact (gustatory)`
+
+After the existing `foodContact` block (lines 322-324):
+```js
+if (BRAIN.stimulate.foodContact) {
+    BRAIN.dendriteAccumulate('GUS_GRN_SWEET');
+}
 ```
 
-##### Change 1b: Save position before idle reset in update()
-- anchor: `if (lastCommandTime === 0 || idleTime > 3000) {`
-- Replace the block at lines 111-117:
+Add two new blocks immediately after:
 ```js
-    if (lastCommandTime === 0 || idleTime > 3000) {
-      // Fade out: clear attention so cursor/trail stop drawing
-      attentionX = -1;
-      attentionY = -1;
-      trail = [];
-      return;
-    }
-```
-- With:
-```js
-    if (lastCommandTime === 0 || idleTime > 3000) {
-      if (lastCommandTime > 0 && attentionX >= 0) {
-        idlePulseX = attentionX;
-        idlePulseY = attentionY;
-      }
-      attentionX = -1;
-      attentionY = -1;
-      trail = [];
-      return;
-    }
-    idlePulseX = -1;
-    idlePulseY = -1;
-```
-- The `idlePulseX = -1; idlePulseY = -1;` lines go right after the closing `}` of the idle block but before the existing `if (attentionX < 0) return;` on line 118. This ensures idle pulse coordinates are cleared when the cursor is active (not idle).
+// Bitter food contact (gustatory -- aversion)
+if (BRAIN.stimulate.bitterContact) {
+    BRAIN.dendriteAccumulate('GUS_GRN_BITTER');
+}
 
-##### Change 1c: Reset idlePulseX/Y on disconnect
-- anchor: `trail = [];` inside `setConnected` (the one at line 95, inside the `} else {` block of `setConnected`)
-- After the existing `activeEffects = [];` line (line 96), add:
-```js
-      idlePulseX = -1;
-      idlePulseY = -1;
+// Water contact (gustatory -- thirst reduction)
+if (BRAIN.stimulate.waterContact) {
+    BRAIN.dendriteAccumulate('GUS_GRN_WATER');
+}
 ```
 
-##### Change 1d: Wire drawIdlePulse into drawOverlay
-- anchor: `function drawOverlay(ctx) {`
-- Replace the entire `drawOverlay` function (lines 140-147):
-```js
-  function drawOverlay(ctx) {
-    if (!caretakerConnected) return;
-    drawEffects(ctx);
-    if (attentionX >= 0) {
-      drawTrail(ctx);
-      drawCursor(ctx);
-    }
-    drawIdlePulse(ctx);
-  }
-```
-- The only change is adding `drawIdlePulse(ctx);` as the last line before the closing `}`.
-
-##### Change 1e: Rewrite drawIdlePulse to use idlePulseX/Y
-- anchor: `function drawIdlePulse(ctx) {`
-- Replace the entire `drawIdlePulse` function (lines 250-274):
-```js
-  function drawIdlePulse(ctx) {
-    if (idlePulseX < 0) return;
-    var t = (Date.now() % 1500) / 1500;
-    var beat = 0;
-    if (t < 0.15) {
-      beat = Math.sin(t / 0.15 * Math.PI);
-    } else if (t < 0.3) {
-      beat = 0;
-    } else if (t < 0.45) {
-      beat = Math.sin((t - 0.3) / 0.15 * Math.PI) * 0.6;
-    } else {
-      beat = 0;
-    }
-    if (beat > 0) {
-      var pulseRadius = CURSOR_SIZE / 2 + 4 + beat * 6;
-      var pulseAlpha = beat * 0.25;
-      ctx.beginPath();
-      ctx.arc(idlePulseX, idlePulseY, pulseRadius, 0, Math.PI * 2);
-      ctx.strokeStyle = CLAUDE_ORANGE + pulseAlpha.toFixed(3) + ')';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-    }
-  }
-```
-- Changes from original: line 1 checks `idlePulseX < 0` instead of `attentionX < 0`; removed the `timeSinceCommand` check (redundant -- `idlePulseX >= 0` already implies idle > 3s); line `ctx.arc` uses `idlePulseX, idlePulseY` instead of `attentionX, attentionY`.
-
-#### Bug 2: Wind arrow double radian conversion
-
-**Root cause:** `caretaker-bridge.js` line 73 stores `params.direction` directly as `BRAIN.stimulate.windDirection`. In `main.js`, `windDirection` is computed via `Math.atan2()` (lines 860, 873, 876) which returns radians. The caretaker server sends direction in the same unit (radians). But `caretaker-renderer.js` line 226 does `angle = e.params.direction * Math.PI / 180` -- treating the radian value as degrees and converting again.
-
-**Known pattern match:** "Radians/degrees unit mismatch in angle wrapping" -- confirmed this is a radian value being treated as degrees.
-
-##### Change 2a: Remove degree-to-radian conversion
-- anchor: `angle = e.params.direction * Math.PI / 180;`
-- Replace line 226:
-```js
-        angle = e.params.direction * Math.PI / 180;
-```
-- With:
-```js
-        angle = e.params.direction;
-```
-
-### 2. MODIFY js/caretaker-bridge.js
+### 2. MODIFY index.html
 - operation: MODIFY
-- reason: Add bounds checking on incoming command parameters (bug 3)
+- reason: Add "Danger" and "Water" toolbar buttons; add help text for new tools and update existing Temp help with Water info
 
-#### Input validation in executeCommand()
+#### anchor: `<button class="tool-btn" data-tool="temp" id="tempBtn">Temp: Neutral</button>`
 
-The function already has some validation (light/temp maps, windStrength clamp) but lacks:
-- `place_food`: no check that params.x/params.y are finite numbers
-- `set_light`/`set_temp`: no warning on invalid values (silently ignores)
-- `touch`: no bounds clamping on x/y
-- `blow_wind`: no validation of params.x/params.y if provided
-
-**Canvas bounds reference:** The codebase uses `window.innerWidth` and `window.innerHeight` for bounds (see main.js:2047-2048, main.js:835-836). The toolbar is 44px tall (getLayoutBounds in main.js:79). Use these same values for consistency.
-
-##### Change 3a: Add validation to place_food
-- anchor: `case 'place_food':`
-- Replace the entire place_food case (lines 36-40):
-```js
-      case 'place_food':
-        if (typeof params.x !== 'number' || typeof params.y !== 'number' ||
-            !isFinite(params.x) || !isFinite(params.y)) {
-          console.warn('[caretaker] place_food: invalid x/y', params.x, params.y);
-          break;
-        }
-        var fx = Math.max(0, Math.min(window.innerWidth, params.x));
-        var fy = Math.max(44, Math.min(window.innerHeight, params.y));
-        food.push({ x: fx, y: fy, radius: 10, feedStart: 0, feedDuration: 0, eaten: 0 });
-        break;
+Insert two new buttons immediately after the Temp button:
+```html
+<button class="tool-btn" data-tool="danger">Danger</button>
+<button class="tool-btn" data-tool="water">Water</button>
 ```
 
-##### Change 3b: Add else-warn to set_light
-- anchor: `case 'set_light':`
-- Replace the entire set_light case (lines 41-52):
-```js
-      case 'set_light':
-        if (lightMap.hasOwnProperty(params.level)) {
-          var li = lightMap[params.level];
-          lightStateIndex = li;
-          BRAIN.stimulate.lightLevel = lightStates[li];
-          document.getElementById('lightBtn').textContent = 'Light: ' + lightLabels[li];
-        } else if (typeof params.level === 'number' && params.level >= 0 && params.level <= 2) {
-          var li2 = Math.floor(params.level);
-          lightStateIndex = li2;
-          BRAIN.stimulate.lightLevel = lightStates[li2];
-          document.getElementById('lightBtn').textContent = 'Light: ' + lightLabels[li2];
-        } else {
-          console.warn('[caretaker] set_light: invalid level (expected bright/dim/dark or 0-2):', params.level);
-        }
-        break;
-```
-- Note: added `Math.floor(params.level)` to the numeric branch to ensure integer index. The original used `params.level` directly which could be a float like 1.5.
+#### anchor: `<div class="help-item"><strong>Temp</strong>`
 
-##### Change 3c: Add else-warn to set_temp
-- anchor: `case 'set_temp':`
-- Replace the entire set_temp case (lines 53-64):
-```js
-      case 'set_temp':
-        if (tempMap.hasOwnProperty(params.level)) {
-          var ti = tempMap[params.level];
-          tempStateIndex = ti;
-          BRAIN.stimulate.temperature = tempStates[ti];
-          document.getElementById('tempBtn').textContent = 'Temp: ' + tempLabels[ti];
-        } else if (typeof params.level === 'number' && params.level >= 0 && params.level <= 2) {
-          var ti2 = Math.floor(params.level);
-          tempStateIndex = ti2;
-          BRAIN.stimulate.temperature = tempStates[ti2];
-          document.getElementById('tempBtn').textContent = 'Temp: ' + tempLabels[ti2];
-        } else {
-          console.warn('[caretaker] set_temp: invalid level (expected warm/neutral/cool or 0-2):', params.level);
-        }
-        break;
+After the Temp help-item div, add three new help items:
+```html
+<div class="help-item"><strong>Danger</strong> -- Click near the fly to emit a danger odor. The fly detects noxious chemicals via olfactory neurons and triggers an avoidance/flight response.</div>
+<div class="help-item"><strong>Water</strong> -- Click on the canvas to place a water droplet. The fly drinks when thirsty, reducing its thirst drive.</div>
+<div class="help-item"><strong>Bitter food</strong> -- 10% of placed food is randomly bitter (shown in green). If the fly contacts bitter food, it triggers rejection and aversive learning.</div>
 ```
-- Same `Math.floor` addition for numeric branch.
 
-##### Change 3d: Add bounds clamping to touch
-- anchor: `case 'touch':`
-- Replace the entire touch case (lines 67-69):
-```js
-      case 'touch':
-        var tx = typeof params.x === 'number' && isFinite(params.x)
-          ? Math.max(0, Math.min(window.innerWidth, params.x)) : fly.x;
-        var ty = typeof params.y === 'number' && isFinite(params.y)
-          ? Math.max(44, Math.min(window.innerHeight, params.y)) : fly.y;
-        applyTouchTool(tx, ty);
-        break;
-```
-- This validates x/y are finite numbers and clamps to canvas bounds. Falls back to `fly.x`/`fly.y` if not provided or invalid (preserving existing default behavior).
+#### anchor: `<script type="text/javascript" src="./js/constants.js?v=23"></script>`
 
-##### Change 3e: Add validation to blow_wind
-- anchor: `case 'blow_wind':`
-- Replace the entire blow_wind case (lines 70-75):
+Bump all `?v=23` cache-bust params to `?v=24` on these script tags: `constants.js`, `connectome.js`, `fly-logic.js`, `main.js`. Also bump the CSS link from `?v=23` to `?v=24`.
+
+Change every occurrence of `?v=23` in `index.html` to `?v=24`.
+
+### 3. MODIFY js/main.js
+- operation: MODIFY
+- reason: Add danger tool handler, water drop item array, bitter food marking on food placement, water/bitter contact detection in update loop, drawing routines for water drops and bitter food, and thirst drive meter sync
+
+#### 3a. Add water items array and danger reset time
+- anchor: `var food = [];`
+
+After this line (line 31), add:
 ```js
-      case 'blow_wind':
-        BRAIN.stimulate.wind = true;
-        BRAIN.stimulate.windStrength = Math.min(1, Math.max(0,
-          typeof params.strength === 'number' && isFinite(params.strength) ? params.strength : 0.5));
-        BRAIN.stimulate.windDirection = typeof params.direction === 'number' && isFinite(params.direction)
-          ? params.direction : 0;
-        windResetTime = Date.now() + 2000;
-        break;
+var waterDrops = [];
+var dangerResetTime = 0;
 ```
-- Validates `strength` is a finite number before clamping to [0,1], defaults to 0.5 if invalid.
-- Validates `direction` is a finite number, defaults to 0 if invalid.
-- Note: `params.x`/`params.y` are not used by blow_wind in either the bridge or the renderer (renderer uses `fly.x`/`fly.y`), so no x/y clamping is needed here. The renderer receives the raw params object via `CaretakerRenderer.onCommand(action, params)` but ignores x/y for blow_wind.
+
+#### 3b. Add danger tool to handleCanvasMousedown
+- anchor: `} else if (activeTool === 'air') {`
+
+Before this `else if`, add a new branch:
+```js
+} else if (activeTool === 'danger') {
+    // Emit danger odor at click location -- affects fly if within 80px
+    var distToFly = Math.hypot(cx - fly.x, cy - fly.y);
+    if (distToFly <= 80) {
+        BRAIN.stimulate.dangerOdor = true;
+        dangerResetTime = Date.now() + 2000;
+    }
+    ripples.push({ x: cx, y: cy, startTime: Date.now() });
+```
+
+#### 3c. Add water tool to handleCanvasMousedown
+- anchor: the same `handleCanvasMousedown` function, after the existing `} else if (activeTool === 'air') {` block
+
+After the air tool's opening brace block (after line 849 `}`), but before the closing `}` of `handleCanvasMousedown`, add:
+```js
+} else if (activeTool === 'water') {
+    var waterMinY = getLayoutBounds().top;
+    var waterMaxY = window.innerHeight;
+    cy = Math.max(waterMinY, Math.min(waterMaxY, cy));
+    waterDrops.push({ x: cx, y: cy, radius: 6 });
+```
+
+The complete structure of `handleCanvasMousedown` after edits should be:
+```
+if (activeTool === 'feed') { ... }
+else if (activeTool === 'touch') { ... }
+else if (activeTool === 'danger') { ... }
+else if (activeTool === 'air') { ... }
+else if (activeTool === 'water') { ... }
+```
+
+#### 3d. Mark 10% of food as bitter on placement
+- anchor: `food.push({ x: cx, y: cy, radius: 10, feedStart: 0, feedDuration: 0, eaten: 0 });`
+
+Replace this line with:
+```js
+food.push({ x: cx, y: cy, radius: 10, feedStart: 0, feedDuration: 0, eaten: 0, bitter: Math.random() < 0.1 });
+```
+
+#### 3e. Add bitter contact detection in food proximity loop
+- anchor: In the `update()` function, the food proximity loop starts at line 1930 with `// Food proximity`
+
+Inside the existing food proximity loop, in the `if (dist <= 20)` block (line 1937-1955), after the line `BRAIN.stimulate.foodContact = true;`, add bitter detection:
+```js
+// Bitter food detection
+if (food[i].bitter) {
+    BRAIN.stimulate.bitterContact = true;
+    // Bitter food causes immediate rejection: remove food and skip feeding
+    food.splice(i, 1);
+    i--;
+    continue;
+}
+```
+
+This must go immediately after `BRAIN.stimulate.foodContact = true;` and before the `if (behavior.current === 'feed')` block.
+
+Also, at the top of the food proximity section (after resetting `foodContact` and `foodNearby` to false), add:
+```js
+BRAIN.stimulate.bitterContact = false;
+```
+Place this after line `BRAIN.stimulate.foodNearby = false;` (line 1932).
+
+#### 3f. Add water contact detection in update()
+- anchor: In the `update()` function, after the entire food proximity loop (after line 1974 approximately, the closing `}` of the food for-loop)
+
+Add a water proximity loop:
+```js
+// Water drop proximity
+BRAIN.stimulate.waterContact = false;
+for (var wi = 0; wi < waterDrops.length; wi++) {
+    var wDist = Math.hypot(fly.x - waterDrops[wi].x, fly.y - waterDrops[wi].y);
+    if (wDist <= 15) {
+        BRAIN.stimulate.waterContact = true;
+        waterDrops.splice(wi, 1);
+        wi--;
+    }
+}
+```
+
+#### 3g. Add danger odor reset timer
+- anchor: `// Reset wind stimulus after wall-clock expiry (2 seconds)`
+
+Before this comment block (line 1983), add:
+```js
+// Reset danger odor stimulus after wall-clock expiry (2 seconds)
+if (dangerResetTime > 0 && Date.now() >= dangerResetTime) {
+    BRAIN.stimulate.dangerOdor = false;
+    dangerResetTime = 0;
+}
+```
+
+#### 3h. Update clearButton to also clear water drops
+- anchor: `document.getElementById('clearButton').onclick = function () {`
+
+Change the body from:
+```js
+food = [];
+```
+to:
+```js
+food = [];
+waterDrops = [];
+```
+
+#### 3i. Draw bitter food with distinct color
+- anchor: In `drawFood()`, the line `ctx.fillStyle = 'rgb(251,192,45)';` (line 1225)
+
+Replace this single line with:
+```js
+ctx.fillStyle = f.bitter ? 'rgb(120, 200, 80)' : 'rgb(251,192,45)';
+```
+
+#### 3j. Add drawWaterDrops function
+- anchor: Place this new function immediately after `drawFood()` function (after line 1228 `}`)
+
+```js
+/**
+ * Draws water droplets on the canvas as small blue circles.
+ */
+function drawWaterDrops() {
+    for (var i = 0; i < waterDrops.length; i++) {
+        var w = waterDrops[i];
+        ctx.beginPath();
+        ctx.arc(w.x, w.y, w.radius, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(100, 180, 255, 0.8)';
+        ctx.fill();
+    }
+}
+```
+
+#### 3k. Call drawWaterDrops in draw()
+- anchor: `drawFood();` inside the `draw()` function (line 2016)
+
+After `drawFood();`, add:
+```js
+drawWaterDrops();
+```
+
+So the draw calls become:
+```js
+drawFood();
+drawWaterDrops();
+drawRipples();
+drawWindArrow();
+```
+
+#### 3l. Add thirst drive meter to UI sync
+- anchor: `if (driveGroomEl) driveGroomEl.style.width = (BRAIN.drives.groom * 100) + '%';` (line 649)
+
+Immediately after this line, add:
+```js
+var driveThirstEl = document.getElementById('driveThirst');
+if (driveThirstEl) driveThirstEl.style.width = (BRAIN.drives.thirst * 100) + '%';
+```
+
+#### 3m. Clamp water drop positions on resize
+- anchor: In the resize function, after the food position clamping loop:
+```js
+for (var i = 0; i < food.length; i++) {
+    food[i].x = Math.max(0, Math.min(food[i].x, window.innerWidth));
+```
+
+After this food clamping loop, add:
+```js
+for (var i = 0; i < waterDrops.length; i++) {
+    waterDrops[i].x = Math.max(0, Math.min(waterDrops[i].x, window.innerWidth));
+    waterDrops[i].y = Math.max(getLayoutBounds().top, Math.min(waterDrops[i].y, window.innerHeight));
+}
+```
+
+#### 3n. Add danger ripple color variant
+The existing ripple drawing (`drawRipples`) uses orange (`rgba(227, 115, 75, ...)`). No change needed -- danger tool reuses the same ripple visual. The ripple gives feedback that the click registered.
+
+### 4. MODIFY index.html (thirst drive meter)
+- operation: MODIFY
+- reason: Add thirst drive bar row to the drive-meters panel
+
+#### anchor: The last drive-row div in drive-meters (the Groom row):
+```html
+<div class="drive-row">
+    <span class="drive-label">Groom</span>
+    <div class="drive-bar-bg"><div class="drive-bar" id="driveGroom"></div></div>
+</div>
+```
+
+After this div, add:
+```html
+<div class="drive-row">
+    <span class="drive-label">Thirst</span>
+    <div class="drive-bar-bg"><div class="drive-bar" id="driveThirst"></div></div>
+</div>
+```
+
+### 5. MODIFY js/main.js (neuron descriptions)
+- operation: MODIFY
+- reason: The neuron descriptions already include entries for GUS_GRN_BITTER, GUS_GRN_WATER, and OLF_ORN_DANGER (lines 170-175). No changes needed here.
+
+Actually -- skip this step, descriptions already exist.
+
+### 6. MODIFY js/fly-logic.js
+- operation: MODIFY
+- reason: No changes needed. The bitter contact causes immediate food removal (no behavior state change needed), danger odor triggers avoidance via the existing connectome pathway (OLF_ORN_DANGER -> fear -> startle/flight), and water contact is handled by drive reduction. The existing `evaluateBehaviorEntry()` already handles startle/fly based on accumulators.
+
+Actually -- skip this step, no changes needed.
 
 ## Verification
-- build: No build step. Files are served directly (vanilla JS, no transpilation).
-- lint: No linter configured. Manually verify no syntax errors by opening the page.
-- test: No existing test suite. Verify manually.
-- smoke: Open the app in a browser. Connect the caretaker WebSocket server (or mock one). Verify:
-  1. **Idle pulse**: After a caretaker command, wait > 3 seconds. A pulsing orange ring should appear at the last cursor position (heartbeat rhythm: two beats per 1.5s cycle). Before 3s, no pulse. On disconnect, pulse disappears.
-  2. **Wind arrow**: Send a `blow_wind` command with `direction: Math.PI/2` (pointing down in canvas coords). The orange arrow should point downward, not at a near-zero angle (which was the bug -- `PI/2 * PI/180 ≈ 0.027 rad`).
-  3. **Input validation**: Send `place_food` with `x: "abc"` -- should log warning, not crash. Send `set_light` with `level: "invalid"` -- should log warning. Send `touch` with `x: 99999` -- should clamp to canvas width. Send `blow_wind` with `strength: 5` -- should clamp to 1.0.
+- build: No build step. Open `index.html` in a browser directly.
+- lint: No linter configured.
+- test: `open js/tests.html` (if it exists) -- or "no existing test runner for these features"
+- smoke: Open `index.html` in a browser and verify:
+  1. **Danger tool**: Select "Danger" from toolbar. Click within 80px of fly. Verify fly's fear drive spikes and it enters startle/flight behavior. Verify the danger odor auto-clears after 2 seconds.
+  2. **Bitter food**: Select "Feed" and place ~20 food items. Verify roughly 2 appear in green (bitter). When fly contacts a green food, verify it disappears immediately (rejection) and the fly does NOT enter feed state for that item. Check that the connectome panel shows GUS_GRN_BITTER firing briefly.
+  3. **Water tool**: Select "Water" from toolbar. Click to place a water droplet (blue circle). Verify fly approaches and the droplet disappears on contact. Verify thirst drive bar decreases. Verify GUS_GRN_WATER fires in connectome panel.
+  4. **Thirst drive**: Verify the "Thirst" drive bar appears in the left panel under Groom. It should slowly increase over time.
+  5. **Clear button**: Click the X/clear icon. Verify both food and water drops are cleared.
+  6. **Help overlay**: Click "?" and verify Danger, Water, and Bitter food entries appear.
 
 ## Constraints
-- Do NOT modify any file other than `js/caretaker-renderer.js` and `js/caretaker-bridge.js`
-- Do NOT change the exported API of either module (window.CaretakerRenderer and window.caretakerBridge must keep the same public methods)
-- Use ES5 style throughout (var, not let/const) -- matches existing codebase convention
-- Do NOT add new dependencies or imports
-- Do NOT modify CLAUDE.md, SPEC.md, or TASKS.md
+- Do NOT modify SPEC.md, CLAUDE.md, or TASKS.md
+- Do NOT modify js/constants.js -- the weights are already correctly defined (confirmed at lines 83-128)
+- Do NOT add new dependencies or build steps
+- Do NOT modify js/fly-logic.js unless a behavior state change is truly needed (it is not for this task)
+- Do NOT modify js/brain-worker-bridge.js (the simplified connectome path in connectome.js handles stimulation directly)
+- Use ES5 syntax throughout (var, not let/const) to match existing codebase style
+- All new `BRAIN.stimulate` flags must be boolean and default to false
+- Bitter food removal must happen BEFORE the feeding logic runs to prevent the fly from eating bitter food
+- Water drops use a smaller radius (6px) than food (10px) to be visually distinct
+- Danger tool range is 80px (slightly larger than touch's 50px, since odor diffuses)
+- The danger odor stimulus auto-clears via setTimeout pattern (2 second timer), consistent with how touch and wind stimuli clear (pattern #3 from known patterns)
+- The "Danger" button is a click-to-apply tool (like Feed, Touch) that participates in active-class management (pattern #9 -- it is NOT a cycle button like Light/Temp)
+- The "Water" button is also a click-to-apply tool
+- Bump all cache-bust query params from `?v=23` to `?v=24`

@@ -8,6 +8,7 @@
 // --- Controls ---
 document.getElementById('clearButton').onclick = function () {
 	food = [];
+	waterDrops = [];
 };
 
 document.getElementById('centerButton').onclick = function () {
@@ -29,6 +30,8 @@ var speed = 0;
 var targetSpeed = 0;
 var speedChangeInterval = 0;
 var food = [];
+var waterDrops = [];
+var dangerResetTime = 0;
 var touchResetTime = 0;
 var windResetTime = 0;
 var dragToolOrigin = null;
@@ -647,6 +650,8 @@ function updateBrain() {
 	if (driveFatigueEl) driveFatigueEl.style.width = (BRAIN.drives.fatigue * 100) + '%';
 	if (driveCuriosityEl) driveCuriosityEl.style.width = (BRAIN.drives.curiosity * 100) + '%';
 	if (driveGroomEl) driveGroomEl.style.width = (BRAIN.drives.groom * 100) + '%';
+	var driveThirstEl = document.getElementById('driveThirst');
+	if (driveThirstEl) driveThirstEl.style.width = (BRAIN.drives.thirst * 100) + '%';
 
 	// Update behavior state label
 	var behaviorStateEl = document.getElementById('behaviorState');
@@ -833,9 +838,17 @@ function handleCanvasMousedown(event) {
 		var foodMinY = getLayoutBounds().top;
 		var foodMaxY = window.innerHeight;
 		cy = Math.max(foodMinY, Math.min(foodMaxY, cy));
-		food.push({ x: cx, y: cy, radius: 10, feedStart: 0, feedDuration: 0, eaten: 0 });
+		food.push({ x: cx, y: cy, radius: 10, feedStart: 0, feedDuration: 0, eaten: 0, bitter: Math.random() < 0.1 });
 	} else if (activeTool === 'touch') {
 		applyTouchTool(cx, cy);
+		ripples.push({ x: cx, y: cy, startTime: Date.now() });
+	} else if (activeTool === 'danger') {
+		// Emit danger odor at click location -- affects fly if within 80px
+		var distToFly = Math.hypot(cx - fly.x, cy - fly.y);
+		if (distToFly <= 80) {
+			BRAIN.stimulate.dangerOdor = true;
+			dangerResetTime = Date.now() + 2000;
+		}
 		ripples.push({ x: cx, y: cy, startTime: Date.now() });
 	} else if (activeTool === 'air') {
 		isDragging = true;
@@ -846,6 +859,11 @@ function handleCanvasMousedown(event) {
 		BRAIN.stimulate.wind = true;
 		BRAIN.stimulate.windStrength = 0.3;
 		BRAIN.stimulate.windDirection = 0;
+	} else if (activeTool === 'water') {
+		var waterMinY = getLayoutBounds().top;
+		var waterMaxY = window.innerHeight;
+		cy = Math.max(waterMinY, Math.min(waterMaxY, cy));
+		waterDrops.push({ x: cx, y: cy, radius: 6 });
 	}
 }
 
@@ -1222,7 +1240,20 @@ function drawFood() {
 		// Food circle (uses dynamic radius for gradual feeding shrink)
 		ctx.beginPath();
 		ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2);
-		ctx.fillStyle = 'rgb(251,192,45)';
+		ctx.fillStyle = f.bitter ? 'rgb(120, 200, 80)' : 'rgb(251,192,45)';
+		ctx.fill();
+	}
+}
+
+/**
+ * Draws water droplets on the canvas as small blue circles.
+ */
+function drawWaterDrops() {
+	for (var i = 0; i < waterDrops.length; i++) {
+		var w = waterDrops[i];
+		ctx.beginPath();
+		ctx.arc(w.x, w.y, w.radius, 0, Math.PI * 2);
+		ctx.fillStyle = 'rgba(100, 180, 255, 0.8)';
 		ctx.fill();
 	}
 }
@@ -1930,12 +1961,21 @@ function update(dt) {
 	// Food proximity
 	BRAIN.stimulate.foodContact = false;
 	BRAIN.stimulate.foodNearby = false;
+	BRAIN.stimulate.bitterContact = false;
 	for (var i = 0; i < food.length; i++) {
 		var dist = Math.hypot(fly.x - food[i].x, fly.y - food[i].y);
 		if (dist <= 50) {
 			BRAIN.stimulate.foodNearby = true;
 			if (dist <= 20) {
 				BRAIN.stimulate.foodContact = true;
+				// Bitter food detection
+				if (food[i].bitter) {
+					BRAIN.stimulate.bitterContact = true;
+					// Bitter food causes immediate rejection: remove food and skip feeding
+					food.splice(i, 1);
+					i--;
+					continue;
+				}
 				if (behavior.current === 'feed') {
 					// Gradual feeding: start timer on first contact, shrink food, remove when done
 					if (food[i].feedStart === 0) {
@@ -1973,11 +2013,28 @@ function update(dt) {
 		}
 	}
 
+	// Water drop proximity
+	BRAIN.stimulate.waterContact = false;
+	for (var wi = 0; wi < waterDrops.length; wi++) {
+		var wDist = Math.hypot(fly.x - waterDrops[wi].x, fly.y - waterDrops[wi].y);
+		if (wDist <= 15) {
+			BRAIN.stimulate.waterContact = true;
+			waterDrops.splice(wi, 1);
+			wi--;
+		}
+	}
+
 	// Reset touch stimulus after wall-clock expiry (2 seconds)
 	if (touchResetTime > 0 && Date.now() >= touchResetTime) {
 		BRAIN.stimulate.touch = false;
 		BRAIN.stimulate.touchLocation = null;
 		touchResetTime = 0;
+	}
+
+	// Reset danger odor stimulus after wall-clock expiry (2 seconds)
+	if (dangerResetTime > 0 && Date.now() >= dangerResetTime) {
+		BRAIN.stimulate.dangerOdor = false;
+		dangerResetTime = 0;
 	}
 
 	// Reset wind stimulus after wall-clock expiry (2 seconds)
@@ -2014,6 +2071,7 @@ function draw() {
 	ctx.translate(-cx, -cy);
 
 	drawFood();
+	drawWaterDrops();
 	drawRipples();
 	drawWindArrow();
 
@@ -2054,6 +2112,10 @@ function draw() {
 	for (var i = 0; i < food.length; i++) {
 		food[i].x = Math.max(0, Math.min(food[i].x, window.innerWidth));
 		food[i].y = Math.max(getLayoutBounds().top, Math.min(food[i].y, window.innerHeight));
+	}
+	for (var i = 0; i < waterDrops.length; i++) {
+		waterDrops[i].x = Math.max(0, Math.min(waterDrops[i].x, window.innerWidth));
+		waterDrops[i].y = Math.max(getLayoutBounds().top, Math.min(waterDrops[i].y, window.innerHeight));
 	}
 	// Also re-clamp the fly position to the new bounds
 	fly.x = Math.max(0, Math.min(fly.x, window.innerWidth));
