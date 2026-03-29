@@ -279,6 +279,13 @@
       var target = sidebar.querySelector('[data-tab-content="' + tabName + '"]');
       if (target) target.classList.add('active');
 
+      if (tabName === 'analytics' && typeof CaretakerAnalytics !== 'undefined') {
+        CaretakerAnalytics.activate();
+      }
+      if (tabName === 'calendar' && typeof CaretakerCalendar !== 'undefined') {
+        CaretakerCalendar.activate();
+      }
+
       // Update header title
       var title = sidebar.querySelector('.caretaker-sidebar-title');
       if (title) {

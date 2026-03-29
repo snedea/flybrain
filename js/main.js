@@ -509,11 +509,9 @@ if (sidebarToggle) {
 	sidebarToggle.addEventListener('click', function (e) {
 		e.stopPropagation();
 		if (isMobile()) {
-			// On mobile, hamburger toggles bottom panel drawer
-			if (leftPanel && leftPanel.classList.contains('drawer-open')) {
-				closeDrawer();
-			} else {
-				openDrawer();
+			// On mobile, hamburger toggles caretaker sidebar bottom sheet
+			if (typeof CaretakerSidebar !== 'undefined') {
+				CaretakerSidebar.toggle();
 			}
 		} else {
 			// On desktop, hamburger toggles activity sidebar

@@ -975,6 +975,12 @@ canvas {
     display: none;
 }
 
+@media (min-width: 1200px) {
+    .caretaker-sidebar {
+        width: 260px;
+    }
+}
+
 .caretaker-sidebar-header {
     display: flex;
     justify-content: space-between;
@@ -1341,32 +1347,6 @@ canvas {
     border-radius: 3px;
 }
 
-.analytics-section-header {
-    display: none;
-}
-
-.analytics-section-title {
-    color: var(--text);
-    font-size: 0.8rem;
-    font-weight: 600;
-}
-
-.analytics-toggle-btn {
-    background: none;
-    border: 1px solid var(--border);
-    color: var(--text-muted);
-    font-size: 0.7rem;
-    padding: 0.15rem 0.5rem;
-    border-radius: var(--radius);
-    cursor: pointer;
-    font-family: system-ui, -apple-system, sans-serif;
-}
-
-.analytics-toggle-btn:hover {
-    color: var(--text);
-    border-color: var(--accent);
-}
-
 .analytics-content {
     padding: 0.75rem;
     display: flex;
@@ -1480,32 +1460,6 @@ canvas {
 .calendar-section::-webkit-scrollbar-thumb {
     background: rgba(136, 146, 164, 0.3);
     border-radius: 3px;
-}
-
-.calendar-section-header {
-    display: none;
-}
-
-.calendar-section-title {
-    color: var(--text);
-    font-size: 0.8rem;
-    font-weight: 600;
-}
-
-.calendar-toggle-btn {
-    background: none;
-    border: 1px solid var(--border);
-    color: var(--text-muted);
-    font-size: 0.7rem;
-    padding: 0.15rem 0.5rem;
-    border-radius: var(--radius);
-    cursor: pointer;
-    font-family: system-ui, -apple-system, sans-serif;
-}
-
-.calendar-toggle-btn:hover {
-    color: var(--text);
-    border-color: var(--accent);
 }
 
 .calendar-content {

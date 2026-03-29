@@ -14,8 +14,6 @@
     if (analyticsToggle !== null) {
       analyticsToggle.addEventListener('click', togglePanel);
     }
-    refresh();
-    refreshTimer = setInterval(refresh, REFRESH_INTERVAL);
   }
 
   function togglePanel() {
@@ -120,5 +118,12 @@
 
   init();
 
-  window.CaretakerAnalytics = { init: init, refresh: refresh };
+  function activate() {
+    refresh();
+    if (refreshTimer === null) {
+      refreshTimer = setInterval(refresh, REFRESH_INTERVAL);
+    }
+  }
+
+  window.CaretakerAnalytics = { init: init, refresh: refresh, activate: activate };
 })();

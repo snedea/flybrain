@@ -240,9 +240,12 @@
     currentMonth = new Date();
     currentMonth.setDate(1);
     currentMonth.setHours(0, 0, 0, 0);
-    fetchAndRender();
   }
 
   init();
-  window.CaretakerCalendar = { init: init, refresh: fetchAndRender };
+  function activate() {
+    fetchAndRender();
+  }
+
+  window.CaretakerCalendar = { init: init, refresh: fetchAndRender, activate: activate };
 })();

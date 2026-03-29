@@ -1,12 +1,12 @@
-# Scout Report: T10.1
+# Scout Report: T11.1
 
 ## Key Facts (read this first)
 
-- **Tech stack**: Node.js, `better-sqlite3` (SQLite), no bundler. `server/db.js` owns all DB logic. `tools/query-log.sh` is a bash script using DuckDB to query a JSON Lines log file -- but that log is no longer written (agent/run.sh does not redirect stdout to a file), so the tool currently targets a non-existent file.
-- **avgResponseTime bug is real** (`db.js:243`): `var avgResponseTime = forgotIncidents;` -- stores a count, not seconds. `getAnalyticsSummary()` already has the correct hunger-breach-to-food-placement logic (lines 272-296) but computes mean; the task asks for **median**. The fix for `computeDailyScore` should mirror that query pattern and compute median.
-- **connectedHours divisor caveat**: `Math.round(connectedSeconds / 360) / 10` is mathematically identical to `Math.round(connectedSeconds / 3600 * 10) / 10`. The task says "inflates by 10x" but the current math is actually correct due to the compensating `/10`. The fix is a readability refactor -- restructure as `Math.round(connectedSeconds / 3600 * 10) / 10`. **Do NOT just swap 360→3600 without adjusting the rounding factor** -- that would produce 10x smaller results.
-- **query-log.sh must switch from JSON log to SQLite**: DuckDB can read SQLite directly via `ATTACH ... (TYPE sqlite, READ_ONLY)`. The JSON log file no longer exists. All three view definitions need to be rewritten against the SQLite table schema.
-- **`@anthropic-ai/sdk` is safe to remove**: `grep -r anthropic server/` finds no imports outside package.json/package-lock.json; caretaker.js uses `execSync('claude ...')` (line 6, 165).
+- **Stack**: Vanilla JS + HTML/CSS, no build step. Files are served directly. Cache-bust via `?v=N` query params. All currently at `v=22` (consistent).
+- **Four files in scope**: `index.html`, `css/main.css`, `js/caretaker-sidebar.js`, `js/main.js`. Plus `js/caretaker-analytics.js` and `js/caretaker-calendar.js` need minor edits.
+- **Tab infrastructure is complete**: HTML has correct `data-tab` / `data-tab-content` structure; CSS has `.sidebar-tab-content { display: none }` / `.active { display: flex }`; `initTabs()` in caretaker-sidebar.js switches panels correctly.
+- **Two verified gaps** requiring code changes: (a) analytics/calendar fetch on page load instead of on tab activation; (b) no `@media (min-width: 1200px)` breakpoint at 260px exists in CSS.
+- **Dead CSS to remove**: `.analytics-section-header`, `.analytics-section-title`, `.analytics-toggle-btn`, `.calendar-section-header`, `.calendar-section-title`, `.calendar-toggle-btn` -- these elements no longer exist in `index.html` (already removed from HTML; CSS not cleaned up).
 
 ---
 
@@ -14,84 +14,95 @@
 
 | File | Role |
 |------|------|
-| `server/db.js` | MODIFY -- `computeDailyScore` (line 243 avgResponseTime bug) and `getAnalyticsSummary` (line 318 connectedHours refactor) |
-| `tools/query-log.sh` | MODIFY -- `build_schema()` (lines 46-85) rewrites DuckDB views to read SQLite; `validate_args()` (line 38) checks for DB file instead of log file |
-| `package.json` | MODIFY -- remove `@anthropic-ai/sdk` from dependencies |
+| `js/caretaker-sidebar.js` | Sheet state machine, `initTabs()`, close button, drag gesture. Primary edit target. |
+| `css/main.css` | All layout/breakpoints. Needs 1200px query + dead CSS removal. |
+| `js/caretaker-analytics.js` | Calls `refresh()` immediately in `init()` -- needs to defer until first tab activation. |
+| `js/caretaker-calendar.js` | Calls `fetchAndRender()` immediately in `init()` -- needs to defer until first tab activation. |
+| `js/main.js` | `activityToggle` / `sidebarToggle` / close-button wiring. Minor sync issue (see below). |
+| `index.html` | HTML structure already correct. No header elements present. Cache-bust consistent at v=22. |
 
 ---
 
 ## Architecture Notes
 
-### db.js computeDailyScore (lines 212-248)
-- Runs four SQLite queries: avg hunger, feed count, fear incidents, forgot incidents
-- `avgResponseTime` at line 243 is simply `var avgResponseTime = forgotIncidents;` -- wrong, stores count
-- The correct query pattern is already present in `getAnalyticsSummary` lines 272-290: fetch hunger > 0.7 observations, fetch place_food actions, iterate to find first food action after each breach, accumulate deltas in seconds
-- Task asks for **median** not mean. After collecting `responseTimes[]`, sort and take the middle element (or average of two middle elements for even length)
+**Sheet state machine** (`caretaker-sidebar.js:167-196`):
+- `sheetState` variable: `'closed' | 'peek' | 'full'`
+- `setSheetState(state)` removes both classes then adds the relevant one
+- Desktop: `closed ↔ full` (no peek)
+- Mobile: `closed → peek → full → closed` cycle via `toggle()`
+- CSS: desktop sidebar uses `translateX(100%/0)`, mobile uses `translateY(100%/50%/0)`
 
-### db.js getAnalyticsSummary (lines 251-329)
-- Line 318: `Math.round(connectedSeconds / 360) / 10` -- algebraically `= Math.round(connectedSeconds / 3600 * 10) / 10`
-- The clearer form: divide by 3600 first (seconds → hours), multiply by 10 before rounding (preserve one decimal), divide by 10 after. No change to output values.
+**Tab switching** (`caretaker-sidebar.js:257-288`):
+- `initTabs()` uses event delegation on `#sidebar-tabs`
+- Correctly removes `active` from all tabs/panels, adds to clicked tab and matching content panel
+- Updates header title to match tab name
+- **Gap**: No `CaretakerAnalytics.refresh()` / `CaretakerCalendar.refresh()` call on tab activation
 
-### SQLite incidents table schema (db.js lines 35-42)
-```
-id, timestamp, type, severity, description, state_snapshot
-```
-- `type` field (not `incident`): values are `'scared_the_fly'`, `'forgot_to_feed'`
-- `description` is a human string like `"Fear spiked from 0.23 to 0.81 after place_food"` or `"Hunger at 0.91 with no food available"` -- no separate fearBefore/fearAfter columns
-- `state_snapshot` is JSON (stringified fly state)
+**Analytics init** (`caretaker-analytics.js:9-19`):
+- Immediately calls `refresh()` on page load and sets a 30s interval
+- `window.CaretakerAnalytics = { init, refresh }` is exposed globally
 
-### SQLite actions table schema (db.js lines 27-34)
-```
-id, timestamp, action, params, reasoning, fly_state
-```
+**Calendar init** (`caretaker-calendar.js:233-247`):
+- Immediately calls `fetchAndRender()` on page load
+- `window.CaretakerCalendar = { init, refresh: fetchAndRender }` is exposed globally
 
-### SQLite observations table schema (db.js lines 6-26)
-```
-id, timestamp, hunger, fear, fatigue, curiosity, groom, behavior, pos_x, pos_y, facing_dir, speed, fired_neurons, food_count, light_level, temperature, raw_data
-```
+**Toggle wiring** (`main.js:508-547`):
+- Desktop hamburger (`sidebarToggle`): calls `CaretakerSidebar.toggle()`, syncs `activityToggle.active`
+- `activityToggle` button: calls `CaretakerSidebar.toggle()`, syncs its own `.active`
+- Close button (`activityCloseBtn`): removes `.active` from `activityToggle` (main.js), ALSO calls `setSheetState('closed')` (caretaker-sidebar.js) -- both handlers fire correctly
+- **Mobile**: hamburger on mobile opens `#left-panel` drawer only; `#activityToggle` is `display:none` on mobile; no toolbar trigger exists to open the caretaker-sidebar on mobile
 
-### Current query-log.sh schema mismatches (build_schema, lines 46-85)
-1. Reads `caretaker.log` (JSON Lines) -- this file no longer exists; agent/run.sh does not redirect stdout to a file
-2. `observations` view: `WHERE type = 'observation'` -- old log wrote `type: 'state'`; SQLite has a proper `observations` table
-3. `incidents` view: selects `incident` (old log field) -- SQLite table has `type`; selects `fearBefore`/`fearAfter` (old log top-level fields) -- SQLite stores these only inside `description` string; `action` field also doesn't exist as a column
-4. `actions` view: `WHERE type = 'action'` -- old log wrote `type: 'action_ack'`; SQLite has a proper `actions` table
-
-### DuckDB SQLite reading syntax
-DuckDB supports: `ATTACH 'path.db' AS db (TYPE sqlite, READ_ONLY); SELECT * FROM db.main.observations;`
-Or alternatively the sqlite_scan function. The ATTACH approach produces cleaner view definitions.
+**CSS breakpoints**:
+- Default (desktop): `.caretaker-sidebar` at `right:0`, `width:360px`, `top:42px`, slide in from right
+- `max-width: 768px`: becomes full-width bottom sheet with `height:85vh`, `translateY` transitions, safe-area padding-bottom
+- `(orientation: landscape) and (max-height: 500px)`: reverts to right-side panel at `width:260px`
+- **Missing**: `@media (min-width: 1200px)` with `width: 260px` -- task requires this
 
 ---
 
 ## Suggested Approach
 
-1. **`server/db.js` -- `computeDailyScore` (line 243)**: Replace `var avgResponseTime = forgotIncidents;` with a small query block similar to `getAnalyticsSummary` lines 272-296 but compute **median** instead of mean:
-   - Fetch hunger > 0.7 observations for the day, ordered by id ASC
-   - Fetch place_food actions for the day, ordered by timestamp ASC
-   - For each breach, find the first food action at or after it, push delta in seconds
-   - Sort the array, return middle value (or null if empty)
-   - Pass result to `stmtUpsertDailyScore.run()`
+**Fix 1 -- Tab-triggered fetches** (`caretaker-sidebar.js:initTabs`):
+Add to the click handler after activating the panel:
+```js
+if (tabName === 'analytics' && typeof CaretakerAnalytics !== 'undefined') {
+  CaretakerAnalytics.refresh();
+}
+if (tabName === 'calendar' && typeof CaretakerCalendar !== 'undefined') {
+  CaretakerCalendar.refresh();
+}
+```
+Also suppress the eager fetch in `caretaker-analytics.js` and `caretaker-calendar.js` on init (skip calling `refresh()`/`fetchAndRender()` immediately; let the first tab click trigger it). This avoids unnecessary requests on page load when the sidebar may never be opened.
 
-2. **`server/db.js` -- `getAnalyticsSummary` (line 318)**: Change `Math.round(connectedSeconds / 360) / 10` to `Math.round(connectedSeconds / 3600 * 10) / 10`. Same math, clearer intent.
+**Fix 2 -- 1200px media query** (`css/main.css`):
+Add after the existing desktop styles (before mobile `@media (max-width: 768px)`):
+```css
+@media (min-width: 1200px) {
+    .caretaker-sidebar {
+        width: 260px;
+    }
+}
+```
 
-3. **`tools/query-log.sh`**:
-   - Change `LOG_FILE` variable to `DB_FILE="$PROJECT_DIR/data/caretaker.db"`
-   - Update `validate_args` to check `$DB_FILE` with `-f` instead of `-s "$LOG_FILE"`
-   - Rewrite `build_schema()` to ATTACH the SQLite DB and create views from real tables:
-     - `observations`: direct `SELECT` from `db.main.observations` (columns already match)
-     - `actions`: direct `SELECT` from `db.main.actions`
-     - `incidents`: SELECT from `db.main.incidents` using `type` field, expose `description` as-is (no fearBefore/fearAfter), include `severity`
-   - Update `validate_args` error message
-   - Update `get_schema_info` to not reference `raw_log` (no longer needed)
+**Fix 3 -- Dead CSS removal** (`css/main.css`):
+Remove these blocks entirely (lines ~1344-1368 and ~1485-1514):
+- `.analytics-section-header { display: none; }`
+- `.analytics-section-title { ... }`
+- `.analytics-toggle-btn { ... }` and `:hover`
+- `.calendar-section-header { display: none; }`
+- `.calendar-section-title { ... }`
+- `.calendar-toggle-btn { ... }` and `:hover`
 
-4. **`package.json`**: Remove `"@anthropic-ai/sdk": "^0.80.0"` from dependencies. Run `npm install` to regenerate lock file.
+**Fix 4 -- Mobile trigger** (`main.js`):
+On mobile, the hamburger (`sidebarToggle`) currently opens `#left-panel` drawer. There's no way to open the caretaker-sidebar bottom sheet. The simplest fix: on mobile, `sidebarToggle` should call `CaretakerSidebar.toggle()` (which cycles through closed/peek/full on mobile) instead of (or in addition to) the drawer toggle. This lets the drag-gesture states be reachable. Coordinate: the left-panel drawer can still open via a separate gesture or just leave it always visible at 120px on mobile.
 
 ---
 
-## Risks and Constraints
+## Risks and Constraints (read this last)
 
-- **connectedHours "fix" is a no-op mathematically**: `/ 360 / 10 == / 3600`. Implement as `/ 3600 * 10` before `/ 10` to make intent clear, but do NOT just swap 360→3600 without the `* 10` or it outputs 10x smaller values.
-- **DuckDB SQLite ATTACH requires DuckDB ≥ 0.8 with sqlite extension loaded**. The script already checks `duckdb` is installed but doesn't verify the sqlite extension. Add `LOAD sqlite;` before the ATTACH, or use `INSTALL sqlite; LOAD sqlite;` -- but INSTALL requires internet. Check if the user's DuckDB has sqlite bundled (most brew installs do). The builder should add `LOAD sqlite;` before the ATTACH statement.
-- **`data/caretaker.db` path**: DB is at `data/caretaker.db` relative to project root (set in `db.js` line 4 as `path.join(__dirname, '..', 'data', 'caretaker.db')`). The query-log.sh `PROJECT_DIR` already resolves to the project root, so `$PROJECT_DIR/data/caretaker.db` is correct.
-- **median with empty or single-element array**: Handle `responseTimes.length === 0` (return null) and `=== 1` (return the single value) to avoid out-of-bounds access.
-- **`package-lock.json`**: Removing `@anthropic-ai/sdk` from package.json requires running `npm install` to update the lock file. Builder must run this command.
-- **No tests exist**: No test suite to run for verification. Verification will need manual inspection of the query outputs.
+- **No build step**: Edits take effect immediately on page reload. No transpilation. ES5 syntax is used throughout (var, not let/const). Match this style.
+- **Deferred init risk**: Suppressing eager fetch in analytics/calendar `init()` means the first tab click may have a brief loading moment. Acceptable UX tradeoff. Do not suppress the 30s interval in analytics -- keep it so data stays fresh while the tab is visible.
+- **Double-registration of close button**: Both `caretaker-sidebar.js` and `main.js` add `click` listeners to `#caretaker-sidebar-close`. This is intentional -- each listener does a different thing (state machine vs button class sync). Do not consolidate.
+- **`analyticsToggle` / `calendarToggle` getElementById returning null**: Both analytics/calendar modules call `getElementById('analytics-toggle')` / `getElementById('calendar-toggle')` -- these elements don't exist, silently get null, and the `if (toggle) addEventListener` guards prevent errors. Leave as-is (harmless dead code).
+- **Width 360px vs 260px**: Current desktop sidebar is 360px (no breakpoint). At 1200px+ it should be 260px per task requirements. At <1200px desktop it stays 360px. This is a narrowing change -- verify no content overflow at 260px (chat input row, sparklines). The landscape query already uses 260px without reported issues.
+- **`caretaker-analytics.js` 30s refresh timer**: Started in `init()` unconditionally. If analytics init is deferred to first tab click, the interval also starts on first tab click -- this is fine.
