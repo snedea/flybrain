@@ -1,44 +1,30 @@
-# Build Claims -- T13.1
+# Build Claims -- T13.2
 
 ## Files Changed
-- [MODIFY] js/connectome.js -- Added bitterContact/waterContact stimulus flags, thirst drive, thirst update logic, and GUS_GRN_BITTER/GUS_GRN_WATER dendriteAccumulate calls
-- [MODIFY] js/main.js -- Added danger/water tool handlers, waterDrops array, bitter food marking (10% chance), bitter contact detection with food removal, water proximity detection, danger odor reset timer, drawWaterDrops function, thirst drive UI sync, water drop resize clamping, clear button clears water drops
-- [MODIFY] index.html -- Added Danger and Water toolbar buttons, three help-item entries (Danger/Water/Bitter), Thirst drive-row in drive-meters panel, bumped all ?v=23 to ?v=24
+- [MODIFY] js/main.js -- Replaced hard-clamp boundary system with soft steering forces, flight landing cap, startle burst bounds check, teleport recovery, and world-bounds-aware resize/center handlers
 
 ## Verification Results
-- Build: PASS (node -c js/connectome.js && node -c js/main.js -- both parse cleanly)
-- Tests: SKIPPED (no automated test runner for these features)
-- Lint: SKIPPED (no linter configured)
+- Build: PASS (`node --check js/main.js` -- no syntax errors)
+- Lint: PASS (`grep -n` verified all 7 new symbols appear at expected locations: BOUNDARY_PADDING:54, BOUNDARY_TELEPORT_THRESHOLD:55, BOUNDARY_STEER_STRENGTH:56, getWorldBounds:103, clampToWorldBounds:115, soft boundary block:1932, teleport recovery:2000, resize handler:2165, centerButton:18)
+- Tests: SKIPPED (browser-only app, no automated test suite)
 
 ## Claims
-- [ ] BRAIN.stimulate.bitterContact and BRAIN.stimulate.waterContact are new boolean fields defaulting to false in js/connectome.js:139-140
-- [ ] BRAIN.drives.thirst is a new drive initialized to 0.4 in js/connectome.js:160
-- [ ] Thirst increases by 0.003 per brain tick and decreases by 0.4 on water contact in BRAIN.updateDrives (connectome.js:184-186)
-- [ ] GUS_GRN_BITTER fires when bitterContact is true (connectome.js:335)
-- [ ] GUS_GRN_WATER fires when waterContact is true (connectome.js:340)
-- [ ] Danger tool button exists in index.html:18 with data-tool="danger"
-- [ ] Water tool button exists in index.html:19 with data-tool="water"
-- [ ] Danger tool handler in main.js:845-852 sets BRAIN.stimulate.dangerOdor=true when click is within 80px of fly, with 2-second auto-reset via dangerResetTime
-- [ ] Water tool handler in main.js:862-866 places a water drop (radius 6) at click position
-- [ ] 10% of placed food is marked bitter (main.js:841 -- Math.random() < 0.1)
-- [ ] Bitter food renders green (rgb(120,200,80)) vs normal yellow (main.js:1241)
-- [ ] When fly contacts bitter food (dist <= 20), bitterContact is set true and food is immediately removed before feeding logic runs (main.js:1973-1978)
-- [ ] Water proximity loop (main.js:2017-2024) sets waterContact=true and removes water drop when fly is within 15px
-- [ ] Danger odor auto-resets after 2 seconds (main.js:2035-2038)
-- [ ] Clear button clears both food[] and waterDrops[] (main.js:10-11)
-- [ ] drawWaterDrops() renders blue circles (rgba(100,180,255,0.8)) and is called in draw() after drawFood() (main.js:1251-1258, 2074)
-- [ ] Thirst drive bar (id="driveThirst") exists in index.html:90-91 and is synced in updateUI (main.js:651-652)
-- [ ] Water drops are clamped on window resize (main.js:2116-2118)
-- [ ] All ?v=23 cache-bust params bumped to ?v=24 in index.html (0 occurrences of v=23 remain)
-- [ ] Help overlay includes entries for Danger, Water, and Bitter food (index.html:50-52)
-- [ ] OLF_ORN_DANGER, GUS_GRN_BITTER, and GUS_GRN_WATER are already defined with weights in js/constants.js (lines 84, 115, 124) -- no changes needed there
-- [ ] js/fly-logic.js was not modified (existing behavior evaluation handles startle/flight from accumulator signals)
-- [ ] All new code uses ES5 syntax (var, not let/const)
+- [ ] Claim 1: Three boundary constants defined -- BOUNDARY_PADDING=20, BOUNDARY_TELEPORT_THRESHOLD=200, BOUNDARY_STEER_STRENGTH=0.25 (line 54-56)
+- [ ] Claim 2: `getWorldBounds()` function (line 103) converts screen-space layout bounds to world coordinates via `screenToWorld()`, applies BOUNDARY_PADDING inset, returns {left, right, top, bottom}
+- [ ] Claim 3: `clampToWorldBounds(x, y)` function (line 115) hard-clamps a position to within world bounds, returns {x, y}
+- [ ] Claim 4: In `computeMovementForBehavior()` fly state (line 1115-1124), flight landing position is projected ~60 frames ahead; if out of bounds, targetDir is redirected toward the clamped position
+- [ ] Claim 5: In `applyBehaviorMovement()` startle burst (line 1179-1190), burst direction is projected ~30 frames ahead; if landing would be out of bounds, direction is redirected toward clamped position
+- [ ] Claim 6: In `update()` (line 1932-1953), edge avoidance uses world-space bounds from `getWorldBounds()` with BOUNDARY_STEER_STRENGTH=0.25 multiplier instead of old screen-space bounds with hardcoded 0.3
+- [ ] Claim 7: In `update()` (line 1979-1997), soft boundary pushback uses 10% lerp per frame (not hard clamp) when fly exceeds world bounds; touch stimulus is preserved
+- [ ] Claim 8: In `update()` (line 2000-2012), teleport recovery triggers when fly exceeds bounds by > BOUNDARY_TELEPORT_THRESHOLD (200px); fly is placed at center +/- 50px random offset, speed is zeroed
+- [ ] Claim 9: Resize handler (line 2163-2176) clamps food, water drops, and fly positions using `getWorldBounds()` instead of raw screen coordinates
+- [ ] Claim 10: centerButton handler (line 14-21) resets zoom/pan BEFORE setting fly position, uses `getWorldBounds()` center instead of raw window center
+- [ ] Claim 11: No `let` or `const` used -- all new code uses `var` (ES5 compliance)
+- [ ] Claim 12: Teleport check comes AFTER soft clamp, so moderate boundary violations get gentle pushback first
 
 ## Gaps and Assumptions
-- No automated tests exist for these features; verification is manual/visual only
-- The thirst drive increases over time but does not currently influence behavior selection (no "seek water" behavior in fly-logic.js) -- the fly does not actively seek water drops, it only benefits when it happens to walk over one
-- Bitter food detection uses the same 20px contact distance as normal food contact; the fly cannot "smell" bitterness from farther away
-- The danger odor ripple visual is the same orange as touch ripples -- no distinct color was specified in the plan
-- Water drops have no evaporation/timeout -- they persist until consumed or cleared
-- The thirst drive is clamped by the existing generic clamp loop in updateDrives (iterates all keys in BRAIN.drives)
+- No automated tests exist; all verification is manual browser testing
+- The 60-frame flight distance estimate and 30-frame burst distance estimate are approximations; actual distances depend on speed decay curves
+- Floating-point comparison (`clamped.x !== landX`) is used to detect out-of-bounds; this works because clamp only changes values that are actually out of bounds (Math.max/Math.min return exact input when in range)
+- The `wb` variable from the soft boundary steering block (line 1933) is reused by the soft clamp and teleport blocks below (lines 1979-2012); this is intentional since world bounds don't change within a single frame
+- When zoom is very large, world bounds become very small; the edgeMargin (50px world-space) could exceed the world bounds width/height -- no explicit guard for this edge case

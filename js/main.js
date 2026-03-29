@@ -12,11 +12,12 @@ document.getElementById('clearButton').onclick = function () {
 };
 
 document.getElementById('centerButton').onclick = function () {
-	fly.x = window.innerWidth / 2;
-	fly.y = window.innerHeight / 2;
 	zoomLevel = 1;
 	panX = 0;
 	panY = 0;
+	var cwb = getWorldBounds();
+	fly.x = (cwb.left + cwb.right) / 2;
+	fly.y = (cwb.top + cwb.bottom) / 2;
 };
 
 // --- Zoom controls ---
@@ -48,6 +49,11 @@ var pinchStartZoom = 1;
 var isPanning = false;
 var panStart = { x: 0, y: 0 };
 var panStartOffset = { x: 0, y: 0 };
+
+// --- Boundary enforcement ---
+var BOUNDARY_PADDING = 20;
+var BOUNDARY_TELEPORT_THRESHOLD = 200;
+var BOUNDARY_STEER_STRENGTH = 0.25;
 
 function screenToWorld(sx, sy) {
 	var cx = window.innerWidth / 2;
@@ -91,6 +97,26 @@ function getLayoutBounds() {
 		bottom: window.innerHeight - bottomH,
 		left: 0,
 		right: window.innerWidth
+	};
+}
+
+function getWorldBounds() {
+	var bounds = getLayoutBounds();
+	var topLeft = screenToWorld(bounds.left, bounds.top);
+	var bottomRight = screenToWorld(bounds.right, bounds.bottom);
+	return {
+		left: topLeft.x + BOUNDARY_PADDING,
+		right: bottomRight.x - BOUNDARY_PADDING,
+		top: topLeft.y + BOUNDARY_PADDING,
+		bottom: bottomRight.y - BOUNDARY_PADDING
+	};
+}
+
+function clampToWorldBounds(x, y) {
+	var wb = getWorldBounds();
+	return {
+		x: Math.max(wb.left, Math.min(x, wb.right)),
+		y: Math.max(wb.top, Math.min(y, wb.bottom))
 	};
 }
 
@@ -1086,6 +1112,16 @@ function computeMovementForBehavior() {
 		targetSpeed = ((Math.abs(BRAIN.accumleft) + Math.abs(BRAIN.accumright)) / (scalingFactor * 5)) * 2.5;
 		if (targetSpeed < 1.5) targetSpeed = 1.5;
 		speedChangeInterval = (targetSpeed - speed) / (scalingFactor * 0.5);
+		// Cap flight direction: if current trajectory would land outside bounds,
+		// bias targetDir toward center of world bounds
+		var flightDist = targetSpeed * 60; // approximate landing distance (60 frames of flight)
+		var landX = fly.x + Math.cos(targetDir) * flightDist;
+		var landY = fly.y - Math.sin(targetDir) * flightDist;
+		var clamped = clampToWorldBounds(landX, landY);
+		if (clamped.x !== landX || clamped.y !== landY) {
+			var safeAngle = Math.atan2(-(clamped.y - fly.y), clamped.x - fly.x);
+			targetDir = safeAngle;
+		}
 	} else if (state === 'startle') {
 		if (behavior.startlePhase === 'freeze') {
 			targetSpeed = 0;
@@ -1140,7 +1176,16 @@ function applyBehaviorMovement(dtScale) {
 			if (now >= behavior.startleFreezeEnd) {
 				behavior.startlePhase = 'burst';
 				speed = 3.0;
-				behavior.burstDir = normalizeAngle(facingDir + Math.PI + (Math.random() - 0.5) * 0.5);
+				var candidateBurstDir = normalizeAngle(facingDir + Math.PI + (Math.random() - 0.5) * 0.5);
+				// If burst direction would send fly off-screen, redirect toward center
+				var burstDist = 3.0 * 30; // approximate burst travel (speed * ~30 frames)
+				var burstLandX = fly.x + Math.cos(candidateBurstDir) * burstDist;
+				var burstLandY = fly.y - Math.sin(candidateBurstDir) * burstDist;
+				var burstClamped = clampToWorldBounds(burstLandX, burstLandY);
+				if (burstClamped.x !== burstLandX || burstClamped.y !== burstLandY) {
+					candidateBurstDir = Math.atan2(-(burstClamped.y - fly.y), burstClamped.x - fly.x);
+				}
+				behavior.burstDir = candidateBurstDir;
 				targetDir = behavior.burstDir;
 				facingDir = behavior.burstDir;
 				targetSpeed = 0.5;
@@ -1884,35 +1929,28 @@ function update(dt) {
 	speed += speedChangeInterval * dtScale;
 	if (speed < 0) speed = 0;
 
-	// Edge avoidance: bias targetDir away from screen edges when within 50px
+	// --- Soft boundary enforcement (world-space) ---
+	var wb = getWorldBounds();
 	var edgeMargin = 50;
-	var edgeBias = 0;
+	var edgeBiasX = 0;
 	var edgeBiasY = 0;
-	var bounds = getLayoutBounds();
-	var topBound = bounds.top;
-	var bottomBound = bounds.bottom;
-	var leftBound = 0;
-	var rightBound = window.innerWidth;
 
-	if (fly.x - leftBound < edgeMargin) {
-		edgeBias += (edgeMargin - (fly.x - leftBound)) / edgeMargin; // push right (+x)
-	} else if (rightBound - fly.x < edgeMargin) {
-		edgeBias -= (edgeMargin - (rightBound - fly.x)) / edgeMargin; // push left (-x)
+	if (fly.x < wb.left + edgeMargin) {
+		edgeBiasX = (edgeMargin - (fly.x - wb.left)) / edgeMargin;
+	} else if (fly.x > wb.right - edgeMargin) {
+		edgeBiasX = -(edgeMargin - (wb.right - fly.x)) / edgeMargin;
 	}
-	if (fly.y - topBound < edgeMargin) {
-		edgeBiasY -= (edgeMargin - (fly.y - topBound)) / edgeMargin; // push down (-y, but facingDir uses -sin for y)
-	} else if (bottomBound - fly.y < edgeMargin) {
-		edgeBiasY += (edgeMargin - (bottomBound - fly.y)) / edgeMargin; // push up
+	if (fly.y < wb.top + edgeMargin) {
+		edgeBiasY = -(edgeMargin - (fly.y - wb.top)) / edgeMargin;
+	} else if (fly.y > wb.bottom - edgeMargin) {
+		edgeBiasY = (edgeMargin - (wb.bottom - fly.y)) / edgeMargin;
 	}
 
-	if (edgeBias !== 0 || edgeBiasY !== 0) {
-		// Compute desired direction away from edges
-		var awayAngle = Math.atan2(edgeBiasY, edgeBias);
-		var awayStrength = Math.min(1, Math.sqrt(edgeBias * edgeBias + edgeBiasY * edgeBiasY));
-		var angleDiffEdge = awayAngle - targetDir;
-		// Normalize to [-PI, PI]
-		angleDiffEdge = normalizeAngle(angleDiffEdge);
-		targetDir += angleDiffEdge * awayStrength * 0.3 * dtScale;
+	if (edgeBiasX !== 0 || edgeBiasY !== 0) {
+		var awayAngle = Math.atan2(edgeBiasY, edgeBiasX);
+		var awayStrength = Math.min(1, Math.sqrt(edgeBiasX * edgeBiasX + edgeBiasY * edgeBiasY));
+		var angleDiffEdge = normalizeAngle(awayAngle - targetDir);
+		targetDir += angleDiffEdge * awayStrength * BOUNDARY_STEER_STRENGTH * dtScale;
 	}
 
 	// Exponential interpolation toward targetDir using shortest-arc angle difference.
@@ -1938,24 +1976,39 @@ function update(dt) {
 	fly.x += Math.cos(facingDir) * speed * dtScale;
 	fly.y -= Math.sin(facingDir) * speed * dtScale;
 
-	// Screen bounds (clamped to visible area: toolbar=44px top, panel=90px bottom)
-	if (fly.x < 0) {
-		fly.x = 0;
+	// Soft boundary: if fly drifts past the world bounds, gently push back
+	// and fire touch stimulus as a safety net
+	if (fly.x < wb.left) {
+		fly.x += (wb.left - fly.x) * 0.1 * dtScale;
 		BRAIN.stimulate.touch = true;
 		touchResetTime = Math.max(touchResetTime, Date.now() + 2000);
-	} else if (fly.x > window.innerWidth) {
-		fly.x = window.innerWidth;
+	} else if (fly.x > wb.right) {
+		fly.x -= (fly.x - wb.right) * 0.1 * dtScale;
 		BRAIN.stimulate.touch = true;
 		touchResetTime = Math.max(touchResetTime, Date.now() + 2000);
 	}
-	if (fly.y < 44) {
-		fly.y = 44;
+	if (fly.y < wb.top) {
+		fly.y += (wb.top - fly.y) * 0.1 * dtScale;
 		BRAIN.stimulate.touch = true;
 		touchResetTime = Math.max(touchResetTime, Date.now() + 2000);
-	} else if (fly.y > window.innerHeight) {
-		fly.y = window.innerHeight;
+	} else if (fly.y > wb.bottom) {
+		fly.y -= (fly.y - wb.bottom) * 0.1 * dtScale;
 		BRAIN.stimulate.touch = true;
 		touchResetTime = Math.max(touchResetTime, Date.now() + 2000);
+	}
+
+	// Teleport recovery: if fly is far off-screen (> 200px beyond bounds), snap to near center
+	if (fly.x < wb.left - BOUNDARY_TELEPORT_THRESHOLD ||
+		fly.x > wb.right + BOUNDARY_TELEPORT_THRESHOLD ||
+		fly.y < wb.top - BOUNDARY_TELEPORT_THRESHOLD ||
+		fly.y > wb.bottom + BOUNDARY_TELEPORT_THRESHOLD) {
+		var centerX = (wb.left + wb.right) / 2;
+		var centerY = (wb.top + wb.bottom) / 2;
+		fly.x = centerX + (Math.random() - 0.5) * 100;
+		fly.y = centerY + (Math.random() - 0.5) * 100;
+		speed = 0;
+		targetSpeed = 0;
+		speedChangeInterval = 0;
 	}
 
 	// Food proximity
@@ -2107,19 +2160,20 @@ function draw() {
 	canvas.style.width = window.innerWidth + 'px';
 	canvas.style.height = window.innerHeight + 'px';
 	ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-	// Clamp food positions to current visible bounds so food items
+	// Clamp food, water, and fly positions to world bounds so entities
 	// near old edges don't become unreachable after window shrinks
+	var resizeWb = getWorldBounds();
 	for (var i = 0; i < food.length; i++) {
-		food[i].x = Math.max(0, Math.min(food[i].x, window.innerWidth));
-		food[i].y = Math.max(getLayoutBounds().top, Math.min(food[i].y, window.innerHeight));
+		food[i].x = Math.max(resizeWb.left, Math.min(food[i].x, resizeWb.right));
+		food[i].y = Math.max(resizeWb.top, Math.min(food[i].y, resizeWb.bottom));
 	}
 	for (var i = 0; i < waterDrops.length; i++) {
-		waterDrops[i].x = Math.max(0, Math.min(waterDrops[i].x, window.innerWidth));
-		waterDrops[i].y = Math.max(getLayoutBounds().top, Math.min(waterDrops[i].y, window.innerHeight));
+		waterDrops[i].x = Math.max(resizeWb.left, Math.min(waterDrops[i].x, resizeWb.right));
+		waterDrops[i].y = Math.max(resizeWb.top, Math.min(waterDrops[i].y, resizeWb.bottom));
 	}
 	// Also re-clamp the fly position to the new bounds
-	fly.x = Math.max(0, Math.min(fly.x, window.innerWidth));
-	fly.y = Math.max(getLayoutBounds().top, Math.min(fly.y, window.innerHeight));
+	fly.x = Math.max(resizeWb.left, Math.min(fly.x, resizeWb.right));
+	fly.y = Math.max(resizeWb.top, Math.min(fly.y, resizeWb.bottom));
 	window.addEventListener('resize', resize);
 })();
 

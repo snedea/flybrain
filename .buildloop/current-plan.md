@@ -1,6 +1,6 @@
-# Plan: T13.1
+# Plan: T13.2
 
-Wire unused connectome pathways (danger odor, bitter taste, water taste) to user interactions.
+Fly boundary constraints and off-screen recovery. Replace the existing hard-clamp boundary system with soft steering forces, cap flight landing positions, and add teleport recovery for far-off-screen situations.
 
 ## Dependencies
 - list: none (vanilla JS, no packages)
@@ -8,336 +8,369 @@ Wire unused connectome pathways (danger odor, bitter taste, water taste) to user
 
 ## File Operations (in execution order)
 
-### 1. MODIFY js/connectome.js
+### 1. MODIFY js/main.js
 - operation: MODIFY
-- reason: Add `bitterContact` and `waterContact` stimulus flags and wire them into BRAIN.update() sensory processing; also add `thirst` drive
+- reason: Replace hard-clamp boundary enforcement with soft steering, add flight landing cap, add teleport recovery, update resize handler
 
-#### anchor: `BRAIN.stimulate = {`
+There are 4 changes to make in this file, detailed below as Change A through Change D.
 
-Add two new boolean fields to `BRAIN.stimulate`:
-```
-bitterContact: false,
-waterContact: false,
-```
-Place them after the `foodContact: false,` line (line 138).
+---
 
-#### anchor: `BRAIN.drives = {`
+#### Change A: Add boundary constants after the zoom/pan constants block
 
-Add a `thirst` drive:
-```
-thirst: 0.4,
-```
-Place it after `curiosity: 0.5,` (line 157). Initial value 0.4 (starts moderately thirsty).
+- anchor: `var pinchStartZoom = 1;` (line 47)
 
-#### anchor: `BRAIN.updateDrives = function () {`
-
-In the `updateDrives` function body, add thirst logic:
-1. After the hunger block (`if (BRAIN._isFeeding) { d.hunger -= 0.3; }`), add:
-```js
-// Thirst: increases over time (slower than hunger), decreases on water contact
-d.thirst += 0.003;
-if (BRAIN.stimulate.waterContact) {
-    d.thirst -= 0.4;
-}
-```
-2. The existing clamp loop at the end (`for (var key in d)`) already handles clamping `thirst` to [0, 1] since it iterates all keys. No change needed there.
-
-#### anchor: `// Food contact (gustatory)`
-
-After the existing `foodContact` block (lines 322-324):
-```js
-if (BRAIN.stimulate.foodContact) {
-    BRAIN.dendriteAccumulate('GUS_GRN_SWEET');
-}
-```
-
-Add two new blocks immediately after:
-```js
-// Bitter food contact (gustatory -- aversion)
-if (BRAIN.stimulate.bitterContact) {
-    BRAIN.dendriteAccumulate('GUS_GRN_BITTER');
-}
-
-// Water contact (gustatory -- thirst reduction)
-if (BRAIN.stimulate.waterContact) {
-    BRAIN.dendriteAccumulate('GUS_GRN_WATER');
-}
-```
-
-### 2. MODIFY index.html
-- operation: MODIFY
-- reason: Add "Danger" and "Water" toolbar buttons; add help text for new tools and update existing Temp help with Water info
-
-#### anchor: `<button class="tool-btn" data-tool="temp" id="tempBtn">Temp: Neutral</button>`
-
-Insert two new buttons immediately after the Temp button:
-```html
-<button class="tool-btn" data-tool="danger">Danger</button>
-<button class="tool-btn" data-tool="water">Water</button>
-```
-
-#### anchor: `<div class="help-item"><strong>Temp</strong>`
-
-After the Temp help-item div, add three new help items:
-```html
-<div class="help-item"><strong>Danger</strong> -- Click near the fly to emit a danger odor. The fly detects noxious chemicals via olfactory neurons and triggers an avoidance/flight response.</div>
-<div class="help-item"><strong>Water</strong> -- Click on the canvas to place a water droplet. The fly drinks when thirsty, reducing its thirst drive.</div>
-<div class="help-item"><strong>Bitter food</strong> -- 10% of placed food is randomly bitter (shown in green). If the fly contacts bitter food, it triggers rejection and aversive learning.</div>
-```
-
-#### anchor: `<script type="text/javascript" src="./js/constants.js?v=23"></script>`
-
-Bump all `?v=23` cache-bust params to `?v=24` on these script tags: `constants.js`, `connectome.js`, `fly-logic.js`, `main.js`. Also bump the CSS link from `?v=23` to `?v=24`.
-
-Change every occurrence of `?v=23` in `index.html` to `?v=24`.
-
-### 3. MODIFY js/main.js
-- operation: MODIFY
-- reason: Add danger tool handler, water drop item array, bitter food marking on food placement, water/bitter contact detection in update loop, drawing routines for water drops and bitter food, and thirst drive meter sync
-
-#### 3a. Add water items array and danger reset time
-- anchor: `var food = [];`
-
-After this line (line 31), add:
-```js
-var waterDrops = [];
-var dangerResetTime = 0;
-```
-
-#### 3b. Add danger tool to handleCanvasMousedown
-- anchor: `} else if (activeTool === 'air') {`
-
-Before this `else if`, add a new branch:
-```js
-} else if (activeTool === 'danger') {
-    // Emit danger odor at click location -- affects fly if within 80px
-    var distToFly = Math.hypot(cx - fly.x, cy - fly.y);
-    if (distToFly <= 80) {
-        BRAIN.stimulate.dangerOdor = true;
-        dangerResetTime = Date.now() + 2000;
-    }
-    ripples.push({ x: cx, y: cy, startTime: Date.now() });
-```
-
-#### 3c. Add water tool to handleCanvasMousedown
-- anchor: the same `handleCanvasMousedown` function, after the existing `} else if (activeTool === 'air') {` block
-
-After the air tool's opening brace block (after line 849 `}`), but before the closing `}` of `handleCanvasMousedown`, add:
-```js
-} else if (activeTool === 'water') {
-    var waterMinY = getLayoutBounds().top;
-    var waterMaxY = window.innerHeight;
-    cy = Math.max(waterMinY, Math.min(waterMaxY, cy));
-    waterDrops.push({ x: cx, y: cy, radius: 6 });
-```
-
-The complete structure of `handleCanvasMousedown` after edits should be:
-```
-if (activeTool === 'feed') { ... }
-else if (activeTool === 'touch') { ... }
-else if (activeTool === 'danger') { ... }
-else if (activeTool === 'air') { ... }
-else if (activeTool === 'water') { ... }
-```
-
-#### 3d. Mark 10% of food as bitter on placement
-- anchor: `food.push({ x: cx, y: cy, radius: 10, feedStart: 0, feedDuration: 0, eaten: 0 });`
-
-Replace this line with:
-```js
-food.push({ x: cx, y: cy, radius: 10, feedStart: 0, feedDuration: 0, eaten: 0, bitter: Math.random() < 0.1 });
-```
-
-#### 3e. Add bitter contact detection in food proximity loop
-- anchor: In the `update()` function, the food proximity loop starts at line 1930 with `// Food proximity`
-
-Inside the existing food proximity loop, in the `if (dist <= 20)` block (line 1937-1955), after the line `BRAIN.stimulate.foodContact = true;`, add bitter detection:
-```js
-// Bitter food detection
-if (food[i].bitter) {
-    BRAIN.stimulate.bitterContact = true;
-    // Bitter food causes immediate rejection: remove food and skip feeding
-    food.splice(i, 1);
-    i--;
-    continue;
-}
-```
-
-This must go immediately after `BRAIN.stimulate.foodContact = true;` and before the `if (behavior.current === 'feed')` block.
-
-Also, at the top of the food proximity section (after resetting `foodContact` and `foodNearby` to false), add:
-```js
-BRAIN.stimulate.bitterContact = false;
-```
-Place this after line `BRAIN.stimulate.foodNearby = false;` (line 1932).
-
-#### 3f. Add water contact detection in update()
-- anchor: In the `update()` function, after the entire food proximity loop (after line 1974 approximately, the closing `}` of the food for-loop)
-
-Add a water proximity loop:
-```js
-// Water drop proximity
-BRAIN.stimulate.waterContact = false;
-for (var wi = 0; wi < waterDrops.length; wi++) {
-    var wDist = Math.hypot(fly.x - waterDrops[wi].x, fly.y - waterDrops[wi].y);
-    if (wDist <= 15) {
-        BRAIN.stimulate.waterContact = true;
-        waterDrops.splice(wi, 1);
-        wi--;
-    }
-}
-```
-
-#### 3g. Add danger odor reset timer
-- anchor: `// Reset wind stimulus after wall-clock expiry (2 seconds)`
-
-Before this comment block (line 1983), add:
-```js
-// Reset danger odor stimulus after wall-clock expiry (2 seconds)
-if (dangerResetTime > 0 && Date.now() >= dangerResetTime) {
-    BRAIN.stimulate.dangerOdor = false;
-    dangerResetTime = 0;
-}
-```
-
-#### 3h. Update clearButton to also clear water drops
-- anchor: `document.getElementById('clearButton').onclick = function () {`
-
-Change the body from:
-```js
-food = [];
-```
-to:
-```js
-food = [];
-waterDrops = [];
-```
-
-#### 3i. Draw bitter food with distinct color
-- anchor: In `drawFood()`, the line `ctx.fillStyle = 'rgb(251,192,45)';` (line 1225)
-
-Replace this single line with:
-```js
-ctx.fillStyle = f.bitter ? 'rgb(120, 200, 80)' : 'rgb(251,192,45)';
-```
-
-#### 3j. Add drawWaterDrops function
-- anchor: Place this new function immediately after `drawFood()` function (after line 1228 `}`)
+Insert the following constants immediately after line 50 (`var panStartOffset = { x: 0, y: 0 };`):
 
 ```js
-/**
- * Draws water droplets on the canvas as small blue circles.
- */
-function drawWaterDrops() {
-    for (var i = 0; i < waterDrops.length; i++) {
-        var w = waterDrops[i];
-        ctx.beginPath();
-        ctx.arc(w.x, w.y, w.radius, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(100, 180, 255, 0.8)';
-        ctx.fill();
-    }
-}
+// --- Boundary enforcement ---
+var BOUNDARY_PADDING = 20;
+var BOUNDARY_TELEPORT_THRESHOLD = 200;
+var BOUNDARY_STEER_STRENGTH = 0.25;
 ```
 
-#### 3k. Call drawWaterDrops in draw()
-- anchor: `drawFood();` inside the `draw()` function (line 2016)
+- `BOUNDARY_PADDING`: 20px inset from canvas edges (world coordinates) defining the soft boundary zone
+- `BOUNDARY_TELEPORT_THRESHOLD`: if fly exceeds boundary by more than 200px, teleport to near center
+- `BOUNDARY_STEER_STRENGTH`: multiplier for the steering force applied when fly is in the boundary margin (0.25 gives a gentle curve back inward)
 
-After `drawFood();`, add:
+---
+
+#### Change B: Add `getWorldBounds()` helper function and `clampToWorldBounds(x, y)` helper function
+
+- anchor: `function getLayoutBounds() {` (line 79)
+
+Insert TWO new functions immediately BEFORE `getLayoutBounds()` (i.e., between line 78 `}` closing `isMobile()` and line 79 `function getLayoutBounds()`):
+
+##### Function 1: `getWorldBounds()`
+- signature: `function getWorldBounds()`
+- purpose: Compute the fly's allowed bounding box in world coordinates, accounting for zoom/pan viewport and UI chrome with BOUNDARY_PADDING inset
+- logic:
+  1. Call `getLayoutBounds()` to get `bounds` (screen-space bounds accounting for toolbar and panel)
+  2. Convert all four corners of the screen-space layout bounds to world coordinates using `screenToWorld()`:
+     - `var topLeft = screenToWorld(bounds.left, bounds.top);`
+     - `var bottomRight = screenToWorld(bounds.right, bounds.bottom);`
+  3. Return an object with BOUNDARY_PADDING applied inward:
+     ```js
+     return {
+       left: topLeft.x + BOUNDARY_PADDING,
+       right: bottomRight.x - BOUNDARY_PADDING,
+       top: topLeft.y + BOUNDARY_PADDING,
+       bottom: bottomRight.y - BOUNDARY_PADDING
+     };
+     ```
+- returns: `{ left: number, top: number, right: number, bottom: number }` in world coordinates
+
+##### Function 2: `clampToWorldBounds(x, y)`
+- signature: `function clampToWorldBounds(x, y)`
+- purpose: Hard-clamp a position to within the world bounds (used for flight landing and teleport target)
+- logic:
+  1. Call `var wb = getWorldBounds();`
+  2. Return `{ x: Math.max(wb.left, Math.min(x, wb.right)), y: Math.max(wb.top, Math.min(y, wb.bottom)) }`
+- returns: `{ x: number, y: number }`
+
+---
+
+#### Change C: Replace the edge avoidance + hard clamp block in `update()` with soft boundary steering, flight landing cap, and teleport recovery
+
+- anchor: The existing edge avoidance block starts at line 1887 with the comment `// Edge avoidance: bias targetDir away from screen edges when within 50px` and ends at line 1959 with the closing `}` of the `fly.y > window.innerHeight` clamp.
+
+**DELETE** the entire block from line 1887 (`// Edge avoidance: bias targetDir away from screen edges when within 50px`) through line 1959 (the closing `}` of the last `fly.y > window.innerHeight` else-if block). This is the block that:
+- Computes `edgeMargin`, `edgeBias`, `edgeBiasY` using screen-space `getLayoutBounds()`
+- Applies `awayAngle` steering
+- Hard clamps `fly.x` to `[0, window.innerWidth]` and `fly.y` to `[44, window.innerHeight]`
+- Sets `BRAIN.stimulate.touch = true` on wall contact
+
+**REPLACE** with the following code (insert at the same location, after `if (speed < 0) speed = 0;`):
+
 ```js
-drawWaterDrops();
+	// --- Soft boundary enforcement (world-space) ---
+	var wb = getWorldBounds();
+	var edgeMargin = 50;
+	var edgeBiasX = 0;
+	var edgeBiasY = 0;
+
+	if (fly.x < wb.left + edgeMargin) {
+		edgeBiasX = (edgeMargin - (fly.x - wb.left)) / edgeMargin;
+	} else if (fly.x > wb.right - edgeMargin) {
+		edgeBiasX = -(edgeMargin - (wb.right - fly.x)) / edgeMargin;
+	}
+	if (fly.y < wb.top + edgeMargin) {
+		edgeBiasY = -(edgeMargin - (fly.y - wb.top)) / edgeMargin;
+	} else if (fly.y > wb.bottom - edgeMargin) {
+		edgeBiasY = (edgeMargin - (wb.bottom - fly.y)) / edgeMargin;
+	}
+
+	if (edgeBiasX !== 0 || edgeBiasY !== 0) {
+		var awayAngle = Math.atan2(edgeBiasY, edgeBiasX);
+		var awayStrength = Math.min(1, Math.sqrt(edgeBiasX * edgeBiasX + edgeBiasY * edgeBiasY));
+		var angleDiffEdge = normalizeAngle(awayAngle - targetDir);
+		targetDir += angleDiffEdge * awayStrength * BOUNDARY_STEER_STRENGTH * dtScale;
+	}
 ```
 
-So the draw calls become:
+Then, after the turn retention / facingDir interpolation block (which follows immediately -- the code starting with `var turnRetention;` through `targetDir = normalizeAngle(targetDir);` at line 1936), and after the position update lines:
 ```js
-drawFood();
-drawWaterDrops();
-drawRipples();
-drawWindArrow();
+	fly.x += Math.cos(facingDir) * speed * dtScale;
+	fly.y -= Math.sin(facingDir) * speed * dtScale;
 ```
 
-#### 3l. Add thirst drive meter to UI sync
-- anchor: `if (driveGroomEl) driveGroomEl.style.width = (BRAIN.drives.groom * 100) + '%';` (line 649)
+**DELETE** the old hard-clamp block (the `// Screen bounds (clamped to visible area...` block from lines 1941-1959).
 
-Immediately after this line, add:
+**REPLACE** with the following three sections:
+
+##### Section 1: Soft clamp with touch stimulus (safety net)
 ```js
-var driveThirstEl = document.getElementById('driveThirst');
-if (driveThirstEl) driveThirstEl.style.width = (BRAIN.drives.thirst * 100) + '%';
+	// Soft boundary: if fly drifts past the world bounds, gently push back
+	// and fire touch stimulus as a safety net
+	if (fly.x < wb.left) {
+		fly.x += (wb.left - fly.x) * 0.1 * dtScale;
+		BRAIN.stimulate.touch = true;
+		touchResetTime = Math.max(touchResetTime, Date.now() + 2000);
+	} else if (fly.x > wb.right) {
+		fly.x -= (fly.x - wb.right) * 0.1 * dtScale;
+		BRAIN.stimulate.touch = true;
+		touchResetTime = Math.max(touchResetTime, Date.now() + 2000);
+	}
+	if (fly.y < wb.top) {
+		fly.y += (wb.top - fly.y) * 0.1 * dtScale;
+		BRAIN.stimulate.touch = true;
+		touchResetTime = Math.max(touchResetTime, Date.now() + 2000);
+	} else if (fly.y > wb.bottom) {
+		fly.y -= (fly.y - wb.bottom) * 0.1 * dtScale;
+		BRAIN.stimulate.touch = true;
+		touchResetTime = Math.max(touchResetTime, Date.now() + 2000);
+	}
 ```
 
-#### 3m. Clamp water drop positions on resize
-- anchor: In the resize function, after the food position clamping loop:
+##### Section 2: Teleport recovery for far off-screen
 ```js
-for (var i = 0; i < food.length; i++) {
-    food[i].x = Math.max(0, Math.min(food[i].x, window.innerWidth));
+	// Teleport recovery: if fly is far off-screen (> 200px beyond bounds), snap to near center
+	if (fly.x < wb.left - BOUNDARY_TELEPORT_THRESHOLD ||
+		fly.x > wb.right + BOUNDARY_TELEPORT_THRESHOLD ||
+		fly.y < wb.top - BOUNDARY_TELEPORT_THRESHOLD ||
+		fly.y > wb.bottom + BOUNDARY_TELEPORT_THRESHOLD) {
+		var centerX = (wb.left + wb.right) / 2;
+		var centerY = (wb.top + wb.bottom) / 2;
+		fly.x = centerX + (Math.random() - 0.5) * 100;
+		fly.y = centerY + (Math.random() - 0.5) * 100;
+		speed = 0;
+		targetSpeed = 0;
+		speedChangeInterval = 0;
+	}
 ```
 
-After this food clamping loop, add:
+**Note**: The teleport check MUST come AFTER the soft clamp section, so the soft clamp gets a chance to act first on moderate violations. Only extreme violations (> 200px) trigger teleport.
+
+---
+
+#### Change D: Cap flight landing position in `computeMovementForBehavior()`
+
+- anchor: The `fly` state branch at line 1083: `} else if (state === 'fly') {`
+
+The existing code for the `fly` state (lines 1083-1088):
 ```js
-for (var i = 0; i < waterDrops.length; i++) {
-    waterDrops[i].x = Math.max(0, Math.min(waterDrops[i].x, window.innerWidth));
-    waterDrops[i].y = Math.max(getLayoutBounds().top, Math.min(waterDrops[i].y, window.innerHeight));
-}
+	} else if (state === 'fly') {
+		var newDir = (BRAIN.accumleft - BRAIN.accumright) / scalingFactor;
+		targetDir = facingDir + newDir * Math.PI + (Math.random() - 0.5) * 0.2;
+		targetSpeed = ((Math.abs(BRAIN.accumleft) + Math.abs(BRAIN.accumright)) / (scalingFactor * 5)) * 2.5;
+		if (targetSpeed < 1.5) targetSpeed = 1.5;
+		speedChangeInterval = (targetSpeed - speed) / (scalingFactor * 0.5);
 ```
 
-#### 3n. Add danger ripple color variant
-The existing ripple drawing (`drawRipples`) uses orange (`rgba(227, 115, 75, ...)`). No change needed -- danger tool reuses the same ripple visual. The ripple gives feedback that the click registered.
+**ADD** the following lines immediately after `speedChangeInterval = (targetSpeed - speed) / (scalingFactor * 0.5);` and before the next `} else if`:
 
-### 4. MODIFY index.html (thirst drive meter)
-- operation: MODIFY
-- reason: Add thirst drive bar row to the drive-meters panel
-
-#### anchor: The last drive-row div in drive-meters (the Groom row):
-```html
-<div class="drive-row">
-    <span class="drive-label">Groom</span>
-    <div class="drive-bar-bg"><div class="drive-bar" id="driveGroom"></div></div>
-</div>
+```js
+		// Cap flight direction: if current trajectory would land outside bounds,
+		// bias targetDir toward center of world bounds
+		var flightDist = targetSpeed * 60; // approximate landing distance (60 frames of flight)
+		var landX = fly.x + Math.cos(targetDir) * flightDist;
+		var landY = fly.y - Math.sin(targetDir) * flightDist;
+		var clamped = clampToWorldBounds(landX, landY);
+		if (clamped.x !== landX || clamped.y !== landY) {
+			var safeAngle = Math.atan2(-(clamped.y - fly.y), clamped.x - fly.x);
+			targetDir = safeAngle;
+		}
 ```
 
-After this div, add:
-```html
-<div class="drive-row">
-    <span class="drive-label">Thirst</span>
-    <div class="drive-bar-bg"><div class="drive-bar" id="driveThirst"></div></div>
-</div>
+This computes where the fly would land at its current flight trajectory (approx 60 frames ~ 1 second of flight at targetSpeed), and if that projected landing is outside bounds, redirects the targetDir toward the clamped (in-bounds) position.
+
+---
+
+#### Change E: Update the startle burst direction in `applyBehaviorMovement()` to stay in bounds
+
+- anchor: line 1143: `behavior.burstDir = normalizeAngle(facingDir + Math.PI + (Math.random() - 0.5) * 0.5);`
+
+**REPLACE** lines 1142-1146 (the burst initialization block inside the `if (now >= behavior.startleFreezeEnd)` branch):
+```js
+				behavior.startlePhase = 'burst';
+				speed = 3.0;
+				behavior.burstDir = normalizeAngle(facingDir + Math.PI + (Math.random() - 0.5) * 0.5);
+				targetDir = behavior.burstDir;
+				facingDir = behavior.burstDir;
 ```
 
-### 5. MODIFY js/main.js (neuron descriptions)
-- operation: MODIFY
-- reason: The neuron descriptions already include entries for GUS_GRN_BITTER, GUS_GRN_WATER, and OLF_ORN_DANGER (lines 170-175). No changes needed here.
+**WITH**:
+```js
+				behavior.startlePhase = 'burst';
+				speed = 3.0;
+				var candidateBurstDir = normalizeAngle(facingDir + Math.PI + (Math.random() - 0.5) * 0.5);
+				// If burst direction would send fly off-screen, redirect toward center
+				var burstDist = 3.0 * 30; // approximate burst travel (speed * ~30 frames)
+				var burstLandX = fly.x + Math.cos(candidateBurstDir) * burstDist;
+				var burstLandY = fly.y - Math.sin(candidateBurstDir) * burstDist;
+				var burstClamped = clampToWorldBounds(burstLandX, burstLandY);
+				if (burstClamped.x !== burstLandX || burstClamped.y !== burstLandY) {
+					candidateBurstDir = Math.atan2(-(burstClamped.y - fly.y), burstClamped.x - fly.x);
+				}
+				behavior.burstDir = candidateBurstDir;
+				targetDir = behavior.burstDir;
+				facingDir = behavior.burstDir;
+```
 
-Actually -- skip this step, descriptions already exist.
+---
 
-### 6. MODIFY js/fly-logic.js
-- operation: MODIFY
-- reason: No changes needed. The bitter contact causes immediate food removal (no behavior state change needed), danger odor triggers avoidance via the existing connectome pathway (OLF_ORN_DANGER -> fear -> startle/flight), and water contact is handled by drive reduction. The existing `evaluateBehaviorEntry()` already handles startle/fly based on accumulators.
+#### Change F: Update the resize handler to use `getWorldBounds()` for fly re-clamping
 
-Actually -- skip this step, no changes needed.
+- anchor: line 2120: `// Also re-clamp the fly position to the new bounds`
+
+**REPLACE** lines 2121-2122:
+```js
+	fly.x = Math.max(0, Math.min(fly.x, window.innerWidth));
+	fly.y = Math.max(getLayoutBounds().top, Math.min(fly.y, window.innerHeight));
+```
+
+**WITH**:
+```js
+	var resizeWb = getWorldBounds();
+	fly.x = Math.max(resizeWb.left, Math.min(fly.x, resizeWb.right));
+	fly.y = Math.max(resizeWb.top, Math.min(fly.y, resizeWb.bottom));
+```
+
+Also update the food and water drop clamping in the same resize handler (lines 2112-2118) to use world bounds for consistency:
+
+**REPLACE** lines 2110-2118:
+```js
+	// Clamp food positions to current visible bounds so food items
+	// near old edges don't become unreachable after window shrinks
+	for (var i = 0; i < food.length; i++) {
+		food[i].x = Math.max(0, Math.min(food[i].x, window.innerWidth));
+		food[i].y = Math.max(getLayoutBounds().top, Math.min(food[i].y, window.innerHeight));
+	}
+	for (var i = 0; i < waterDrops.length; i++) {
+		waterDrops[i].x = Math.max(0, Math.min(waterDrops[i].x, window.innerWidth));
+		waterDrops[i].y = Math.max(getLayoutBounds().top, Math.min(waterDrops[i].y, window.innerHeight));
+	}
+```
+
+**WITH**:
+```js
+	// Clamp food, water, and fly positions to world bounds so entities
+	// near old edges don't become unreachable after window shrinks
+	var resizeWb = getWorldBounds();
+	for (var i = 0; i < food.length; i++) {
+		food[i].x = Math.max(resizeWb.left, Math.min(food[i].x, resizeWb.right));
+		food[i].y = Math.max(resizeWb.top, Math.min(food[i].y, resizeWb.bottom));
+	}
+	for (var i = 0; i < waterDrops.length; i++) {
+		waterDrops[i].x = Math.max(resizeWb.left, Math.min(waterDrops[i].x, resizeWb.right));
+		waterDrops[i].y = Math.max(resizeWb.top, Math.min(waterDrops[i].y, resizeWb.bottom));
+	}
+```
+
+(Note: after this replacement, the `resizeWb` variable is already declared for the food/water block. The fly clamping lines that follow can reuse it -- but since they are a separate replacement, just use the same `var resizeWb = getWorldBounds();` declaration. To avoid a duplicate `var resizeWb`, combine both replacements into a single block: declare `var resizeWb = getWorldBounds();` once, then clamp food, water, and fly using it.)
+
+**Combined replacement for lines 2110-2122**:
+```js
+	// Clamp food, water, and fly positions to world bounds so entities
+	// near old edges don't become unreachable after window shrinks
+	var resizeWb = getWorldBounds();
+	for (var i = 0; i < food.length; i++) {
+		food[i].x = Math.max(resizeWb.left, Math.min(food[i].x, resizeWb.right));
+		food[i].y = Math.max(resizeWb.top, Math.min(food[i].y, resizeWb.bottom));
+	}
+	for (var i = 0; i < waterDrops.length; i++) {
+		waterDrops[i].x = Math.max(resizeWb.left, Math.min(waterDrops[i].x, resizeWb.right));
+		waterDrops[i].y = Math.max(resizeWb.top, Math.min(waterDrops[i].y, resizeWb.bottom));
+	}
+	// Also re-clamp the fly position to the new bounds
+	fly.x = Math.max(resizeWb.left, Math.min(fly.x, resizeWb.right));
+	fly.y = Math.max(resizeWb.top, Math.min(fly.y, resizeWb.bottom));
+```
+
+---
+
+#### Change G: Update the `centerButton` handler to use world bounds center
+
+- anchor: line 14: `document.getElementById('centerButton').onclick = function () {`
+
+**REPLACE** lines 15-16:
+```js
+	fly.x = window.innerWidth / 2;
+	fly.y = window.innerHeight / 2;
+```
+
+**WITH**:
+```js
+	var cwb = getWorldBounds();
+	fly.x = (cwb.left + cwb.right) / 2;
+	fly.y = (cwb.top + cwb.bottom) / 2;
+```
+
+**Wait** -- `getWorldBounds()` calls `getLayoutBounds()` which calls `document.getElementById('toolbar')` etc. These exist by the time the button is clicked (the button itself is in the DOM). And the center button also resets zoom/pan to 0/1, which means screenToWorld will map to identity. At zoom=1, panX=0, panY=0, `screenToWorld(0, topH)` returns `(0, topH)` and `screenToWorld(innerWidth, innerHeight)` returns `(innerWidth, innerHeight)`. So the world bounds center will be `(innerWidth/2, (topH + BOUNDARY_PADDING + innerHeight - BOUNDARY_PADDING) / 2)`. That's close to the current behavior but accounts for toolbar correctly.
+
+Actually, the center button sets zoom=1, panX=0, panY=0 AFTER setting fly position. The fly position should be set after resetting zoom/pan so the world bounds computation is correct. **Reorder**: set zoom/pan first, then set fly position.
+
+**REPLACE** lines 14-20:
+```js
+document.getElementById('centerButton').onclick = function () {
+	fly.x = window.innerWidth / 2;
+	fly.y = window.innerHeight / 2;
+	zoomLevel = 1;
+	panX = 0;
+	panY = 0;
+};
+```
+
+**WITH**:
+```js
+document.getElementById('centerButton').onclick = function () {
+	zoomLevel = 1;
+	panX = 0;
+	panY = 0;
+	var cwb = getWorldBounds();
+	fly.x = (cwb.left + cwb.right) / 2;
+	fly.y = (cwb.top + cwb.bottom) / 2;
+};
+```
+
+---
+
+## Summary of all edits in js/main.js (execution order)
+
+1. **Change G** (line 14-20): Reorder centerButton handler -- reset zoom/pan before setting fly position, use getWorldBounds() center
+2. **Change A** (after line 50): Insert BOUNDARY_PADDING, BOUNDARY_TELEPORT_THRESHOLD, BOUNDARY_STEER_STRENGTH constants
+3. **Change B** (before line 79): Insert getWorldBounds() and clampToWorldBounds() functions
+4. **Change E** (line 1141-1146): Replace startle burst direction with bounds-aware version
+5. **Change D** (after line 1088): Add flight landing cap in computeMovementForBehavior fly state
+6. **Change C** (lines 1887-1959): Replace entire edge avoidance + hard clamp block with soft boundary steering, soft clamp safety net, and teleport recovery
+7. **Change F** (lines 2110-2122): Replace resize handler clamping with getWorldBounds()-based clamping
 
 ## Verification
-- build: No build step. Open `index.html` in a browser directly.
-- lint: No linter configured.
-- test: `open js/tests.html` (if it exists) -- or "no existing test runner for these features"
-- smoke: Open `index.html` in a browser and verify:
-  1. **Danger tool**: Select "Danger" from toolbar. Click within 80px of fly. Verify fly's fear drive spikes and it enters startle/flight behavior. Verify the danger odor auto-clears after 2 seconds.
-  2. **Bitter food**: Select "Feed" and place ~20 food items. Verify roughly 2 appear in green (bitter). When fly contacts a green food, verify it disappears immediately (rejection) and the fly does NOT enter feed state for that item. Check that the connectome panel shows GUS_GRN_BITTER firing briefly.
-  3. **Water tool**: Select "Water" from toolbar. Click to place a water droplet (blue circle). Verify fly approaches and the droplet disappears on contact. Verify thirst drive bar decreases. Verify GUS_GRN_WATER fires in connectome panel.
-  4. **Thirst drive**: Verify the "Thirst" drive bar appears in the left panel under Groom. It should slowly increase over time.
-  5. **Clear button**: Click the X/clear icon. Verify both food and water drops are cleared.
-  6. **Help overlay**: Click "?" and verify Danger, Water, and Bitter food entries appear.
+- build: No build step. Open `index.html` in a browser.
+- lint: `grep -n "getWorldBounds\|clampToWorldBounds\|BOUNDARY_PADDING\|BOUNDARY_TELEPORT_THRESHOLD\|BOUNDARY_STEER_STRENGTH" js/main.js` -- verify all new symbols appear at their expected locations
+- test: Open the page in a browser console and run: `getWorldBounds()` -- should return an object with left, right, top, bottom properties where left < right and top < bottom. Run `clampToWorldBounds(-1000, -1000)` -- should return `{x: <wb.left>, y: <wb.top>}`.
+- smoke:
+  1. Load the page. Let the fly walk around. It should never walk off-screen. When approaching edges, it should gently curve back inward (no visible "bounce" off a wall).
+  2. Trigger a startle (touch tool + click on fly). The fly should jump/fly but land within the visible canvas area.
+  3. Open browser console. Run `fly.x = -500; fly.y = -500;` -- the fly should teleport to near the center within 1-2 frames.
+  4. Open browser console. Run `fly.x = getWorldBounds().right + 50;` -- the fly should gently drift back into bounds (not teleport, since 50 < 200 threshold).
+  5. Resize the browser window smaller. The fly should be re-clamped to the new bounds.
+  6. Zoom in (use zoom controls). Trigger a startle. The fly should still land within the visible viewport area (world bounds adjust with zoom).
 
 ## Constraints
-- Do NOT modify SPEC.md, CLAUDE.md, or TASKS.md
-- Do NOT modify js/constants.js -- the weights are already correctly defined (confirmed at lines 83-128)
-- Do NOT add new dependencies or build steps
-- Do NOT modify js/fly-logic.js unless a behavior state change is truly needed (it is not for this task)
-- Do NOT modify js/brain-worker-bridge.js (the simplified connectome path in connectome.js handles stimulation directly)
-- Use ES5 syntax throughout (var, not let/const) to match existing codebase style
-- All new `BRAIN.stimulate` flags must be boolean and default to false
-- Bitter food removal must happen BEFORE the feeding logic runs to prevent the fly from eating bitter food
-- Water drops use a smaller radius (6px) than food (10px) to be visually distinct
-- Danger tool range is 80px (slightly larger than touch's 50px, since odor diffuses)
-- The danger odor stimulus auto-clears via setTimeout pattern (2 second timer), consistent with how touch and wind stimuli clear (pattern #3 from known patterns)
-- The "Danger" button is a click-to-apply tool (like Feed, Touch) that participates in active-class management (pattern #9 -- it is NOT a cycle button like Light/Temp)
-- The "Water" button is also a click-to-apply tool
-- Bump all cache-bust query params from `?v=23` to `?v=24`
+- Do NOT modify any file other than `js/main.js`
+- Do NOT use `let` or `const` -- the codebase uses `var` exclusively (ES5 style)
+- Do NOT add new dependencies or imports
+- Do NOT modify SPEC.md, TASKS.md, CLAUDE.md, or any .buildloop/ file other than current-plan.md
+- Do NOT remove the `touchResetTime` stimulus when the fly contacts a boundary -- keep this behavior as it triggers realistic startle/avoidance responses
+- The `getWorldBounds()` function must be defined BEFORE `getLayoutBounds()` is not needed -- actually it calls `getLayoutBounds()`, so it must be defined AFTER `getLayoutBounds()`. **Correction**: place `getWorldBounds()` and `clampToWorldBounds()` immediately AFTER the closing `}` of `getLayoutBounds()` (after line 95), not before it. This ensures `getLayoutBounds()` is hoisted/available. (In ES5 with function declarations, hoisting would handle this, but for clarity and consistency with the codebase style, define them after `getLayoutBounds()`.)
