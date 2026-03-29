@@ -1,6 +1,6 @@
 {
-  "task_id": "T13.2",
-  "task_desc": "Fly boundary constraints and off-screen recovery. The spec shows the fly living on a bounded canvas but there are no collision constraints -- the fly can walk or fly off-screen indefinitely. Add soft boundary enforcement: (1) define a \"world\" bounding box from the canvas dimensions with 20px padding, (2) when the fly's position exceeds the boundary, apply a gentle steering force back toward center (not a hard clamp -- should look natural), (3) when the fly takes flight due to startle, cap the landing position within bounds, (4) if the fly somehow ends up far off-screen (> 200px beyond canvas), teleport it to a random position near center. This should work correctly with the zoom/pan viewport (screenToWorld boundaries). Files: js/main.js (applyBehaviorMovement, update, computeMovementForBehavior).",
+  "task_id": "T13.3",
+  "task_desc": "Mate interaction (spec stretch goal) and courtship behavior. The spec lists \"Offer mate\" as an interaction with olfactory neuron pathway. Implement as a new toolbar tool: (1) clicking \"Mate\" tool then clicking on canvas spawns a static mate sprite (simple smaller fly silhouette) at the click position, (2) fly detects mate via olfactory pathway (OLF_ORN_FOOD repurposed or new group), (3) if drives are favorable (low fear, moderate curiosity, low fatigue), fly approaches mate and enters new \"courtship\" behavior state with wing vibration animation (rapid small wing angle oscillation), (4) after 5-10s of courtship, mate disappears and curiosity resets. Add \"courtship\" to evaluateBehaviorEntry and the behavior state machine. Files: js/fly-logic.js (new behavior state), js/main.js (tool handler, mate rendering, courtship animation), js/connectome.js (olfactory pathway for mate detection), index.html (toolbar button).",
   "completed_stage": "builder",
-  "timestamp": "2026-03-29T23:18:00.254923+00:00"
+  "timestamp": "2026-03-29T23:27:50.297472+00:00"
 }

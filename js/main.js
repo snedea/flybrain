@@ -9,6 +9,7 @@
 document.getElementById('clearButton').onclick = function () {
 	food = [];
 	waterDrops = [];
+	mates = [];
 };
 
 document.getElementById('centerButton').onclick = function () {
@@ -32,6 +33,7 @@ var targetSpeed = 0;
 var speedChangeInterval = 0;
 var food = [];
 var waterDrops = [];
+var mates = [];
 var dangerResetTime = 0;
 var touchResetTime = 0;
 var windResetTime = 0;
@@ -141,6 +143,7 @@ var BEHAVIOR_MIN_DURATION = {
 	fly: 1500,
 	startle: 800,
 	brace: 500,
+	courtship: 5000,
 };
 
 // Cooldown (ms) after exiting a state before it can be re-entered
@@ -150,6 +153,7 @@ var BEHAVIOR_COOLDOWN = {
 	groom: 3000,
 	feed: 1000,
 	brace: 1000,
+	courtship: 5000,
 };
 
 // The behavior state object
@@ -890,6 +894,12 @@ function handleCanvasMousedown(event) {
 		var waterMaxY = window.innerHeight;
 		cy = Math.max(waterMinY, Math.min(waterMaxY, cy));
 		waterDrops.push({ x: cx, y: cy, radius: 6 });
+	} else if (activeTool === 'mate') {
+		var mateMinY = getLayoutBounds().top;
+		var mateMaxY = window.innerHeight;
+		cy = Math.max(mateMinY, Math.min(mateMaxY, cy));
+		// Only one mate at a time
+		mates = [{ x: cx, y: cy, spawnTime: Date.now() }];
 	}
 }
 
@@ -988,6 +998,20 @@ function nearestFood() {
 	}
 	if (!best) return null;
 	return { item: best, dist: bestDist };
+}
+
+function nearestMate() {
+	if (!mates.length) return null;
+	var best = null;
+	var bestDist = Infinity;
+	for (var i = 0; i < mates.length; i++) {
+		var d = Math.hypot(fly.x - mates[i].x, fly.y - mates[i].y);
+		if (d < bestDist) {
+			bestDist = d;
+			best = mates[i];
+		}
+	}
+	return best ? { item: best, dist: bestDist } : null;
 }
 
 /**
@@ -1155,6 +1179,18 @@ function computeMovementForBehavior() {
 	} else if (state === 'groom' || state === 'rest') {
 		targetSpeed = 0;
 		speedChangeInterval = -speed * 0.1;
+	} else if (state === 'courtship') {
+		// Approach mate slowly, then stop when close
+		var nm = nearestMate();
+		if (nm && nm.dist > 25) {
+			var mateAngle = Math.atan2(-(nm.item.y - fly.y), nm.item.x - fly.x);
+			targetDir = mateAngle;
+			targetSpeed = 0.2;
+			speedChangeInterval = (targetSpeed - speed) / 30;
+		} else {
+			targetSpeed = 0;
+			speedChangeInterval = -speed * 0.1;
+		}
 	} else {
 		// idle
 		targetSpeed = 0;
@@ -1196,6 +1232,7 @@ function applyBehaviorMovement(dtScale) {
 
 	if (behavior.current === 'groom' ||
 		behavior.current === 'rest' || behavior.current === 'idle' ||
+		behavior.current === 'courtship' ||
 		behavior.current === 'brace') {
 		if (speed > 0.05) {
 			speed *= Math.pow(0.92, dtScale);
@@ -1251,6 +1288,13 @@ function updateAnimForBehavior(dtScale) {
 		var spd = Math.abs(speed);
 		anim.walkPhase += spd * 0.5 * dtScale;
 	}
+
+	// Courtship wing vibration: rapid small oscillation target
+	var targetCourtshipVib = 0;
+	if (state === 'courtship') {
+		targetCourtshipVib = 1;
+	}
+	anim.courtshipWingVibration += (targetCourtshipVib - anim.courtshipWingVibration) * (1 - Math.pow(0.8, dtScale));
 }
 
 function cycleLightLevel() {
@@ -1300,6 +1344,86 @@ function drawWaterDrops() {
 		ctx.arc(w.x, w.y, w.radius, 0, Math.PI * 2);
 		ctx.fillStyle = 'rgba(100, 180, 255, 0.8)';
 		ctx.fill();
+	}
+}
+
+/**
+ * Draws mate sprites as smaller fly silhouettes.
+ */
+function drawMates() {
+	for (var i = 0; i < mates.length; i++) {
+		var m = mates[i];
+		ctx.save();
+		ctx.translate(m.x, m.y);
+		ctx.scale(0.7, 0.7);
+
+		// Abdomen (ellipse)
+		ctx.beginPath();
+		ctx.ellipse(0, 8, 7, 11, 0, 0, Math.PI * 2);
+		ctx.fillStyle = '#A0750A';
+		ctx.fill();
+		ctx.strokeStyle = '#7A5A08';
+		ctx.lineWidth = 0.8;
+		ctx.stroke();
+
+		// Thorax (ellipse)
+		ctx.beginPath();
+		ctx.ellipse(0, -5, 6, 9, 0, 0, Math.PI * 2);
+		ctx.fillStyle = '#8B6914';
+		ctx.fill();
+		ctx.strokeStyle = '#6B4F10';
+		ctx.lineWidth = 0.8;
+		ctx.stroke();
+
+		// Head (circle)
+		ctx.beginPath();
+		ctx.arc(0, -16, 4.5, 0, Math.PI * 2);
+		ctx.fillStyle = '#8B6914';
+		ctx.fill();
+		ctx.strokeStyle = '#6B4F10';
+		ctx.lineWidth = 0.8;
+		ctx.stroke();
+
+		// Eyes (two small red ovals)
+		ctx.beginPath();
+		ctx.ellipse(-3.5, -17, 3, 3.5, 0, 0, Math.PI * 2);
+		ctx.fillStyle = '#8B0000';
+		ctx.fill();
+		ctx.beginPath();
+		ctx.ellipse(3.5, -17, 3, 3.5, 0, 0, Math.PI * 2);
+		ctx.fillStyle = '#8B0000';
+		ctx.fill();
+
+		// Wings (simplified, folded)
+		ctx.save();
+		ctx.translate(-5, -4);
+		ctx.rotate(-0.3);
+		ctx.beginPath();
+		ctx.ellipse(0, 12, 5, 18, 0, 0, Math.PI * 2);
+		ctx.fillStyle = 'rgba(200, 210, 230, 0.25)';
+		ctx.fill();
+		ctx.restore();
+
+		ctx.save();
+		ctx.translate(5, -4);
+		ctx.rotate(0.3);
+		ctx.beginPath();
+		ctx.ellipse(0, 12, 5, 18, 0, 0, Math.PI * 2);
+		ctx.fillStyle = 'rgba(200, 210, 230, 0.25)';
+		ctx.fill();
+		ctx.restore();
+
+		// Subtle pheromone glow when fly is nearby
+		var distToFly = Math.hypot(fly.x - m.x, fly.y - m.y);
+		if (distToFly <= 80) {
+			var pulse = 0.15 + Math.sin(Date.now() / 300) * 0.1;
+			ctx.beginPath();
+			ctx.arc(0, 0, 25, 0, Math.PI * 2);
+			ctx.fillStyle = 'rgba(255, 180, 200, ' + pulse.toFixed(2) + ')';
+			ctx.fill();
+		}
+
+		ctx.restore();
 	}
 }
 
@@ -1404,6 +1528,7 @@ var anim = {
 	groomPhase: 0,
 	proboscisExtend: 0,
 	wingSpread: 0,
+	courtshipWingVibration: 0,
 };
 
 // Body dimensions (fly ~70px long)
@@ -1536,9 +1661,17 @@ function drawWing(side) {
 		buzzOffset = Math.sin(Date.now() / 30) * 0.15 * anim.wingSpread;
 	}
 
+	// Courtship vibration: rapid small wing angle oscillation (one wing extends more)
+	var courtshipOffset = 0;
+	if (anim.courtshipWingVibration > 0.1) {
+		// Asymmetric vibration: left wing vibrates more (side === -1)
+		var vibFreq = side === -1 ? 20 : 40;
+		courtshipOffset = Math.sin(Date.now() / vibFreq) * 0.12 * anim.courtshipWingVibration;
+	}
+
 	ctx.save();
 	ctx.translate(wx + microOffset, wy);
-	ctx.rotate(side * (0.35 + spreadAngle) + microOffset * 0.02 + buzzOffset);
+	ctx.rotate(side * (0.35 + spreadAngle) + microOffset * 0.02 + buzzOffset + courtshipOffset);
 
 	// Scale wings up during flight (compensates for spread rotation)
 	var wingScale = 1.0 + anim.wingSpread * 0.3;
@@ -2077,6 +2210,29 @@ function update(dt) {
 		}
 	}
 
+	// Mate proximity
+	BRAIN.stimulate.mateNearby = false;
+	for (var mi = 0; mi < mates.length; mi++) {
+		var mDist = Math.hypot(fly.x - mates[mi].x, fly.y - mates[mi].y);
+		if (mDist <= 80) {
+			BRAIN.stimulate.mateNearby = true;
+		}
+	}
+
+	// Courtship completion: after 5-10s in courtship state, mate disappears and curiosity resets
+	if (behavior.current === 'courtship' && mates.length > 0) {
+		var courtshipElapsed = Date.now() - behavior.enterTime;
+		// Random completion between 5000-10000ms (decided once at entry)
+		if (!mates[0].courtshipEnd) {
+			mates[0].courtshipEnd = 5000 + Math.random() * 5000;
+		}
+		if (courtshipElapsed >= mates[0].courtshipEnd) {
+			mates = [];
+			BRAIN.drives.curiosity = 0.1;
+			BRAIN.stimulate.mateNearby = false;
+		}
+	}
+
 	// Reset touch stimulus after wall-clock expiry (2 seconds)
 	if (touchResetTime > 0 && Date.now() >= touchResetTime) {
 		BRAIN.stimulate.touch = false;
@@ -2125,6 +2281,7 @@ function draw() {
 
 	drawFood();
 	drawWaterDrops();
+	drawMates();
 	drawRipples();
 	drawWindArrow();
 
@@ -2170,6 +2327,10 @@ function draw() {
 	for (var i = 0; i < waterDrops.length; i++) {
 		waterDrops[i].x = Math.max(resizeWb.left, Math.min(waterDrops[i].x, resizeWb.right));
 		waterDrops[i].y = Math.max(resizeWb.top, Math.min(waterDrops[i].y, resizeWb.bottom));
+	}
+	for (var i = 0; i < mates.length; i++) {
+		mates[i].x = Math.max(resizeWb.left, Math.min(mates[i].x, resizeWb.right));
+		mates[i].y = Math.max(resizeWb.top, Math.min(mates[i].y, resizeWb.bottom));
 	}
 	// Also re-clamp the fly position to the new bounds
 	fly.x = Math.max(resizeWb.left, Math.min(fly.x, resizeWb.right));

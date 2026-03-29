@@ -1,376 +1,567 @@
-# Plan: T13.2
+# Plan: T13.3
 
-Fly boundary constraints and off-screen recovery. Replace the existing hard-clamp boundary system with soft steering forces, cap flight landing positions, and add teleport recovery for far-off-screen situations.
+Mate interaction (spec stretch goal) and courtship behavior.
 
 ## Dependencies
-- list: none (vanilla JS, no packages)
-- commands: none
+- list: [] (no new dependencies -- vanilla JS project)
+- commands: [] (none)
 
 ## File Operations (in execution order)
 
-### 1. MODIFY js/main.js
+### 1. MODIFY js/connectome.js
 - operation: MODIFY
-- reason: Replace hard-clamp boundary enforcement with soft steering, add flight landing cap, add teleport recovery, update resize handler
+- reason: Add `mateNearby` stimulus flag and olfactory stimulation pathway for mate detection. Add `accumCourtship` accumulator.
 
-There are 4 changes to make in this file, detailed below as Change A through Change D.
-
----
-
-#### Change A: Add boundary constants after the zoom/pan constants block
-
-- anchor: `var pinchStartZoom = 1;` (line 47)
-
-Insert the following constants immediately after line 50 (`var panStartOffset = { x: 0, y: 0 };`):
-
+#### Anchor: `BRAIN.stimulate` object
 ```js
-// --- Boundary enforcement ---
-var BOUNDARY_PADDING = 20;
-var BOUNDARY_TELEPORT_THRESHOLD = 200;
-var BOUNDARY_STEER_STRENGTH = 0.25;
+BRAIN.stimulate = {
 ```
 
-- `BOUNDARY_PADDING`: 20px inset from canvas edges (world coordinates) defining the soft boundary zone
-- `BOUNDARY_TELEPORT_THRESHOLD`: if fly exceeds boundary by more than 200px, teleport to near center
-- `BOUNDARY_STEER_STRENGTH`: multiplier for the steering force applied when fly is in the boundary margin (0.25 gives a gentle curve back inward)
+#### Changes to BRAIN.stimulate
+- Add field `mateNearby: false` after `waterContact: false,` (line 139 area)
 
----
-
-#### Change B: Add `getWorldBounds()` helper function and `clampToWorldBounds(x, y)` helper function
-
-- anchor: `function getLayoutBounds() {` (line 79)
-
-Insert TWO new functions immediately BEFORE `getLayoutBounds()` (i.e., between line 78 `}` closing `isMobile()` and line 79 `function getLayoutBounds()`):
-
-##### Function 1: `getWorldBounds()`
-- signature: `function getWorldBounds()`
-- purpose: Compute the fly's allowed bounding box in world coordinates, accounting for zoom/pan viewport and UI chrome with BOUNDARY_PADDING inset
-- logic:
-  1. Call `getLayoutBounds()` to get `bounds` (screen-space bounds accounting for toolbar and panel)
-  2. Convert all four corners of the screen-space layout bounds to world coordinates using `screenToWorld()`:
-     - `var topLeft = screenToWorld(bounds.left, bounds.top);`
-     - `var bottomRight = screenToWorld(bounds.right, bounds.bottom);`
-  3. Return an object with BOUNDARY_PADDING applied inward:
-     ```js
-     return {
-       left: topLeft.x + BOUNDARY_PADDING,
-       right: bottomRight.x - BOUNDARY_PADDING,
-       top: topLeft.y + BOUNDARY_PADDING,
-       bottom: bottomRight.y - BOUNDARY_PADDING
-     };
-     ```
-- returns: `{ left: number, top: number, right: number, bottom: number }` in world coordinates
-
-##### Function 2: `clampToWorldBounds(x, y)`
-- signature: `function clampToWorldBounds(x, y)`
-- purpose: Hard-clamp a position to within the world bounds (used for flight landing and teleport target)
-- logic:
-  1. Call `var wb = getWorldBounds();`
-  2. Return `{ x: Math.max(wb.left, Math.min(x, wb.right)), y: Math.max(wb.top, Math.min(y, wb.bottom)) }`
-- returns: `{ x: number, y: number }`
-
----
-
-#### Change C: Replace the edge avoidance + hard clamp block in `update()` with soft boundary steering, flight landing cap, and teleport recovery
-
-- anchor: The existing edge avoidance block starts at line 1887 with the comment `// Edge avoidance: bias targetDir away from screen edges when within 50px` and ends at line 1959 with the closing `}` of the `fly.y > window.innerHeight` clamp.
-
-**DELETE** the entire block from line 1887 (`// Edge avoidance: bias targetDir away from screen edges when within 50px`) through line 1959 (the closing `}` of the last `fly.y > window.innerHeight` else-if block). This is the block that:
-- Computes `edgeMargin`, `edgeBias`, `edgeBiasY` using screen-space `getLayoutBounds()`
-- Applies `awayAngle` steering
-- Hard clamps `fly.x` to `[0, window.innerWidth]` and `fly.y` to `[44, window.innerHeight]`
-- Sets `BRAIN.stimulate.touch = true` on wall contact
-
-**REPLACE** with the following code (insert at the same location, after `if (speed < 0) speed = 0;`):
-
+#### Anchor: BRAIN behavior accumulators
 ```js
-	// --- Soft boundary enforcement (world-space) ---
-	var wb = getWorldBounds();
-	var edgeMargin = 50;
-	var edgeBiasX = 0;
-	var edgeBiasY = 0;
+BRAIN.accumHead = 0;
+```
 
-	if (fly.x < wb.left + edgeMargin) {
-		edgeBiasX = (edgeMargin - (fly.x - wb.left)) / edgeMargin;
-	} else if (fly.x > wb.right - edgeMargin) {
-		edgeBiasX = -(edgeMargin - (wb.right - fly.x)) / edgeMargin;
-	}
-	if (fly.y < wb.top + edgeMargin) {
-		edgeBiasY = -(edgeMargin - (fly.y - wb.top)) / edgeMargin;
-	} else if (fly.y > wb.bottom - edgeMargin) {
-		edgeBiasY = (edgeMargin - (wb.bottom - fly.y)) / edgeMargin;
-	}
+#### Changes to accumulators
+- Add `BRAIN.accumCourtship = 0;` after `BRAIN.accumHead = 0;` (line 90)
+- Add `BRAIN.accumCourtship = 0;` in the backward-compatible section after `BRAIN.accumleft = 0;` line 93
 
-	if (edgeBiasX !== 0 || edgeBiasY !== 0) {
-		var awayAngle = Math.atan2(edgeBiasY, edgeBiasX);
-		var awayStrength = Math.min(1, Math.sqrt(edgeBiasX * edgeBiasX + edgeBiasY * edgeBiasY));
-		var angleDiffEdge = normalizeAngle(awayAngle - targetDir);
-		targetDir += angleDiffEdge * awayStrength * BOUNDARY_STEER_STRENGTH * dtScale;
+#### Anchor: `BRAIN.update` function, after the foodNearby stimulation block
+```js
+	// Food nearby (olfactory)
+	if (BRAIN.stimulate.foodNearby) {
+		BRAIN.dendriteAccumulate('OLF_ORN_FOOD');
 	}
 ```
 
-Then, after the turn retention / facingDir interpolation block (which follows immediately -- the code starting with `var turnRetention;` through `targetDir = normalizeAngle(targetDir);` at line 1936), and after the position update lines:
+#### New stimulation block (insert AFTER the foodNearby block, before the food contact block)
+- Add:
 ```js
-	fly.x += Math.cos(facingDir) * speed * dtScale;
-	fly.y -= Math.sin(facingDir) * speed * dtScale;
-```
-
-**DELETE** the old hard-clamp block (the `// Screen bounds (clamped to visible area...` block from lines 1941-1959).
-
-**REPLACE** with the following three sections:
-
-##### Section 1: Soft clamp with touch stimulus (safety net)
-```js
-	// Soft boundary: if fly drifts past the world bounds, gently push back
-	// and fire touch stimulus as a safety net
-	if (fly.x < wb.left) {
-		fly.x += (wb.left - fly.x) * 0.1 * dtScale;
-		BRAIN.stimulate.touch = true;
-		touchResetTime = Math.max(touchResetTime, Date.now() + 2000);
-	} else if (fly.x > wb.right) {
-		fly.x -= (fly.x - wb.right) * 0.1 * dtScale;
-		BRAIN.stimulate.touch = true;
-		touchResetTime = Math.max(touchResetTime, Date.now() + 2000);
-	}
-	if (fly.y < wb.top) {
-		fly.y += (wb.top - fly.y) * 0.1 * dtScale;
-		BRAIN.stimulate.touch = true;
-		touchResetTime = Math.max(touchResetTime, Date.now() + 2000);
-	} else if (fly.y > wb.bottom) {
-		fly.y -= (fly.y - wb.bottom) * 0.1 * dtScale;
-		BRAIN.stimulate.touch = true;
-		touchResetTime = Math.max(touchResetTime, Date.now() + 2000);
+	// Mate nearby (olfactory -- reuses food odor pathway for pheromone detection)
+	if (BRAIN.stimulate.mateNearby) {
+		BRAIN.dendriteAccumulate('OLF_ORN_FOOD');
+		BRAIN.dendriteAccumulateScaled('DRIVE_CURIOSITY', 0.5);
 	}
 ```
 
-##### Section 2: Teleport recovery for far off-screen
+#### Anchor: `BRAIN.motorcontrol` function, after accumStartle section
 ```js
-	// Teleport recovery: if fly is far off-screen (> 200px beyond bounds), snap to near center
-	if (fly.x < wb.left - BOUNDARY_TELEPORT_THRESHOLD ||
-		fly.x > wb.right + BOUNDARY_TELEPORT_THRESHOLD ||
-		fly.y < wb.top - BOUNDARY_TELEPORT_THRESHOLD ||
-		fly.y > wb.bottom + BOUNDARY_TELEPORT_THRESHOLD) {
-		var centerX = (wb.left + wb.right) / 2;
-		var centerY = (wb.top + wb.bottom) / 2;
-		fly.x = centerX + (Math.random() - 0.5) * 100;
-		fly.y = centerY + (Math.random() - 0.5) * 100;
-		speed = 0;
-		targetSpeed = 0;
-		speedChangeInterval = 0;
+	if (BRAIN.postSynaptic['DN_STARTLE']) {
+		BRAIN.accumStartle = BRAIN.postSynaptic['DN_STARTLE'][BRAIN.nextState];
 	}
 ```
 
-**Note**: The teleport check MUST come AFTER the soft clamp section, so the soft clamp gets a chance to act first on moderate violations. Only extreme violations (> 200px) trigger teleport.
-
----
-
-#### Change D: Cap flight landing position in `computeMovementForBehavior()`
-
-- anchor: The `fly` state branch at line 1083: `} else if (state === 'fly') {`
-
-The existing code for the `fly` state (lines 1083-1088):
+#### New courtship accumulator computation (insert AFTER accumStartle, BEFORE the floor section)
+- Add:
 ```js
-	} else if (state === 'fly') {
-		var newDir = (BRAIN.accumleft - BRAIN.accumright) / scalingFactor;
-		targetDir = facingDir + newDir * Math.PI + (Math.random() - 0.5) * 0.2;
-		targetSpeed = ((Math.abs(BRAIN.accumleft) + Math.abs(BRAIN.accumright)) / (scalingFactor * 5)) * 2.5;
-		if (targetSpeed < 1.5) targetSpeed = 1.5;
-		speedChangeInterval = (targetSpeed - speed) / (scalingFactor * 0.5);
-```
-
-**ADD** the following lines immediately after `speedChangeInterval = (targetSpeed - speed) / (scalingFactor * 0.5);` and before the next `} else if`:
-
-```js
-		// Cap flight direction: if current trajectory would land outside bounds,
-		// bias targetDir toward center of world bounds
-		var flightDist = targetSpeed * 60; // approximate landing distance (60 frames of flight)
-		var landX = fly.x + Math.cos(targetDir) * flightDist;
-		var landY = fly.y - Math.sin(targetDir) * flightDist;
-		var clamped = clampToWorldBounds(landX, landY);
-		if (clamped.x !== landX || clamped.y !== landY) {
-			var safeAngle = Math.atan2(-(clamped.y - fly.y), clamped.x - fly.x);
-			targetDir = safeAngle;
+	// Courtship: derives from olfactory activation + low fear + moderate curiosity
+	// This is a synthetic accumulator (not directly from motor neurons)
+	if (BRAIN.stimulate.mateNearby) {
+		var olfPN = 0;
+		if (BRAIN.postSynaptic['OLF_PN']) {
+			olfPN = BRAIN.postSynaptic['OLF_PN'][BRAIN.nextState];
 		}
-```
-
-This computes where the fly would land at its current flight trajectory (approx 60 frames ~ 1 second of flight at targetSpeed), and if that projected landing is outside bounds, redirects the targetDir toward the clamped (in-bounds) position.
-
----
-
-#### Change E: Update the startle burst direction in `applyBehaviorMovement()` to stay in bounds
-
-- anchor: line 1143: `behavior.burstDir = normalizeAngle(facingDir + Math.PI + (Math.random() - 0.5) * 0.5);`
-
-**REPLACE** lines 1142-1146 (the burst initialization block inside the `if (now >= behavior.startleFreezeEnd)` branch):
-```js
-				behavior.startlePhase = 'burst';
-				speed = 3.0;
-				behavior.burstDir = normalizeAngle(facingDir + Math.PI + (Math.random() - 0.5) * 0.5);
-				targetDir = behavior.burstDir;
-				facingDir = behavior.burstDir;
-```
-
-**WITH**:
-```js
-				behavior.startlePhase = 'burst';
-				speed = 3.0;
-				var candidateBurstDir = normalizeAngle(facingDir + Math.PI + (Math.random() - 0.5) * 0.5);
-				// If burst direction would send fly off-screen, redirect toward center
-				var burstDist = 3.0 * 30; // approximate burst travel (speed * ~30 frames)
-				var burstLandX = fly.x + Math.cos(candidateBurstDir) * burstDist;
-				var burstLandY = fly.y - Math.sin(candidateBurstDir) * burstDist;
-				var burstClamped = clampToWorldBounds(burstLandX, burstLandY);
-				if (burstClamped.x !== burstLandX || burstClamped.y !== burstLandY) {
-					candidateBurstDir = Math.atan2(-(burstClamped.y - fly.y), burstClamped.x - fly.x);
-				}
-				behavior.burstDir = candidateBurstDir;
-				targetDir = behavior.burstDir;
-				facingDir = behavior.burstDir;
-```
-
----
-
-#### Change F: Update the resize handler to use `getWorldBounds()` for fly re-clamping
-
-- anchor: line 2120: `// Also re-clamp the fly position to the new bounds`
-
-**REPLACE** lines 2121-2122:
-```js
-	fly.x = Math.max(0, Math.min(fly.x, window.innerWidth));
-	fly.y = Math.max(getLayoutBounds().top, Math.min(fly.y, window.innerHeight));
-```
-
-**WITH**:
-```js
-	var resizeWb = getWorldBounds();
-	fly.x = Math.max(resizeWb.left, Math.min(fly.x, resizeWb.right));
-	fly.y = Math.max(resizeWb.top, Math.min(fly.y, resizeWb.bottom));
-```
-
-Also update the food and water drop clamping in the same resize handler (lines 2112-2118) to use world bounds for consistency:
-
-**REPLACE** lines 2110-2118:
-```js
-	// Clamp food positions to current visible bounds so food items
-	// near old edges don't become unreachable after window shrinks
-	for (var i = 0; i < food.length; i++) {
-		food[i].x = Math.max(0, Math.min(food[i].x, window.innerWidth));
-		food[i].y = Math.max(getLayoutBounds().top, Math.min(food[i].y, window.innerHeight));
-	}
-	for (var i = 0; i < waterDrops.length; i++) {
-		waterDrops[i].x = Math.max(0, Math.min(waterDrops[i].x, window.innerWidth));
-		waterDrops[i].y = Math.max(getLayoutBounds().top, Math.min(waterDrops[i].y, window.innerHeight));
+		var fearPenalty = BRAIN.drives.fear * 20;
+		var fatiguePenalty = BRAIN.drives.fatigue > 0.6 ? 15 : 0;
+		var curiosityBonus = BRAIN.drives.curiosity * 10;
+		BRAIN.accumCourtship = Math.max(0, olfPN + curiosityBonus - fearPenalty - fatiguePenalty);
+	} else {
+		BRAIN.accumCourtship = 0;
 	}
 ```
 
-**WITH**:
+#### Add `BRAIN.accumCourtship` to the floor section
+- anchor: `BRAIN.accumHead = Math.max(0, BRAIN.accumHead);`
+- Add after it: `BRAIN.accumCourtship = Math.max(0, BRAIN.accumCourtship);`
+
+### 2. MODIFY js/fly-logic.js
+- operation: MODIFY
+- reason: Add 'courtship' to `evaluateBehaviorEntry()` and add `BEHAVIOR_THRESHOLDS.courtship`. Add `hasNearbyMate()` helper.
+
+#### Anchor: BEHAVIOR_THRESHOLDS
 ```js
-	// Clamp food, water, and fly positions to world bounds so entities
-	// near old edges don't become unreachable after window shrinks
-	var resizeWb = getWorldBounds();
-	for (var i = 0; i < food.length; i++) {
-		food[i].x = Math.max(resizeWb.left, Math.min(food[i].x, resizeWb.right));
-		food[i].y = Math.max(resizeWb.top, Math.min(food[i].y, resizeWb.bottom));
+var BEHAVIOR_THRESHOLDS = {
+```
+
+#### Add new threshold
+- Add `courtship: 10,` after `groom: 8,` (line 23)
+
+#### New function: `hasNearbyMate`
+- Insert AFTER the `hasNearbyFood()` function (after line 46), BEFORE `evaluateBehaviorEntry()`
+- signature: `function hasNearbyMate()`
+- purpose: Returns true if any mate item is within 80px of the fly
+- logic:
+  1. Iterate over global `mates` array
+  2. For each mate, compute `Math.hypot(fly.x - mates[i].x, fly.y - mates[i].y)`
+  3. If distance <= 80, return true
+  4. Return false after loop
+- Code:
+```js
+/**
+ * Returns true if any mate is within 80px of the fly.
+ * Requires globals `mates` (array) and `fly` (object with x, y).
+ */
+function hasNearbyMate() {
+	if (typeof mates === 'undefined') return false;
+	for (var i = 0; i < mates.length; i++) {
+		if (Math.hypot(fly.x - mates[i].x, fly.y - mates[i].y) <= 80) return true;
 	}
+	return false;
+}
+```
+
+#### Modify `evaluateBehaviorEntry()`
+- anchor: right after the groom check block, before the brace check:
+```js
+	if (BRAIN.accumGroom > BEHAVIOR_THRESHOLDS.groom && !isCoolingDown('groom', now)) {
+		return 'groom';
+	}
+```
+- Insert courtship check AFTER the groom block and BEFORE the brace block:
+```js
+	if (BRAIN.accumCourtship > BEHAVIOR_THRESHOLDS.courtship &&
+		hasNearbyMate() && !isCoolingDown('courtship', now) &&
+		BRAIN.drives.fear < 0.3 && BRAIN.drives.fatigue < 0.6) {
+		return 'courtship';
+	}
+```
+- Priority: courtship slots between groom and brace (lower than feeding/grooming, higher than brace/rest/explore). This matches the spec requirement that courtship only happens when conditions are favorable.
+
+### 3. MODIFY js/main.js
+- operation: MODIFY
+- reason: Add `mates` array, mate tool handler, mate rendering, mate proximity detection, courtship behavior in state machine/movement/animation, and courtship expiry logic.
+
+#### 3a. Add `mates` array to state section
+- anchor (line 34):
+```js
+var waterDrops = [];
+```
+- Insert after: `var mates = [];`
+
+#### 3b. Add courtship entry to BEHAVIOR_MIN_DURATION
+- anchor:
+```js
+var BEHAVIOR_MIN_DURATION = {
+```
+- Add `courtship: 5000,` after `brace: 500,` (line 143 area). This enforces the 5s minimum courtship duration from the spec.
+
+#### 3c. Add courtship entry to BEHAVIOR_COOLDOWN
+- anchor:
+```js
+var BEHAVIOR_COOLDOWN = {
+```
+- Add `courtship: 5000,` after `brace: 1000,` (line 152 area). Prevents immediate re-courtship.
+
+#### 3d. Add `courtshipWingVibration` to `anim` object
+- anchor:
+```js
+	wingSpread: 0,
+};
+```
+- Add before the closing `};`: `courtshipWingVibration: 0,`
+
+#### 3e. Add mate tool button handler
+- The existing tool button loop at lines 429-450 already handles any `data-tool` attribute. Since the new button will have `data-tool="mate"`, it will be picked up automatically -- clicking it sets `activeTool = 'mate'` and toggles the active class. No JS changes needed for the button handler itself.
+
+#### 3f. Add mate placement in `handleCanvasMousedown`
+- anchor (the last tool handler in the if/else chain):
+```js
+	} else if (activeTool === 'water') {
+		var waterMinY = getLayoutBounds().top;
+		var waterMaxY = window.innerHeight;
+		cy = Math.max(waterMinY, Math.min(waterMaxY, cy));
+		waterDrops.push({ x: cx, y: cy, radius: 6 });
+	}
+```
+- Add a new `else if` block AFTER the water block, BEFORE the closing `}`:
+```js
+	} else if (activeTool === 'mate') {
+		var mateMinY = getLayoutBounds().top;
+		var mateMaxY = window.innerHeight;
+		cy = Math.max(mateMinY, Math.min(mateMaxY, cy));
+		// Only one mate at a time
+		mates = [{ x: cx, y: cy, spawnTime: Date.now() }];
+	}
+```
+- The `mates = [...]` (assignment, not push) ensures only one mate exists at a time, keeping behavior predictable.
+
+#### 3g. Add mate to clearButton handler
+- anchor (line 9-12):
+```js
+document.getElementById('clearButton').onclick = function () {
+	food = [];
+	waterDrops = [];
+};
+```
+- Change to:
+```js
+document.getElementById('clearButton').onclick = function () {
+	food = [];
+	waterDrops = [];
+	mates = [];
+};
+```
+
+#### 3h. Add courtship to `syncBrainFlags`
+- anchor:
+```js
+function syncBrainFlags() {
+	var s = behavior.current;
+	BRAIN._isMoving = (s === 'walk' || s === 'explore' || s === 'phototaxis' ||
+		s === 'fly' || (s === 'startle' && behavior.startlePhase === 'burst'));
+```
+- The courtship state is NOT moving (fly is near the mate, vibrating wings). No changes needed to `_isMoving`.
+- No changes to `_isFeeding` or `_isGrooming` either. `syncBrainFlags` does not need modification.
+
+#### 3i. Add courtship to `computeMovementForBehavior`
+- anchor (the `else` clause for idle at the end of the function):
+```js
+	} else if (state === 'groom' || state === 'rest') {
+		targetSpeed = 0;
+		speedChangeInterval = -speed * 0.1;
+	} else {
+		// idle
+		targetSpeed = 0;
+		speedChangeInterval = -speed * 0.05;
+	}
+```
+- Add a new `else if` for courtship BEFORE the `groom || rest` block. Actually, to avoid reordering, add it AFTER the `groom || rest` block and BEFORE the `else` (idle) block:
+- Replace the above with:
+```js
+	} else if (state === 'groom' || state === 'rest') {
+		targetSpeed = 0;
+		speedChangeInterval = -speed * 0.1;
+	} else if (state === 'courtship') {
+		// Approach mate slowly, then stop when close
+		var nm = nearestMate();
+		if (nm && nm.dist > 25) {
+			var mateAngle = Math.atan2(-(nm.item.y - fly.y), nm.item.x - fly.x);
+			targetDir = mateAngle;
+			targetSpeed = 0.2;
+			speedChangeInterval = (targetSpeed - speed) / 30;
+		} else {
+			targetSpeed = 0;
+			speedChangeInterval = -speed * 0.1;
+		}
+	} else {
+		// idle
+		targetSpeed = 0;
+		speedChangeInterval = -speed * 0.05;
+	}
+```
+
+#### 3j. Add `nearestMate` helper function
+- Insert AFTER `nearestFood()` function (which ends around line 991) and BEFORE `updateBehaviorState()`:
+- anchor:
+```js
+	return { item: best, dist: bestDist };
+}
+```
+- Add after:
+```js
+
+function nearestMate() {
+	if (!mates.length) return null;
+	var best = null;
+	var bestDist = Infinity;
+	for (var i = 0; i < mates.length; i++) {
+		var d = Math.hypot(fly.x - mates[i].x, fly.y - mates[i].y);
+		if (d < bestDist) {
+			bestDist = d;
+			best = mates[i];
+		}
+	}
+	return best ? { item: best, dist: bestDist } : null;
+}
+```
+
+#### 3k. Add courtship to `applyBehaviorMovement`
+- anchor (the stationary behaviors block):
+```js
+	if (behavior.current === 'groom' ||
+		behavior.current === 'rest' || behavior.current === 'idle' ||
+		behavior.current === 'brace') {
+```
+- Add `behavior.current === 'courtship' ||` to this condition, making it:
+```js
+	if (behavior.current === 'groom' ||
+		behavior.current === 'rest' || behavior.current === 'idle' ||
+		behavior.current === 'courtship' ||
+		behavior.current === 'brace') {
+```
+
+#### 3l. Add courtship wing vibration to `updateAnimForBehavior`
+- anchor (end of the function, after the walkPhase block):
+```js
+	// Walk phase advances when walking (linear dt scaling for phase accumulator)
+	if (state === 'walk' || state === 'explore' || state === 'phototaxis') {
+		var spd = Math.abs(speed);
+		anim.walkPhase += spd * 0.5 * dtScale;
+	}
+```
+- Add after:
+```js
+
+	// Courtship wing vibration: rapid small oscillation target
+	var targetCourtshipVib = 0;
+	if (state === 'courtship') {
+		targetCourtshipVib = 1;
+	}
+	anim.courtshipWingVibration += (targetCourtshipVib - anim.courtshipWingVibration) * (1 - Math.pow(0.8, dtScale));
+```
+
+#### 3m. Add courtship vibration to `drawWing` function
+- anchor (inside `drawWing`, after buzzOffset computation):
+```js
+	// Flight buzz: rapid oscillation when wings are spread
+	var buzzOffset = 0;
+	if (anim.wingSpread > 0.5) {
+		buzzOffset = Math.sin(Date.now() / 30) * 0.15 * anim.wingSpread;
+	}
+```
+- Add after the buzzOffset block:
+```js
+
+	// Courtship vibration: rapid small wing angle oscillation (one wing extends more)
+	var courtshipOffset = 0;
+	if (anim.courtshipWingVibration > 0.1) {
+		// Asymmetric vibration: left wing vibrates more (side === -1)
+		var vibFreq = side === -1 ? 20 : 40;
+		courtshipOffset = Math.sin(Date.now() / vibFreq) * 0.12 * anim.courtshipWingVibration;
+	}
+```
+- Then modify the line that computes the rotation to include courtshipOffset:
+- anchor:
+```js
+	ctx.rotate(side * (0.35 + spreadAngle) + microOffset * 0.02 + buzzOffset);
+```
+- Replace with:
+```js
+	ctx.rotate(side * (0.35 + spreadAngle) + microOffset * 0.02 + buzzOffset + courtshipOffset);
+```
+
+#### 3n. Add `drawMates` function
+- Insert AFTER `drawWaterDrops()` function (line ~1304), BEFORE `drawRipples()`:
+```js
+
+/**
+ * Draws mate sprites as smaller fly silhouettes.
+ */
+function drawMates() {
+	for (var i = 0; i < mates.length; i++) {
+		var m = mates[i];
+		ctx.save();
+		ctx.translate(m.x, m.y);
+		ctx.scale(0.7, 0.7);
+
+		// Abdomen (ellipse)
+		ctx.beginPath();
+		ctx.ellipse(0, 8, 7, 11, 0, 0, Math.PI * 2);
+		ctx.fillStyle = '#A0750A';
+		ctx.fill();
+		ctx.strokeStyle = '#7A5A08';
+		ctx.lineWidth = 0.8;
+		ctx.stroke();
+
+		// Thorax (ellipse)
+		ctx.beginPath();
+		ctx.ellipse(0, -5, 6, 9, 0, 0, Math.PI * 2);
+		ctx.fillStyle = '#8B6914';
+		ctx.fill();
+		ctx.strokeStyle = '#6B4F10';
+		ctx.lineWidth = 0.8;
+		ctx.stroke();
+
+		// Head (circle)
+		ctx.beginPath();
+		ctx.arc(0, -16, 4.5, 0, Math.PI * 2);
+		ctx.fillStyle = '#8B6914';
+		ctx.fill();
+		ctx.strokeStyle = '#6B4F10';
+		ctx.lineWidth = 0.8;
+		ctx.stroke();
+
+		// Eyes (two small red ovals)
+		ctx.beginPath();
+		ctx.ellipse(-3.5, -17, 3, 3.5, 0, 0, Math.PI * 2);
+		ctx.fillStyle = '#8B0000';
+		ctx.fill();
+		ctx.beginPath();
+		ctx.ellipse(3.5, -17, 3, 3.5, 0, 0, Math.PI * 2);
+		ctx.fillStyle = '#8B0000';
+		ctx.fill();
+
+		// Wings (simplified, folded)
+		ctx.save();
+		ctx.translate(-5, -4);
+		ctx.rotate(-0.3);
+		ctx.beginPath();
+		ctx.ellipse(0, 12, 5, 18, 0, 0, Math.PI * 2);
+		ctx.fillStyle = 'rgba(200, 210, 230, 0.25)';
+		ctx.fill();
+		ctx.restore();
+
+		ctx.save();
+		ctx.translate(5, -4);
+		ctx.rotate(0.3);
+		ctx.beginPath();
+		ctx.ellipse(0, 12, 5, 18, 0, 0, Math.PI * 2);
+		ctx.fillStyle = 'rgba(200, 210, 230, 0.25)';
+		ctx.fill();
+		ctx.restore();
+
+		// Subtle pheromone glow when fly is nearby
+		var distToFly = Math.hypot(fly.x - m.x, fly.y - m.y);
+		if (distToFly <= 80) {
+			var pulse = 0.15 + Math.sin(Date.now() / 300) * 0.1;
+			ctx.beginPath();
+			ctx.arc(0, 0, 25, 0, Math.PI * 2);
+			ctx.fillStyle = 'rgba(255, 180, 200, ' + pulse.toFixed(2) + ')';
+			ctx.fill();
+		}
+
+		ctx.restore();
+	}
+}
+```
+
+#### 3o. Call `drawMates()` in the `draw()` function
+- anchor:
+```js
+	drawFood();
+	drawWaterDrops();
+	drawRipples();
+```
+- Replace with:
+```js
+	drawFood();
+	drawWaterDrops();
+	drawMates();
+	drawRipples();
+```
+
+#### 3p. Add mate proximity detection to `update()` function
+- anchor (insert AFTER water drop proximity block, BEFORE the touch reset block):
+```js
+	// Water drop proximity
+	BRAIN.stimulate.waterContact = false;
+	for (var wi = 0; wi < waterDrops.length; wi++) {
+		var wDist = Math.hypot(fly.x - waterDrops[wi].x, fly.y - waterDrops[wi].y);
+		if (wDist <= 15) {
+			BRAIN.stimulate.waterContact = true;
+			waterDrops.splice(wi, 1);
+			wi--;
+		}
+	}
+```
+- Add AFTER the water drop proximity block:
+```js
+
+	// Mate proximity
+	BRAIN.stimulate.mateNearby = false;
+	for (var mi = 0; mi < mates.length; mi++) {
+		var mDist = Math.hypot(fly.x - mates[mi].x, fly.y - mates[mi].y);
+		if (mDist <= 80) {
+			BRAIN.stimulate.mateNearby = true;
+		}
+	}
+
+	// Courtship completion: after 5-10s in courtship state, mate disappears and curiosity resets
+	if (behavior.current === 'courtship' && mates.length > 0) {
+		var courtshipElapsed = Date.now() - behavior.enterTime;
+		// Random completion between 5000-10000ms (decided once at entry)
+		if (!mates[0].courtshipEnd) {
+			mates[0].courtshipEnd = 5000 + Math.random() * 5000;
+		}
+		if (courtshipElapsed >= mates[0].courtshipEnd) {
+			mates = [];
+			BRAIN.drives.curiosity = 0.1;
+			BRAIN.stimulate.mateNearby = false;
+		}
+	}
+```
+
+#### 3q. Add mates to resize clamping
+- anchor:
+```js
 	for (var i = 0; i < waterDrops.length; i++) {
 		waterDrops[i].x = Math.max(resizeWb.left, Math.min(waterDrops[i].x, resizeWb.right));
 		waterDrops[i].y = Math.max(resizeWb.top, Math.min(waterDrops[i].y, resizeWb.bottom));
 	}
 ```
-
-(Note: after this replacement, the `resizeWb` variable is already declared for the food/water block. The fly clamping lines that follow can reuse it -- but since they are a separate replacement, just use the same `var resizeWb = getWorldBounds();` declaration. To avoid a duplicate `var resizeWb`, combine both replacements into a single block: declare `var resizeWb = getWorldBounds();` once, then clamp food, water, and fly using it.)
-
-**Combined replacement for lines 2110-2122**:
+- Add after:
 ```js
-	// Clamp food, water, and fly positions to world bounds so entities
-	// near old edges don't become unreachable after window shrinks
-	var resizeWb = getWorldBounds();
-	for (var i = 0; i < food.length; i++) {
-		food[i].x = Math.max(resizeWb.left, Math.min(food[i].x, resizeWb.right));
-		food[i].y = Math.max(resizeWb.top, Math.min(food[i].y, resizeWb.bottom));
+	for (var i = 0; i < mates.length; i++) {
+		mates[i].x = Math.max(resizeWb.left, Math.min(mates[i].x, resizeWb.right));
+		mates[i].y = Math.max(resizeWb.top, Math.min(mates[i].y, resizeWb.bottom));
 	}
-	for (var i = 0; i < waterDrops.length; i++) {
-		waterDrops[i].x = Math.max(resizeWb.left, Math.min(waterDrops[i].x, resizeWb.right));
-		waterDrops[i].y = Math.max(resizeWb.top, Math.min(waterDrops[i].y, resizeWb.bottom));
+```
+
+#### 3r. Add mates to visibility-change snapshot/restore
+- Look at visibility change handler that snapshots drives on hide. The mates array is transient UI state and does not need snapshotting -- mates persisting across tab hide/show is fine. No change needed.
+
+#### 3s. Add courtship to turn retention in `update()`
+- anchor:
+```js
+	var turnRetention;
+	if (behavior.current === 'startle' && behavior.startlePhase === 'burst') {
+		turnRetention = 0.3;
+	} else if (behavior.current === 'fly') {
+		turnRetention = 0.4;
+	} else {
+		turnRetention = 0.9;
 	}
-	// Also re-clamp the fly position to the new bounds
-	fly.x = Math.max(resizeWb.left, Math.min(fly.x, resizeWb.right));
-	fly.y = Math.max(resizeWb.top, Math.min(fly.y, resizeWb.bottom));
+```
+- Courtship uses slow gentle turning (0.9 default), so no modification is needed.
+
+### 4. MODIFY index.html
+- operation: MODIFY
+- reason: Add "Mate" toolbar button and help overlay entry.
+
+#### 4a. Add toolbar button
+- anchor:
+```html
+            <button class="tool-btn" data-tool="water">Water</button>
+```
+- Add after:
+```html
+            <button class="tool-btn" data-tool="mate">Mate</button>
 ```
 
----
-
-#### Change G: Update the `centerButton` handler to use world bounds center
-
-- anchor: line 14: `document.getElementById('centerButton').onclick = function () {`
-
-**REPLACE** lines 15-16:
-```js
-	fly.x = window.innerWidth / 2;
-	fly.y = window.innerHeight / 2;
+#### 4b. Add help overlay entry
+- anchor:
+```html
+        <div class="help-item"><strong>Bitter food</strong> -- 10% of placed food is randomly bitter (shown in green). If the fly contacts bitter food, it triggers rejection and aversive learning.</div>
 ```
-
-**WITH**:
-```js
-	var cwb = getWorldBounds();
-	fly.x = (cwb.left + cwb.right) / 2;
-	fly.y = (cwb.top + cwb.bottom) / 2;
+- Add after:
+```html
+        <div class="help-item"><strong>Mate</strong> -- Click on the canvas to place a mate fly. If the fly is calm (low fear, low fatigue, moderate curiosity), it will approach and perform courtship wing vibration for 5-10 seconds.</div>
 ```
-
-**Wait** -- `getWorldBounds()` calls `getLayoutBounds()` which calls `document.getElementById('toolbar')` etc. These exist by the time the button is clicked (the button itself is in the DOM). And the center button also resets zoom/pan to 0/1, which means screenToWorld will map to identity. At zoom=1, panX=0, panY=0, `screenToWorld(0, topH)` returns `(0, topH)` and `screenToWorld(innerWidth, innerHeight)` returns `(innerWidth, innerHeight)`. So the world bounds center will be `(innerWidth/2, (topH + BOUNDARY_PADDING + innerHeight - BOUNDARY_PADDING) / 2)`. That's close to the current behavior but accounts for toolbar correctly.
-
-Actually, the center button sets zoom=1, panX=0, panY=0 AFTER setting fly position. The fly position should be set after resetting zoom/pan so the world bounds computation is correct. **Reorder**: set zoom/pan first, then set fly position.
-
-**REPLACE** lines 14-20:
-```js
-document.getElementById('centerButton').onclick = function () {
-	fly.x = window.innerWidth / 2;
-	fly.y = window.innerHeight / 2;
-	zoomLevel = 1;
-	panX = 0;
-	panY = 0;
-};
-```
-
-**WITH**:
-```js
-document.getElementById('centerButton').onclick = function () {
-	zoomLevel = 1;
-	panX = 0;
-	panY = 0;
-	var cwb = getWorldBounds();
-	fly.x = (cwb.left + cwb.right) / 2;
-	fly.y = (cwb.top + cwb.bottom) / 2;
-};
-```
-
----
-
-## Summary of all edits in js/main.js (execution order)
-
-1. **Change G** (line 14-20): Reorder centerButton handler -- reset zoom/pan before setting fly position, use getWorldBounds() center
-2. **Change A** (after line 50): Insert BOUNDARY_PADDING, BOUNDARY_TELEPORT_THRESHOLD, BOUNDARY_STEER_STRENGTH constants
-3. **Change B** (before line 79): Insert getWorldBounds() and clampToWorldBounds() functions
-4. **Change E** (line 1141-1146): Replace startle burst direction with bounds-aware version
-5. **Change D** (after line 1088): Add flight landing cap in computeMovementForBehavior fly state
-6. **Change C** (lines 1887-1959): Replace entire edge avoidance + hard clamp block with soft boundary steering, soft clamp safety net, and teleport recovery
-7. **Change F** (lines 2110-2122): Replace resize handler clamping with getWorldBounds()-based clamping
 
 ## Verification
-- build: No build step. Open `index.html` in a browser.
-- lint: `grep -n "getWorldBounds\|clampToWorldBounds\|BOUNDARY_PADDING\|BOUNDARY_TELEPORT_THRESHOLD\|BOUNDARY_STEER_STRENGTH" js/main.js` -- verify all new symbols appear at their expected locations
-- test: Open the page in a browser console and run: `getWorldBounds()` -- should return an object with left, right, top, bottom properties where left < right and top < bottom. Run `clampToWorldBounds(-1000, -1000)` -- should return `{x: <wb.left>, y: <wb.top>}`.
+- build: Open `index.html` in a browser (no build step).
+- lint: `No linter configured for this project.`
+- test: `No automated test runner. Manual verification below.`
 - smoke:
-  1. Load the page. Let the fly walk around. It should never walk off-screen. When approaching edges, it should gently curve back inward (no visible "bounce" off a wall).
-  2. Trigger a startle (touch tool + click on fly). The fly should jump/fly but land within the visible canvas area.
-  3. Open browser console. Run `fly.x = -500; fly.y = -500;` -- the fly should teleport to near the center within 1-2 frames.
-  4. Open browser console. Run `fly.x = getWorldBounds().right + 50;` -- the fly should gently drift back into bounds (not teleport, since 50 < 200 threshold).
-  5. Resize the browser window smaller. The fly should be re-clamped to the new bounds.
-  6. Zoom in (use zoom controls). Trigger a startle. The fly should still land within the visible viewport area (world bounds adjust with zoom).
+  1. Load page in browser. Verify "Mate" button appears in toolbar between "Water" and "Brain 3D".
+  2. Click "Mate" button -- it should become highlighted (active class).
+  3. Click on canvas -- a smaller fly silhouette should appear at click position.
+  4. Wait for the fly to detect the mate (within 80px). Verify the behavior state label changes to "courtship" in the bottom panel (may require favorable drive conditions: low fear, low fatigue, moderate curiosity).
+  5. Observe wing vibration animation during courtship -- wings should oscillate rapidly at a small angle.
+  6. After 5-10 seconds, mate should disappear and curiosity drive should drop.
+  7. Click "?" help button -- verify "Mate" entry appears in the help overlay.
+  8. Click the clear button (X icon) -- verify mates are cleared along with food and water.
+  9. Place a mate, then startle the fly (touch tool) -- verify fly does NOT enter courtship while fear is high.
 
 ## Constraints
-- Do NOT modify any file other than `js/main.js`
-- Do NOT use `let` or `const` -- the codebase uses `var` exclusively (ES5 style)
-- Do NOT add new dependencies or imports
-- Do NOT modify SPEC.md, TASKS.md, CLAUDE.md, or any .buildloop/ file other than current-plan.md
-- Do NOT remove the `touchResetTime` stimulus when the fly contacts a boundary -- keep this behavior as it triggers realistic startle/avoidance responses
-- The `getWorldBounds()` function must be defined BEFORE `getLayoutBounds()` is not needed -- actually it calls `getLayoutBounds()`, so it must be defined AFTER `getLayoutBounds()`. **Correction**: place `getWorldBounds()` and `clampToWorldBounds()` immediately AFTER the closing `}` of `getLayoutBounds()` (after line 95), not before it. This ensures `getLayoutBounds()` is hoisted/available. (In ES5 with function declarations, hoisting would handle this, but for clarity and consistency with the codebase style, define them after `getLayoutBounds()`.)
+- Do not modify SPEC.md, CLAUDE.md, TASKS.md, or any file in .buildloop/ other than this plan.
+- Do not add any new files -- all changes are modifications to existing files.
+- Use ES5 syntax throughout (var, not let/const) -- matches the existing codebase style.
+- Do not add `console.log` or other debugging output.
+- The `mates` array should hold at most 1 item (enforced by the placement logic using assignment, not push).
+- Do not add new neuron groups to `constants.js` -- reuse the `OLF_ORN_FOOD` pathway for mate pheromone detection as specified in the task description.
+- Do not modify the `clearButton` handler to reference mates if the handler uses a different pattern than shown -- adapt to the actual code.
+- All canvas drawing must happen inside the zoom/pan transform block (between `ctx.save()` and `ctx.restore()` in `draw()`).

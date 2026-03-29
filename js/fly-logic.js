@@ -20,6 +20,7 @@ var BEHAVIOR_THRESHOLDS = {
 	fly: 15,
 	feed: 8,
 	groom: 8,
+	courtship: 10,
 	walk: 5,
 	restFatigue: 0.7,
 	exploreCuriosity: 0.4,
@@ -41,6 +42,18 @@ function isCoolingDown(state, now) {
 function hasNearbyFood() {
 	for (var i = 0; i < food.length; i++) {
 		if (Math.hypot(fly.x - food[i].x, fly.y - food[i].y) <= 50) return true;
+	}
+	return false;
+}
+
+/**
+ * Returns true if any mate is within 80px of the fly.
+ * Requires globals `mates` (array) and `fly` (object with x, y).
+ */
+function hasNearbyMate() {
+	if (typeof mates === 'undefined') return false;
+	for (var i = 0; i < mates.length; i++) {
+		if (Math.hypot(fly.x - mates[i].x, fly.y - mates[i].y) <= 80) return true;
 	}
 	return false;
 }
@@ -68,6 +81,11 @@ function evaluateBehaviorEntry() {
 	}
 	if (BRAIN.accumGroom > BEHAVIOR_THRESHOLDS.groom && !isCoolingDown('groom', now)) {
 		return 'groom';
+	}
+	if (BRAIN.accumCourtship > BEHAVIOR_THRESHOLDS.courtship &&
+		hasNearbyMate() && !isCoolingDown('courtship', now) &&
+		BRAIN.drives.fear < 0.3 && BRAIN.drives.fatigue < 0.6) {
+		return 'courtship';
 	}
 	if (BRAIN.stimulate.wind && BRAIN.stimulate.windStrength < 0.5 &&
 		BRAIN.accumStartle < BEHAVIOR_THRESHOLDS.startle && !isCoolingDown('brace', now)) {

@@ -88,6 +88,7 @@ BRAIN.accumFeed = 0;
 BRAIN.accumGroom = 0;
 BRAIN.accumStartle = 0;
 BRAIN.accumHead = 0;
+BRAIN.accumCourtship = 0;
 
 // Backward-compatible left/right accumulators (computed from walk)
 BRAIN.accumleft = 0;
@@ -138,6 +139,7 @@ BRAIN.stimulate = {
 	foodContact: false,
 	bitterContact: false,
 	waterContact: false,
+	mateNearby: false,
 	dangerOdor: false,
 	wind: false,
 	windStrength: 0,       // 0-1
@@ -326,6 +328,12 @@ BRAIN.update = function () {
 		BRAIN.dendriteAccumulate('OLF_ORN_FOOD');
 	}
 
+	// Mate nearby (olfactory -- reuses food odor pathway for pheromone detection)
+	if (BRAIN.stimulate.mateNearby) {
+		BRAIN.dendriteAccumulate('OLF_ORN_FOOD');
+		BRAIN.dendriteAccumulateScaled('DRIVE_CURIOSITY', 0.5);
+	}
+
 	// Food contact (gustatory)
 	if (BRAIN.stimulate.foodContact) {
 		BRAIN.dendriteAccumulate('GUS_GRN_SWEET');
@@ -461,6 +469,7 @@ BRAIN.motorcontrol = function () {
 	BRAIN.accumGroom = 0;
 	BRAIN.accumStartle = 0;
 	BRAIN.accumHead = 0;
+	BRAIN.accumCourtship = 0;
 
 	// Helper to read and drain a motor neuron
 	var readMotor = function (name) {
@@ -504,6 +513,21 @@ BRAIN.motorcontrol = function () {
 		BRAIN.accumStartle = BRAIN.postSynaptic['DN_STARTLE'][BRAIN.nextState];
 	}
 
+	// Courtship: derives from olfactory activation + low fear + moderate curiosity
+	// This is a synthetic accumulator (not directly from motor neurons)
+	if (BRAIN.stimulate.mateNearby) {
+		var olfPN = 0;
+		if (BRAIN.postSynaptic['OLF_PN']) {
+			olfPN = BRAIN.postSynaptic['OLF_PN'][BRAIN.nextState];
+		}
+		var fearPenalty = BRAIN.drives.fear * 20;
+		var fatiguePenalty = BRAIN.drives.fatigue > 0.6 ? 15 : 0;
+		var curiosityBonus = BRAIN.drives.curiosity * 10;
+		BRAIN.accumCourtship = Math.max(0, olfPN + curiosityBonus - fearPenalty - fatiguePenalty);
+	} else {
+		BRAIN.accumCourtship = 0;
+	}
+
 	// Floor all accumulators at 0 (negative motor output has no physical meaning)
 	BRAIN.accumWalkLeft = Math.max(0, BRAIN.accumWalkLeft);
 	BRAIN.accumWalkRight = Math.max(0, BRAIN.accumWalkRight);
@@ -512,6 +536,7 @@ BRAIN.motorcontrol = function () {
 	BRAIN.accumGroom = Math.max(0, BRAIN.accumGroom);
 	BRAIN.accumStartle = Math.max(0, BRAIN.accumStartle);
 	BRAIN.accumHead = Math.max(0, BRAIN.accumHead);
+	BRAIN.accumCourtship = Math.max(0, BRAIN.accumCourtship);
 
 	// --- Backward compatibility: accumleft / accumright ---
 	// These are what main.js reads to compute direction and speed.
