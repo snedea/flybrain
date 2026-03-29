@@ -101,41 +101,32 @@ canvas {
 }
 
 .connectome-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 0.35rem;
-    overflow: hidden;
     flex: 1;
     min-height: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
     padding: 0.25rem 0;
 }
 
-.cg-section {
+.cg-region-badge {
+    font-size: 0.4rem;
+    font-weight: 700;
+    width: 0.8rem;
+    height: 0.8rem;
     display: flex;
-    flex-direction: column;
-    gap: 0.15rem;
-    overflow-y: auto;
-    min-height: 0;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid;
+    border-radius: 2px;
+    flex-shrink: 0;
+    opacity: 0.7;
 }
-
-.cg-label {
-    font-size: 0.6rem;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-weight: 600;
-    padding: 0.15rem 0.3rem;
-    border-radius: 3px;
-}
-
-.cg-section-sensory .cg-label { color: var(--neuron-sensory); background: rgba(59,130,246,0.1); }
-.cg-section-central .cg-label { color: var(--neuron-central); background: rgba(139,92,246,0.1); }
-.cg-section-drives .cg-label  { color: var(--neuron-drives);  background: rgba(245,158,11,0.1); }
-.cg-section-motor .cg-label   { color: var(--neuron-motor);   background: rgba(239,68,68,0.1); }
 
 .cg-nodes {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
+    column-width: 140px;
+    column-gap: 0.35rem;
+    column-fill: auto;
+    height: 100%;
 }
 
 .cg-node {
@@ -146,6 +137,8 @@ canvas {
     border-radius: 3px;
     cursor: default;
     transition: background 0.15s;
+    break-inside: avoid;
+    margin-bottom: 1px;
 }
 
 .cg-dot-cluster {

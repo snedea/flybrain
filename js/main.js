@@ -191,6 +191,11 @@ var regionColors = {
 	motor: '#ef4444',
 };
 
+// Activity-based sorting: track how often each group flashes
+var neuronActivityScore = {};
+var ACTIVITY_DECAY = 0.92;
+var SORT_INTERVAL = 3000;
+
 // Human-readable neuron descriptions for tooltips
 var neuronDescriptions = {
 	VIS_R1R6: 'R1-R6 motion photoreceptors',
@@ -320,80 +325,112 @@ var neuronPopulations = {
 // --- Brain setup ---
 BRAIN.setup();
 
-// Build connectome grid grouped by region type
+// Build connectome grid -- flat list sorted dynamically by activity
+var neuronRegionLookup = {};
 (function () {
 	var holder = document.getElementById('nodeHolder');
 	var regionOrder = ['sensory', 'central', 'drives', 'motor'];
-	var regionLabels = { sensory: 'Sensory', central: 'Central', drives: 'Drives', motor: 'Motor' };
-	var regionNeurons = {};
-	for (var r = 0; r < regionOrder.length; r++) {
-		regionNeurons[regionOrder[r]] = [];
-	}
-	// Sort neurons into regions
+
+	// Build neuron -> region lookup
 	for (var ps in BRAIN.connectome) {
 		var assigned = false;
 		for (var regionName in BRAIN.neuronRegions) {
 			var list = BRAIN.neuronRegions[regionName];
 			for (var ni = 0; ni < list.length; ni++) {
 				if (list[ni] === ps) {
-					regionNeurons[regionName].push(ps);
+					neuronRegionLookup[ps] = regionName;
 					assigned = true;
 					break;
 				}
 			}
 			if (assigned) break;
 		}
-		if (!assigned) regionNeurons['motor'].push(ps);
+		if (!assigned) neuronRegionLookup[ps] = 'motor';
 	}
 
-	for (var ri = 0; ri < regionOrder.length; ri++) {
-		var type = regionOrder[ri];
-		var neurons = regionNeurons[type];
-		if (neurons.length === 0) continue;
+	// Collect all neurons, initial sort by population (biggest first)
+	var allNeurons = Object.keys(BRAIN.connectome);
+	allNeurons.sort(function (a, b) {
+		return (neuronPopulations[b] || 1) - (neuronPopulations[a] || 1);
+	});
 
-		var section = document.createElement('div');
-		section.className = 'cg-section cg-section-' + type;
+	var grid = document.createElement('div');
+	grid.className = 'cg-nodes';
+	grid.id = 'connectomeGrid';
 
-		var label = document.createElement('div');
-		label.className = 'cg-label';
-		label.textContent = regionLabels[type];
-		section.appendChild(label);
+	var regionAbbrev = { sensory: 'S', central: 'C', drives: 'D', motor: 'M' };
 
-		var grid = document.createElement('div');
-		grid.className = 'cg-nodes';
+	for (var n = 0; n < allNeurons.length; n++) {
+		var neuronId = allNeurons[n];
+		var region = neuronRegionLookup[neuronId];
+		var color = regionColors[region] || '#55FF55';
 
-		for (var n = 0; n < neurons.length; n++) {
-			var node = document.createElement('div');
-			node.className = 'cg-node';
-			node.id = neurons[n];
-			node.setAttribute('data-neuron', neurons[n]);
+		var node = document.createElement('div');
+		node.className = 'cg-node';
+		node.id = neuronId;
+		node.setAttribute('data-neuron', neuronId);
+		node.setAttribute('data-region', region);
 
-			var nameSpan = document.createElement('span');
-			nameSpan.className = 'cg-name';
-			nameSpan.textContent = neurons[n].replace(/_/g, ' ');
-			node.appendChild(nameSpan);
+		// Region color badge
+		var badge = document.createElement('span');
+		badge.className = 'cg-region-badge';
+		badge.textContent = regionAbbrev[region] || '?';
+		badge.style.color = color;
+		badge.style.borderColor = color;
+		node.appendChild(badge);
 
-			var cluster = document.createElement('span');
-			cluster.className = 'cg-dot-cluster';
-			var pop = neuronPopulations[neurons[n]] || 1;
-			var dotCount = Math.max(1, Math.min(600, Math.round(pop / 100)));
-			var dotArr = [];
-			for (var d = 0; d < dotCount; d++) {
-				var dot = document.createElement('span');
-				dot.className = 'cg-dot';
-				cluster.appendChild(dot);
-				dotArr.push(dot);
-			}
-			neuronDotCache[neurons[n]] = dotArr;
-			node.appendChild(cluster);
+		var nameSpan = document.createElement('span');
+		nameSpan.className = 'cg-name';
+		nameSpan.textContent = neuronId.replace(/_/g, ' ');
+		node.appendChild(nameSpan);
 
-			grid.appendChild(node);
+		var cluster = document.createElement('span');
+		cluster.className = 'cg-dot-cluster';
+		var pop = neuronPopulations[neuronId] || 1;
+		var dotCount = Math.max(1, Math.min(600, Math.round(pop / 100)));
+		var dotArr = [];
+		for (var d = 0; d < dotCount; d++) {
+			var dot = document.createElement('span');
+			dot.className = 'cg-dot';
+			cluster.appendChild(dot);
+			dotArr.push(dot);
 		}
+		neuronDotCache[neuronId] = dotArr;
+		node.appendChild(cluster);
 
-		section.appendChild(grid);
-		holder.appendChild(section);
+		neuronActivityScore[neuronId] = 0;
+		grid.appendChild(node);
 	}
+
+	holder.appendChild(grid);
 })();
+
+// Re-sort connectome nodes by activity (most active + biggest at top)
+function sortConnectomeGrid() {
+	var grid = document.getElementById('connectomeGrid');
+	if (!grid) return;
+	var nodes = Array.prototype.slice.call(grid.querySelectorAll('.cg-node'));
+	nodes.sort(function (a, b) {
+		var aId = a.getAttribute('data-neuron');
+		var bId = b.getAttribute('data-neuron');
+		var aScore = neuronActivityScore[aId] || 0;
+		var bScore = neuronActivityScore[bId] || 0;
+		// Primary: activity score descending
+		if (Math.abs(bScore - aScore) > 0.5) return bScore - aScore;
+		// Secondary: population size descending
+		return (neuronPopulations[bId] || 1) - (neuronPopulations[aId] || 1);
+	});
+	for (var i = 0; i < nodes.length; i++) {
+		grid.appendChild(nodes[i]);
+	}
+	// Decay all scores so stale activity fades
+	for (var key in neuronActivityScore) {
+		neuronActivityScore[key] *= ACTIVITY_DECAY;
+		if (neuronActivityScore[key] < 0.1) neuronActivityScore[key] = 0;
+	}
+}
+
+setInterval(sortConnectomeGrid, SORT_INTERVAL);
 
 // Build neuron -> color lookup from BRAIN.neuronRegions
 for (var region in BRAIN.neuronRegions) {
@@ -663,6 +700,10 @@ function updateBrain() {
 				dots[di].style.boxShadow = dotOpacity > 0.5 ? '0 0 ' + Math.round(dotOpacity * 4) + 'px ' + color : 'none';
 			}
 			psBox.classList.toggle('cg-active', baseOpacity > 0.15);
+			// Track activity for dynamic sort
+			if (baseOpacity > 0.15) {
+				neuronActivityScore[postSynaptic] = (neuronActivityScore[postSynaptic] || 0) + 1;
+			}
 		}
 	}
 	// Evaluate behavioral state and compute movement
