@@ -329,6 +329,7 @@ canvas {
     overflow: hidden;
     gap: 0.5rem;
     box-sizing: content-box;
+    font-family: system-ui, -apple-system, sans-serif;
 }
 
 #bottom-panel {
