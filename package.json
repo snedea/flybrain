@@ -9,7 +9,6 @@
     "migrate-logs": "node server/migrate-logs.js"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.80.0",
     "better-sqlite3": "^12.8.0",
     "ws": "^8.18.0"
   }

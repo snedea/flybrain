@@ -542,11 +542,7 @@ if (activityToggle) {
 
 if (activityCloseBtn) {
 	activityCloseBtn.addEventListener('click', function() {
-		if (typeof CaretakerSidebar !== 'undefined') {
-			var sidebar = document.getElementById('caretaker-sidebar');
-			if (sidebar) sidebar.classList.remove('sidebar-open');
-			if (activityToggle) activityToggle.classList.remove('active');
-		}
+		if (activityToggle) activityToggle.classList.remove('active');
 	});
 }
 

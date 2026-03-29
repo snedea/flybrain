@@ -60,6 +60,8 @@
     }
 
     loadChatHistory();
+    initSheetGestures();
+    initTabs();
   }
 
   function formatTime(isoString) {
@@ -161,14 +163,128 @@
     feedList.scrollTop = 0;
   }
 
+  // Bottom sheet states: closed -> peek -> full -> closed
+  var sheetState = 'closed'; // closed, peek, full
+  var dragStartY = 0;
+  var dragStartState = '';
+  var isDragging = false;
+
+  function setSheetState(state) {
+    if (sidebar === null) return;
+    sheetState = state;
+    sidebar.classList.remove('sheet-peek', 'sheet-full');
+    if (state === 'peek') sidebar.classList.add('sheet-peek');
+    else if (state === 'full') sidebar.classList.add('sheet-full');
+  }
+
+  function isMobile() {
+    return window.innerWidth <= 768;
+  }
+
   function toggle() {
     if (sidebar === null) return false;
-    sidebar.classList.toggle('sidebar-open');
-    return sidebar.classList.contains('sidebar-open');
+    if (isMobile()) {
+      // Mobile: closed -> peek -> full -> closed
+      if (sheetState === 'closed') setSheetState('peek');
+      else if (sheetState === 'peek') setSheetState('full');
+      else setSheetState('closed');
+    } else {
+      // Desktop: closed <-> full (no peek)
+      if (sheetState === 'closed') setSheetState('full');
+      else setSheetState('closed');
+    }
+    return sheetState !== 'closed';
   }
 
   function isOpen() {
-    return sidebar !== null && sidebar.classList.contains('sidebar-open');
+    return sheetState !== 'closed';
+  }
+
+  function initSheetGestures() {
+    var handle = document.getElementById('sheet-handle');
+    if (!handle) return;
+
+    function onStart(y) {
+      isDragging = true;
+      dragStartY = y;
+      dragStartState = sheetState;
+      sidebar.style.transition = 'none';
+    }
+
+    function onEnd(y) {
+      if (!isDragging) return;
+      isDragging = false;
+      sidebar.style.transition = '';
+      var dy = y - dragStartY;
+
+      if (dragStartState === 'peek') {
+        if (dy < -60) setSheetState('full');
+        else if (dy > 60) setSheetState('closed');
+        else setSheetState('peek');
+      } else if (dragStartState === 'full') {
+        if (dy > 100) setSheetState('closed');
+        else if (dy > 40) setSheetState('peek');
+        else setSheetState('full');
+      } else {
+        if (dy < -40) setSheetState('peek');
+        else setSheetState('closed');
+      }
+    }
+
+    // Mouse
+    handle.addEventListener('mousedown', function(e) { onStart(e.clientY); });
+    document.addEventListener('mousemove', function(e) {
+      if (!isDragging) return;
+      e.preventDefault();
+    });
+    document.addEventListener('mouseup', function(e) { onEnd(e.clientY); });
+
+    // Touch
+    handle.addEventListener('touchstart', function(e) {
+      onStart(e.touches[0].clientY);
+    }, { passive: true });
+    handle.addEventListener('touchend', function(e) {
+      onEnd(e.changedTouches[0].clientY);
+    }, { passive: true });
+
+    // Close button
+    var closeBtn = document.getElementById('caretaker-sidebar-close');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', function() { setSheetState('closed'); });
+    }
+  }
+
+  function initTabs() {
+    var tabContainer = document.getElementById('sidebar-tabs');
+    if (!tabContainer) return;
+
+    tabContainer.addEventListener('click', function(e) {
+      var btn = e.target.closest('.sidebar-tab');
+      if (!btn) return;
+      var tabName = btn.getAttribute('data-tab');
+      if (!tabName) return;
+
+      // Update tab buttons
+      var tabs = tabContainer.querySelectorAll('.sidebar-tab');
+      for (var i = 0; i < tabs.length; i++) {
+        tabs[i].classList.remove('active');
+      }
+      btn.classList.add('active');
+
+      // Update tab content panels
+      var panels = sidebar.querySelectorAll('.sidebar-tab-content');
+      for (var j = 0; j < panels.length; j++) {
+        panels[j].classList.remove('active');
+      }
+      var target = sidebar.querySelector('[data-tab-content="' + tabName + '"]');
+      if (target) target.classList.add('active');
+
+      // Update header title
+      var title = sidebar.querySelector('.caretaker-sidebar-title');
+      if (title) {
+        title.textContent = btn.textContent;
+      }
+    });
   }
 
   function formatChatTime(isoString) {

@@ -1,6 +1,6 @@
 {
-  "task_id": "T8.9",
-  "task_desc": "Left sidebar -- Calendar View. Day/week calendar grid showing daily caretaker performance. Each day: color-coded score (green > 80, yellow 50-80, red < 50), incident count, feed count, avg hunger. Click a day to filter the activity feed to that day's events. Data from daily_scores table. Files: `js/caretaker-calendar.js`, `css/main.css` (calendar grid styles), `server/caretaker.js` (daily scores endpoint).",
+  "task_id": "T10.1",
+  "task_desc": "Fix daily score computation bugs and query-log schema mismatch. The db.js computeDailyScore() function has two calculation errors: (1) avgResponseTime (line 243) stores the count of forgot_to_feed incidents instead of actual response time in seconds between hunger > 0.7 and the next place_food action -- fix by computing the median time delta between high-hunger observations and subsequent food placements in the actions table; (2) connectedHours calculation (line 318 in getAnalyticsSummary) divides by 360 instead of 3600, inflating connected hours by 10x -- fix the divisor. Additionally, tools/query-log.sh has a schema mismatch with db.js: the DuckDB incident view references an `incident` field but db.js stores `type`; the view references `fearBefore`/`fearAfter` fields but caretaker.js stores these in the `description` string -- update the query-log.sh DuckDB schema to match the actual SQLite table structure. Also remove unused `@anthropic-ai/sdk` from package.json (server now uses claude CLI via execSync). Files: server/db.js (computeDailyScore, getAnalyticsSummary), tools/query-log.sh (DuckDB schema), package.json (remove unused dep).",
   "completed_stage": "builder",
-  "timestamp": "2026-03-28T03:17:17.272138+00:00"
+  "timestamp": "2026-03-29T20:11:03.049677+00:00"
 }

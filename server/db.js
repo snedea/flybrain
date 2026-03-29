@@ -240,7 +240,37 @@ function openDb(dbPath) {
       var composite = Math.max(0, Math.min(100, 100 - hungerPenalty - fearPenalty - forgotPenalty));
       composite = Math.round(composite * 10) / 10;
 
-      var avgResponseTime = forgotIncidents;
+      // Compute median response time: seconds between hunger > 0.7 and next place_food
+      var hungerBreaches = db.prepare(
+        'SELECT timestamp FROM observations WHERE hunger > 0.7 AND timestamp >= ? AND timestamp <= ? ORDER BY id ASC'
+      ).all(dayStart, dayEnd);
+
+      var foodPlacements = db.prepare(
+        'SELECT timestamp FROM actions WHERE action = \'place_food\' AND timestamp >= ? AND timestamp <= ? ORDER BY timestamp ASC'
+      ).all(dayStart, dayEnd);
+
+      var responseTimesArr = [];
+      for (var hb = 0; hb < hungerBreaches.length; hb++) {
+        var breachMs = new Date(hungerBreaches[hb].timestamp).getTime();
+        for (var fp = 0; fp < foodPlacements.length; fp++) {
+          var foodMs = new Date(foodPlacements[fp].timestamp).getTime();
+          if (foodMs >= breachMs) {
+            responseTimesArr.push((foodMs - breachMs) / 1000);
+            break;
+          }
+        }
+      }
+
+      var avgResponseTime = null;
+      if (responseTimesArr.length > 0) {
+        responseTimesArr.sort(function(a, b) { return a - b; });
+        var mid = Math.floor(responseTimesArr.length / 2);
+        if (responseTimesArr.length % 2 === 0) {
+          avgResponseTime = Math.round(((responseTimesArr[mid - 1] + responseTimesArr[mid]) / 2) * 10) / 10;
+        } else {
+          avgResponseTime = Math.round(responseTimesArr[mid] * 10) / 10;
+        }
+      }
 
       var now = new Date().toISOString();
       stmtUpsertDailyScore.run(dateStr, composite, totalFeeds, avgHunger, fearIncidents, avgResponseTime, now);
@@ -315,7 +345,7 @@ function openDb(dbPath) {
           if (gap <= 60) connectedSeconds += gap;
         }
       }
-      var connectedHours = obsTimes.length >= 2 ? Math.round(connectedSeconds / 360) / 10 : 0;
+      var connectedHours = obsTimes.length >= 2 ? Math.round(connectedSeconds / 3600 * 10) / 10 : 0;
 
       return {
         composite_score: scoreRow ? scoreRow.composite_score : null,

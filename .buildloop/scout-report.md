@@ -1,66 +1,97 @@
-# Scout Report: T8.8
+# Scout Report: T10.1
 
 ## Key Facts (read this first)
 
-- **Tech stack**: Vanilla JS (no build step), Node.js WebSocket server (`server/caretaker.js`), SQLite via better-sqlite3 (`server/db.js`). No npm packages on the frontend -- all plain `<script>` tags.
-- **`js/caretaker-analytics.js` does not exist** -- must be created as a new file following the IIFE pattern used in `caretaker-sidebar.js`.
-- **Sidebar HTML lives in `index.html`** and is laid out as a flex column: header -> `.activity-feed` -> `.chat-section`. Analytics panel must be appended after `.chat-section` inside `#caretaker-sidebar`.
-- **`avg_response_time` in `daily_scores` is currently bogus** -- `computeDailyScore()` stores `forgotIncidents` (a count) in that field, not an actual time. The analytics endpoint will need to compute real response time dynamically from DB, or document this gap.
-- **CSS version query param is `?v=17`** -- the new analytics script tag must use `?v=18` (or match whatever bump is applied to other assets) to avoid stale cache.
+- **Tech stack**: Node.js, `better-sqlite3` (SQLite), no bundler. `server/db.js` owns all DB logic. `tools/query-log.sh` is a bash script using DuckDB to query a JSON Lines log file -- but that log is no longer written (agent/run.sh does not redirect stdout to a file), so the tool currently targets a non-existent file.
+- **avgResponseTime bug is real** (`db.js:243`): `var avgResponseTime = forgotIncidents;` -- stores a count, not seconds. `getAnalyticsSummary()` already has the correct hunger-breach-to-food-placement logic (lines 272-296) but computes mean; the task asks for **median**. The fix for `computeDailyScore` should mirror that query pattern and compute median.
+- **connectedHours divisor caveat**: `Math.round(connectedSeconds / 360) / 10` is mathematically identical to `Math.round(connectedSeconds / 3600 * 10) / 10`. The task says "inflates by 10x" but the current math is actually correct due to the compensating `/10`. The fix is a readability refactor -- restructure as `Math.round(connectedSeconds / 3600 * 10) / 10`. **Do NOT just swap 360→3600 without adjusting the rounding factor** -- that would produce 10x smaller results.
+- **query-log.sh must switch from JSON log to SQLite**: DuckDB can read SQLite directly via `ATTACH ... (TYPE sqlite, READ_ONLY)`. The JSON log file no longer exists. All three view definitions need to be rewritten against the SQLite table schema.
+- **`@anthropic-ai/sdk` is safe to remove**: `grep -r anthropic server/` finds no imports outside package.json/package-lock.json; caretaker.js uses `execSync('claude ...')` (line 6, 165).
+
+---
 
 ## Relevant Files
 
-| File | Notes |
-|------|-------|
-| `js/caretaker-sidebar.js` | Pattern to follow for analytics IIFE -- init, fetch, render. Exposes `window.CaretakerSidebar`. |
-| `server/caretaker.js` | HTTP server with existing GET/POST endpoints. New analytics endpoints go here. Pattern: sync `if (req.method === 'GET' && req.url === ...)` blocks. |
-| `server/db.js` | Schema and query methods. `daily_scores` table has `composite_score, total_feeds, avg_hunger, fear_incidents, avg_response_time`. `observations` has per-row `hunger, fear, timestamp`. Needs new query methods for analytics. |
-| `index.html` | Sidebar HTML structure, script load order. Add analytics section div + new `<script>` tag. Version param is `?v=17`. |
-| `css/main.css` | CSS variables: `--bg`, `--surface`, `--border`, `--text`, `--text-muted`, `--accent` (#E3734B), `--radius`. Add sparkline + analytics panel styles in the Caretaker section (around line 951). |
-| `js/caretaker-bridge.js` | Dispatches WebSocket messages to `CaretakerSidebar` -- if analytics needs real-time updates, a hook must be added here for `CaretakerAnalytics`. |
+| File | Role |
+|------|------|
+| `server/db.js` | MODIFY -- `computeDailyScore` (line 243 avgResponseTime bug) and `getAnalyticsSummary` (line 318 connectedHours refactor) |
+| `tools/query-log.sh` | MODIFY -- `build_schema()` (lines 46-85) rewrites DuckDB views to read SQLite; `validate_args()` (line 38) checks for DB file instead of log file |
+| `package.json` | MODIFY -- remove `@anthropic-ai/sdk` from dependencies |
+
+---
 
 ## Architecture Notes
 
-**Sidebar layout**: `.caretaker-sidebar` is `display:flex; flex-direction:column`. `.activity-feed` has `flex:1` (takes remaining space). `.chat-section` is `flex-shrink:0; max-height:45%`. Analytics panel should be `flex-shrink:0` with a fixed or max-height, collapsible via a toggle (matching the expandable pattern in the task description).
+### db.js computeDailyScore (lines 212-248)
+- Runs four SQLite queries: avg hunger, feed count, fear incidents, forgot incidents
+- `avgResponseTime` at line 243 is simply `var avgResponseTime = forgotIncidents;` -- wrong, stores count
+- The correct query pattern is already present in `getAnalyticsSummary` lines 272-290: fetch hunger > 0.7 observations, fetch place_food actions, iterate to find first food action after each breach, accumulate deltas in seconds
+- Task asks for **median** not mean. After collecting `responseTimes[]`, sort and take the middle element (or average of two middle elements for even length)
 
-**Data sources**:
-- `GET /analytics/summary` -- today's `daily_scores` row + computed metrics (feeds today, avg hunger today, fear incidents today, avg response time). Returns JSON.
-- `GET /analytics/hunger-timeline` -- last N observations (hunger + timestamp) + last N food actions (timestamp) for feed markers. Returns JSON.
-- Both endpoints are simple synchronous SQLite reads -- no async needed in server code (better-sqlite3 is sync).
+### db.js getAnalyticsSummary (lines 251-329)
+- Line 318: `Math.round(connectedSeconds / 360) / 10` -- algebraically `= Math.round(connectedSeconds / 3600 * 10) / 10`
+- The clearer form: divide by 3600 first (seconds → hours), multiply by 10 before rounding (preserve one decimal), divide by 10 after. No change to output values.
 
-**Observations frequency**: `OBSERVATION_INTERVAL_MS = 10000` (10s). For a 24h chart that's up to ~8640 points; use last 100-200 for a readable sparkline (last ~30 minutes).
+### SQLite incidents table schema (db.js lines 35-42)
+```
+id, timestamp, type, severity, description, state_snapshot
+```
+- `type` field (not `incident`): values are `'scared_the_fly'`, `'forgot_to_feed'`
+- `description` is a human string like `"Fear spiked from 0.23 to 0.81 after place_food"` or `"Hunger at 0.91 with no food available"` -- no separate fearBefore/fearAfter columns
+- `state_snapshot` is JSON (stringified fly state)
 
-**Active hours (connected vs disconnected)**: No explicit connection log table. Infer from observation timestamp gaps > 60s = "disconnected". The endpoint can compute this from `observations` gaps.
+### SQLite actions table schema (db.js lines 27-34)
+```
+id, timestamp, action, params, reasoning, fly_state
+```
 
-**SVG sparklines**: Inline SVG `<polyline>` with `viewBox="0 0 W H"`. Map data values to SVG coordinates. Feed markers = vertical `<line>` elements at the corresponding x-position. No external library needed.
+### SQLite observations table schema (db.js lines 6-26)
+```
+id, timestamp, hunger, fear, fatigue, curiosity, groom, behavior, pos_x, pos_y, facing_dir, speed, fired_neurons, food_count, light_level, temperature, raw_data
+```
 
-**Real-time updates**: Analytics can be polled (e.g. every 30s with `setInterval`) rather than pushed via WebSocket, since this is aggregate data not a live event stream. No change needed to `caretaker-bridge.js` for the initial implementation.
+### Current query-log.sh schema mismatches (build_schema, lines 46-85)
+1. Reads `caretaker.log` (JSON Lines) -- this file no longer exists; agent/run.sh does not redirect stdout to a file
+2. `observations` view: `WHERE type = 'observation'` -- old log wrote `type: 'state'`; SQLite has a proper `observations` table
+3. `incidents` view: selects `incident` (old log field) -- SQLite table has `type`; selects `fearBefore`/`fearAfter` (old log top-level fields) -- SQLite stores these only inside `description` string; `action` field also doesn't exist as a column
+4. `actions` view: `WHERE type = 'action'` -- old log wrote `type: 'action_ack'`; SQLite has a proper `actions` table
+
+### DuckDB SQLite reading syntax
+DuckDB supports: `ATTACH 'path.db' AS db (TYPE sqlite, READ_ONLY); SELECT * FROM db.main.observations;`
+Or alternatively the sqlite_scan function. The ATTACH approach produces cleaner view definitions.
+
+---
 
 ## Suggested Approach
 
-1. **`server/db.js`**: Add two new query methods:
-   - `getAnalyticsSummary(dateStr)` -- returns `daily_scores` row for date (or computes if missing), plus active connection estimate.
-   - `getHungerTimeline(limit)` -- returns last N observations (timestamp, hunger) + last M place_food actions (timestamp) joined or separately.
+1. **`server/db.js` -- `computeDailyScore` (line 243)**: Replace `var avgResponseTime = forgotIncidents;` with a small query block similar to `getAnalyticsSummary` lines 272-296 but compute **median** instead of mean:
+   - Fetch hunger > 0.7 observations for the day, ordered by id ASC
+   - Fetch place_food actions for the day, ordered by timestamp ASC
+   - For each breach, find the first food action at or after it, push delta in seconds
+   - Sort the array, return middle value (or null if empty)
+   - Pass result to `stmtUpsertDailyScore.run()`
 
-2. **`server/caretaker.js`**: Add two new GET routes:
-   - `GET /analytics/summary` -- calls `getAnalyticsSummary(today)`.
-   - `GET /analytics/hunger-timeline` -- calls `getHungerTimeline(120)`.
+2. **`server/db.js` -- `getAnalyticsSummary` (line 318)**: Change `Math.round(connectedSeconds / 360) / 10` to `Math.round(connectedSeconds / 3600 * 10) / 10`. Same math, clearer intent.
 
-3. **`js/caretaker-analytics.js`**: New IIFE file. On `init()`:
-   - Find/bind DOM elements (analytics section, toggle, chart containers).
-   - `fetch('/analytics/summary')` + `fetch('/analytics/hunger-timeline')`.
-   - Render 6 metrics: score gauge, hunger sparkline with feed markers, fear incidents per hour bar, avg response time, feeding frequency, active hours.
-   - `setInterval(refresh, 30000)` for live-ish updates.
-   - Expose `window.CaretakerAnalytics = { init, refresh }`.
+3. **`tools/query-log.sh`**:
+   - Change `LOG_FILE` variable to `DB_FILE="$PROJECT_DIR/data/caretaker.db"`
+   - Update `validate_args` to check `$DB_FILE` with `-f` instead of `-s "$LOG_FILE"`
+   - Rewrite `build_schema()` to ATTACH the SQLite DB and create views from real tables:
+     - `observations`: direct `SELECT` from `db.main.observations` (columns already match)
+     - `actions`: direct `SELECT` from `db.main.actions`
+     - `incidents`: SELECT from `db.main.incidents` using `type` field, expose `description` as-is (no fearBefore/fearAfter), include `severity`
+   - Update `validate_args` error message
+   - Update `get_schema_info` to not reference `raw_log` (no longer needed)
 
-4. **`index.html`**: Add `.analytics-section` div after `.chat-section` inside `#caretaker-sidebar`. Add `<script src="./js/caretaker-analytics.js?v=18">`.
+4. **`package.json`**: Remove `"@anthropic-ai/sdk": "^0.80.0"` from dependencies. Run `npm install` to regenerate lock file.
 
-5. **`css/main.css`**: Add styles for `.analytics-section`, `.analytics-toggle`, `.sparkline-container`, `.metric-row`, `.metric-value`, `.metric-label`. Keep the dark theme using existing CSS variables.
+---
 
-## Risks and Constraints (read this last)
+## Risks and Constraints
 
-- **`avg_response_time` is currently wrong** in `daily_scores` (stores `forgotIncidents` count, not seconds). Need to decide: (a) fix `computeDailyScore()` to compute real response time, or (b) compute it on-the-fly in the analytics endpoint. Option (b) is safer -- avoids touching the scheduled score computation and migration concerns. The real computation: for each `place_food` action, find the most recent observation where `hunger > 0.7` before it, compute delta in seconds.
-- **Sidebar height**: The sidebar is `bottom: 180px` on desktop (leaves room for the left panel at the bottom). Adding a 3rd section risks making the sidebar too tall for small screens. Use `max-height` + `overflow-y: hidden` on the analytics panel with a collapse toggle.
-- **Empty database**: On first run with no data, all analytics will be zero/null. The renderer must handle null/empty gracefully (show "No data yet" placeholder, not a broken SVG).
-- **Version bump**: `index.html` uses `?v=17` on all asset URLs. The new script tag needs `?v=18` (or increment all to v=18 in the same commit to avoid mixed cache state).
-- **Script load order**: `caretaker-analytics.js` should load after `caretaker-sidebar.js` and before `caretaker-bridge.js` (or after -- analytics doesn't depend on bridge events for initial load).
+- **connectedHours "fix" is a no-op mathematically**: `/ 360 / 10 == / 3600`. Implement as `/ 3600 * 10` before `/ 10` to make intent clear, but do NOT just swap 360→3600 without the `* 10` or it outputs 10x smaller values.
+- **DuckDB SQLite ATTACH requires DuckDB ≥ 0.8 with sqlite extension loaded**. The script already checks `duckdb` is installed but doesn't verify the sqlite extension. Add `LOAD sqlite;` before the ATTACH, or use `INSTALL sqlite; LOAD sqlite;` -- but INSTALL requires internet. Check if the user's DuckDB has sqlite bundled (most brew installs do). The builder should add `LOAD sqlite;` before the ATTACH statement.
+- **`data/caretaker.db` path**: DB is at `data/caretaker.db` relative to project root (set in `db.js` line 4 as `path.join(__dirname, '..', 'data', 'caretaker.db')`). The query-log.sh `PROJECT_DIR` already resolves to the project root, so `$PROJECT_DIR/data/caretaker.db` is correct.
+- **median with empty or single-element array**: Handle `responseTimes.length === 0` (return null) and `=== 1` (return the single value) to avoid out-of-bounds access.
+- **`package-lock.json`**: Removing `@anthropic-ai/sdk` from package.json requires running `npm install` to update the lock file. Builder must run this command.
+- **No tests exist**: No test suite to run for verification. Verification will need manual inspection of the query outputs.

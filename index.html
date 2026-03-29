@@ -3,7 +3,7 @@
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>FlyBrain</title>
-    <link rel="stylesheet" type="text/css" href="./css/main.css?v=17">
+    <link rel="stylesheet" type="text/css" href="./css/main.css?v=22">
 </head>
 
 <body>
@@ -84,31 +84,38 @@
         </div>
     </div>
     <div id="caretaker-sidebar" class="caretaker-sidebar">
+        <div class="caretaker-sidebar-handle" id="sheet-handle"></div>
         <div class="caretaker-sidebar-header">
             <span class="caretaker-sidebar-title">Activity</span>
             <button class="caretaker-sidebar-close" id="caretaker-sidebar-close">&times;</button>
         </div>
-        <div class="activity-feed" id="activity-feed-list"></div>
-        <div class="chat-section" id="chat-section">
-            <div class="chat-history" id="chat-history"></div>
-            <div class="chat-input-row">
-                <input type="text" class="chat-input" id="chat-input" placeholder="Ask about the fly..." autocomplete="off" />
-                <button class="chat-send-btn" id="chat-send-btn">Send</button>
+        <div class="sidebar-tabs" id="sidebar-tabs">
+            <button class="sidebar-tab active" data-tab="activity">Activity</button>
+            <button class="sidebar-tab" data-tab="chat">Chat</button>
+            <button class="sidebar-tab" data-tab="analytics">Analytics</button>
+            <button class="sidebar-tab" data-tab="calendar">Calendar</button>
+        </div>
+        <div class="sidebar-tab-content active" data-tab-content="activity">
+            <div class="activity-feed" id="activity-feed-list"></div>
+        </div>
+        <div class="sidebar-tab-content" data-tab-content="chat">
+            <div class="chat-section" id="chat-section">
+                <div class="chat-history" id="chat-history"></div>
+                <div class="chat-input-row">
+                    <input type="text" class="chat-input" id="chat-input" placeholder="Ask about the fly..." autocomplete="off" />
+                    <button class="chat-send-btn" id="chat-send-btn">Send</button>
+                </div>
             </div>
         </div>
-        <div class="analytics-section" id="analytics-section">
-            <div class="analytics-section-header">
-                <span class="analytics-section-title">Analytics</span>
-                <button class="analytics-toggle-btn" id="analytics-toggle">Hide</button>
+        <div class="sidebar-tab-content" data-tab-content="analytics">
+            <div class="analytics-section" id="analytics-section">
+                <div class="analytics-content" id="analytics-content"></div>
             </div>
-            <div class="analytics-content" id="analytics-content"></div>
         </div>
-        <div class="calendar-section" id="calendar-section">
-            <div class="calendar-section-header">
-                <span class="calendar-section-title">Calendar</span>
-                <button class="calendar-toggle-btn" id="calendar-toggle">Hide</button>
+        <div class="sidebar-tab-content" data-tab-content="calendar">
+            <div class="calendar-section" id="calendar-section">
+                <div class="calendar-content" id="calendar-content"></div>
             </div>
-            <div class="calendar-content" id="calendar-content"></div>
         </div>
     </div>
     <div id="drawer-backdrop" class="drawer-backdrop"></div>
@@ -129,19 +136,19 @@
     <!-- Three.js v0.128.0 (vendored) -- do NOT upgrade one without the other -->
     <script src="./js/vendor/three.min.js"></script>
     <script src="./js/vendor/OrbitControls.js"></script>
-    <script type="text/javascript" src="./js/constants.js?v=17"></script>
-    <script type="text/javascript" src="./js/connectome.js?v=17"></script>
-    <script type="text/javascript" src="./js/brain-worker-bridge.js?v=17"></script>
-    <script type="text/javascript" src="./js/neuro-renderer.js?v=17"></script>
-    <script type="text/javascript" src="./js/fly-logic.js?v=17"></script>
-    <script type="text/javascript" src="./js/brain3d.js?v=17"></script>
-    <script type="text/javascript" src="./js/education.js?v=17"></script>
-    <script type="text/javascript" src="./js/main.js?v=17"></script>
-    <script type="text/javascript" src="./js/caretaker-renderer.js?v=17"></script>
-    <script type="text/javascript" src="./js/caretaker-sidebar.js?v=17"></script>
-    <script type="text/javascript" src="./js/caretaker-analytics.js?v=17"></script>
-    <script type="text/javascript" src="./js/caretaker-calendar.js?v=17"></script>
-    <script type="text/javascript" src="./js/caretaker-bridge.js?v=17"></script>
+    <script type="text/javascript" src="./js/constants.js?v=22"></script>
+    <script type="text/javascript" src="./js/connectome.js?v=22"></script>
+    <script type="text/javascript" src="./js/brain-worker-bridge.js?v=22"></script>
+    <script type="text/javascript" src="./js/neuro-renderer.js?v=22"></script>
+    <script type="text/javascript" src="./js/fly-logic.js?v=22"></script>
+    <script type="text/javascript" src="./js/brain3d.js?v=22"></script>
+    <script type="text/javascript" src="./js/education.js?v=22"></script>
+    <script type="text/javascript" src="./js/main.js?v=22"></script>
+    <script type="text/javascript" src="./js/caretaker-renderer.js?v=22"></script>
+    <script type="text/javascript" src="./js/caretaker-sidebar.js?v=22"></script>
+    <script type="text/javascript" src="./js/caretaker-analytics.js?v=22"></script>
+    <script type="text/javascript" src="./js/caretaker-calendar.js?v=22"></script>
+    <script type="text/javascript" src="./js/caretaker-bridge.js?v=22"></script>
 </body>
 
 </html>

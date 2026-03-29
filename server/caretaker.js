@@ -3,11 +3,11 @@ var http = require('http');
 var fs = require('fs');
 var path = require('path');
 var readline = require('readline');
-var Anthropic = require('@anthropic-ai/sdk');
+var { execSync } = require('child_process');
 var dbModule = require('./db');
 var chatPolicyPath = path.join(__dirname, '..', 'agent', 'chat-policy.md');
 var chatPolicyContent = fs.readFileSync(chatPolicyPath, 'utf-8');
-var anthropic = new Anthropic();
+// Chat uses claude CLI (OAuth) instead of API key
 
 var PORT = parseInt(process.env.CARETAKER_PORT, 10) || 7600;
 var caretakerDb = dbModule.openDb();
@@ -155,26 +155,29 @@ async function handleChatRequest(userMessage, viewContext) {
   if (viewContext != null) {
     systemPrompt += '\n\n## User\'s Current View\n\n' + JSON.stringify(viewContext);
   }
-  var history = caretakerDb.getChatHistory(20);
-  var messages = [];
+  var history = caretakerDb.getChatHistory(10);
+  var chatContext = '';
   for (var i = 0; i < history.length; i++) {
-    messages.push({ role: history[i].role, content: history[i].message });
+    chatContext += (history[i].role === 'user' ? 'User: ' : 'Claude: ') + history[i].message + '\n';
   }
-  messages.push({ role: 'user', content: userMessage });
+  var prompt = chatContext + 'User: ' + userMessage;
   try {
-    var response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 512,
-      system: systemPrompt,
-      messages: messages
-    });
-    var assistantMessage = response.content[0].text;
+    var raw = execSync(
+      'claude -p --system-prompt ' + JSON.stringify(systemPrompt) +
+      ' --no-session-persistence --model haiku --output-format json ' +
+      JSON.stringify(prompt),
+      { encoding: 'utf-8', timeout: 30000, stdio: ['pipe', 'pipe', 'pipe'] }
+    );
+    var parsed = JSON.parse(raw);
+    var assistantMessage = parsed.result || raw;
+    // Strip markdown fences if present
+    assistantMessage = assistantMessage.replace(/^```[a-z]*\s*/i, '').replace(/\s*```\s*$/, '').trim();
     var ts = new Date().toISOString();
     caretakerDb.insertChatMessage(ts, 'user', userMessage);
     caretakerDb.insertChatMessage(ts, 'assistant', assistantMessage);
     return { role: 'assistant', message: assistantMessage, timestamp: ts };
   } catch (err) {
-    return { role: 'assistant', message: 'Sorry, I could not process that question. Error: ' + err.message, timestamp: new Date().toISOString(), error: true };
+    return { role: 'assistant', message: 'Sorry, I could not process that. Error: ' + err.message, timestamp: new Date().toISOString(), error: true };
   }
 }
 

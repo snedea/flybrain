@@ -134,155 +134,11 @@ Using the logged values from Step 1, adjust:
 Files: `js/brain-worker-bridge.js`, `js/fly-logic.js`, `js/connectome.js`, `js/main.js`
 
 - Discovery Round 24: Test Coverage for Worker Bridge Pipeline (1 tasks archived to TASKS-ARCHIVE.md)
-## Discovery Round 25
-
-No new tasks discovered.
-
-## Discovery Round 26
-
-No new tasks discovered.
-
-## Discovery Round 27
-
-No new tasks discovered.
-
-- Discovery Round 28 (1 tasks archived to TASKS-ARCHIVE.md)
-## Discovery Round 29
-
-No new tasks discovered.
-
-## Discovery Round 30
-
-No new tasks discovered.
-
-## Discovery Round 31
-
-No new tasks discovered.
-
-## Discovery Round 32
-
-No new tasks discovered.
-
-## Discovery Round 33
-
-No new tasks discovered.
-
-## Discovery Round 34
-
-No new tasks discovered.
-
-## Discovery Round 35
-
-No new tasks discovered.
-
-## Discovery Round 36
-
-No new tasks discovered.
-
-## Discovery Round 37
-
-No new tasks discovered.
-
-## Discovery Round 38
-
-No new tasks discovered.
-
-## Discovery Round 39
-
-No new tasks discovered.
-
-## Discovery Round 40
-
-No new tasks discovered.
-
-## Discovery Round 41
-
-No new tasks discovered.
-
-## Discovery Round 42
-
-No new tasks discovered.
-
-## Discovery Round 43
-
-No new tasks discovered.
-
-## Discovery Round 44
-
-No new tasks discovered.
-
-## Discovery Round 45
-
-No new tasks discovered.
-
-## Discovery Round 46
-
-No new tasks discovered.
-
-## Discovery Round 48
-
-No new tasks discovered.
-
-## Discovery Round 50
-
-No new tasks discovered.
-
-## Discovery Round 51
-
-No new tasks discovered.
-
-## Discovery Round 52
-
-No new tasks discovered.
-
-## Discovery Round 53
-
-No new tasks discovered.
-
-## Discovery Round 55
-
-No new tasks discovered.
-
-## Discovery Round 56
-
-No new tasks discovered.
-
-## Discovery Round 58
-
-No new tasks discovered.
-
-## Discovery Round 59
-
-No new tasks discovered.
-
-## Discovery Round 60
-
-No new tasks discovered.
-
-## Discovery Round 61
-
-No new tasks discovered.
-
-## Discovery Round 62
-
-No new tasks discovered.
-
-## Discovery Round 63
-
-No new tasks discovered.
-
-## Discovery Round 64
-
-No new tasks discovered.
-
+- Discovery Rounds 25-45, 48, 50-53, 55-56, 58-64, 66 (no new tasks discovered)
 - Discovery Round 65 (1 tasks archived to TASKS-ARCHIVE.md)
-## Discovery Round 66
-
-No new tasks discovered.
-
 - Discovery Round 67 (1 tasks archived to TASKS-ARCHIVE.md)
 - Discovery Round 68 (3 tasks archived to TASKS-ARCHIVE.md)
-## Phase 8: Autonomous Claude Code Caretaker (GitHub Issue #1)
+## Phase 8: Autonomous Claude Code Caretaker (GitHub Issue #1) (3 archived, 6 retained)
 
 Claude Code acts as a hands-off caretaker for the virtual fly -- feeding it, managing its environment, and keeping it healthy. All actions and observations are logged in structured JSON Lines for AI-powered querying ("how many times did Claude forget to feed the fly?").
 
@@ -292,11 +148,11 @@ Claude Code acts as a hands-off caretaker for the virtual fly -- feeding it, man
 
 - [x] T8.3: Canvas rendering of Claude's visual presence. Draw Claude's presence on the canvas so the user always sees where Claude is and what it's doing. Claude cursor: small Claude logo silhouette in orange (#E3734B), rendered at Claude's current "attention point" on the canvas. Interaction indicators: orange ripple/pulse when placing food, orange ring when touching, orange arrow for wind, toolbar highlight for light/temp changes. Attention trail: faint orange line as Claude shifts focus. Idle pulse: gentle heartbeat glow when observing. All indicators are cosmetic (rendered on the canvas draw loop), not part of the simulation. Files: `js/caretaker-renderer.js` (canvas overlay drawing), `svg/claude-cursor.svg` (Claude logo silhouette), `css/main.css` (toolbar highlight for Claude actions). [-PI-]
 
-- [x] T8.4: Log query tool. Build a tool to query caretaker logs with natural language. Use DuckDB to load the JSON Lines file, then let Claude Code answer questions against it. Example queries: "how many times did Claude forget to feed the fly?" (count periods where hunger > 0.9 with no place_food within 30s), "how many times did Claude scare the fly?" (count fear spikes > 0.5 within 10s of a Claude action), "what was the fly's average hunger today?", "show me all incidents". Files: new `tools/query-log.sh` (wrapper that loads log into DuckDB and passes the user's question to Claude Code). [-PI-]
+  ... (3 tasks archived to TASKS-ARCHIVE.md)
 
-- [x] T8.5: SQLite database and data pipeline. Replace JSON Lines logging with SQLite (better-sqlite3). Schema: observations (sampled at 0.1Hz -- drives, behavior, position, firing stats), actions (action, params JSON, reasoning, fly state at time of action), incidents (type, severity, description, state snapshot), chat_messages (role, message), daily_scores (composite score, total feeds, avg hunger, fear incidents, avg response time). Server writes to DB on each event. Compute daily_scores on a 5-minute interval. Add migration script for existing caretaker.log data. Files: `server/caretaker.js` (replace file logging with SQLite), new `server/db.js` (schema, queries), new `server/migrate-logs.js`. [SPI-]
+  ... (3 tasks archived to TASKS-ARCHIVE.md)
 
-- [x] T8.6: Left sidebar -- Activity Feed. Add a collapsible left sidebar to the UI with a real-time scrolling activity feed. Feed shows Claude's actions and notable events: "Placed food at (320, 280) -- hunger was 0.82", "Set light to Dim -- fatigue rising", "WARNING: fly fear spiked to 0.7". Each entry: timestamp, action icon, description, reasoning. Color-coded: green = feeding, blue = comfort, yellow = warning, red = incident. Data pulled from actions/incidents tables via WebSocket channel from server. Auto-scrolls, click to expand reasoning. Files: new `js/caretaker-sidebar.js`, `css/main.css` (sidebar layout), `index.html` (sidebar HTML), `server/caretaker.js` (broadcast actions/incidents to sidebar). [SPI-]
+  ... (3 tasks archived to TASKS-ARCHIVE.md)
 
 - [x] T8.7: Left sidebar -- Chat Box. Add a chat input below the activity feed. User types a question ("why didn't you feed the fly when it was hungry?", "what do you think the fly needs next?"), it's sent to Claude with relevant database context (last N observations, recent actions, incident history around the time in question). Claude responds with data-backed answers referencing specific timestamps. Chat history persisted in chat_messages table. Files: `js/caretaker-sidebar.js` (chat UI), `server/caretaker.js` (chat endpoint -- queries DB, builds context, calls Claude), `agent/chat-policy.md` (system prompt for chat mode). [-PI-]
 
@@ -306,3 +162,25 @@ Claude Code acts as a hands-off caretaker for the virtual fly -- feeding it, man
 
 - Phase 9: iOS App (iPhone) (3 tasks archived to TASKS-ARCHIVE.md)
 - Discovery Round 69 (1 tasks archived to TASKS-ARCHIVE.md)
+
+## Phase 10: Server and Data Pipeline Bug Fixes
+
+- [x] T10.1: Fix daily score computation bugs and query-log schema mismatch. The db.js computeDailyScore() function has two calculation errors: (1) avgResponseTime (line 243) stores the count of forgot_to_feed incidents instead of actual response time in seconds between hunger > 0.7 and the next place_food action -- fix by computing the median time delta between high-hunger observations and subsequent food placements in the actions table; (2) connectedHours calculation (line 318 in getAnalyticsSummary) divides by 360 instead of 3600, inflating connected hours by 10x -- fix the divisor. Additionally, tools/query-log.sh has a schema mismatch with db.js: the DuckDB incident view references an `incident` field but db.js stores `type`; the view references `fearBefore`/`fearAfter` fields but caretaker.js stores these in the `description` string -- update the query-log.sh DuckDB schema to match the actual SQLite table structure. Also remove unused `@anthropic-ai/sdk` from package.json (server now uses claude CLI via execSync). Files: server/db.js (computeDailyScore, getAnalyticsSummary), tools/query-log.sh (DuckDB schema), package.json (remove unused dep). [SPI-]
+
+## Phase 11: Sidebar UI Tabbed Layout
+
+Note: Working tree contains an in-progress refactor moving the sidebar from left to right, adding tab navigation (Activity/Chat/Analytics/Calendar), and implementing a mobile bottom-sheet gesture. The changes touch index.html, css/main.css, js/caretaker-sidebar.js, js/main.js, and server/caretaker.js. These should be reviewed and completed before any further sidebar work.
+
+- [ ] T11.1: Finalize sidebar tab refactor and mobile bottom-sheet. The uncommitted working tree changes implement a right-side sidebar with tab navigation and mobile bottom-sheet gestures but need completion and verification. Verify: (1) all four tabs (Activity, Chat, Analytics, Calendar) render their content correctly when selected and hide when deselected, (2) analytics and calendar sections auto-fetch data when their tab becomes active (currently they may only fetch on page load), (3) mobile bottom-sheet peek/full/closed states work with the handle drag gesture and respect safe-area-inset-bottom, (4) the close button and activity toggle button both correctly sync with the new sheet state machine (sheetState variable), (5) desktop breakpoint (min-width 1200px) shows the sidebar on the right at 260px width. Fix any issues found. Remove the now-hidden analytics-section-header and calendar-section-header elements from CSS if they are no longer rendered (display:none is set but the HTML structure should be cleaned up). Ensure cache-bust versions in index.html are consistent. Files: index.html, css/main.css, js/caretaker-sidebar.js, js/main.js.
+
+## Phase 12: Caretaker Renderer and Bridge Hardening
+
+- [ ] T12.1: Fix caretaker-renderer idle pulse, arrow angle, and caretaker-bridge input validation. Three bugs in the caretaker visual layer: (1) caretaker-renderer.js idle pulse is never drawn because the condition at line 251 checks attentionX < 0 which is the idle state, but the pulse draw block is inside a branch that skips when idle -- restructure so idle pulse draws when the cursor has been stationary for > 3 seconds; (2) caretaker-renderer.js line 226 converts wind direction from degrees to radians (direction * PI / 180) but caretaker-bridge.js line 73 already sends direction in radians from Math.atan2 -- remove the double conversion; (3) caretaker-bridge.js executeCommand() has no bounds checking on incoming parameters -- add validation for place_food (x/y within canvas bounds), set_light (value in [bright, dim, dark]), set_temp (value in [warm, neutral, cool]), touch (x/y within canvas), blow_wind (x/y within canvas, intensity 0-1). Files: js/caretaker-renderer.js (idle pulse, arrow angle), js/caretaker-bridge.js (input validation in executeCommand).
+
+## Phase 13: Spec Features Not Yet Implemented
+
+- [ ] T13.1: Wire unused connectome pathways to user interactions -- danger odor, bitter taste, water taste. Three sensory pathways have weights defined in constants.js (lines 83, 114, 123) but are not connected to any user interaction. The spec lists olfactory neurons for mate/avoidance and gustatory neurons for bitter/water. Wire these up: (1) add a "Danger" tool (or piggyback on wind tool at high intensity) that sets BRAIN.stimulate.dangerOdor=true, triggering OLF_ORN_DANGER -> avoidance circuit -> flight response; (2) when food is placed, randomly mark some food items as "bitter" (10% chance) -- if fly contacts bitter food, fire GUS_GRN_BITTER causing rejection and avoidance learning via MB_DAN_PUN; (3) add a "Water" tool or have water drops appear randomly near food -- fire GUS_GRN_WATER when contacted, reducing thirst (new drive or repurpose curiosity). Update the toolbar in index.html if new tools are added. Files: js/main.js (tool handlers, toolbar), js/connectome.js (stimulate paths), js/constants.js (verify weight connectivity), index.html (toolbar buttons if needed).
+
+- [ ] T13.2: Fly boundary constraints and off-screen recovery. The spec shows the fly living on a bounded canvas but there are no collision constraints -- the fly can walk or fly off-screen indefinitely. Add soft boundary enforcement: (1) define a "world" bounding box from the canvas dimensions with 20px padding, (2) when the fly's position exceeds the boundary, apply a gentle steering force back toward center (not a hard clamp -- should look natural), (3) when the fly takes flight due to startle, cap the landing position within bounds, (4) if the fly somehow ends up far off-screen (> 200px beyond canvas), teleport it to a random position near center. This should work correctly with the zoom/pan viewport (screenToWorld boundaries). Files: js/main.js (applyBehaviorMovement, update, computeMovementForBehavior).
+
+- [ ] T13.3: Mate interaction (spec stretch goal) and courtship behavior. The spec lists "Offer mate" as an interaction with olfactory neuron pathway. Implement as a new toolbar tool: (1) clicking "Mate" tool then clicking on canvas spawns a static mate sprite (simple smaller fly silhouette) at the click position, (2) fly detects mate via olfactory pathway (OLF_ORN_FOOD repurposed or new group), (3) if drives are favorable (low fear, moderate curiosity, low fatigue), fly approaches mate and enters new "courtship" behavior state with wing vibration animation (rapid small wing angle oscillation), (4) after 5-10s of courtship, mate disappears and curiosity resets. Add "courtship" to evaluateBehaviorEntry and the behavior state machine. Files: js/fly-logic.js (new behavior state), js/main.js (tool handler, mate rendering, courtship animation), js/connectome.js (olfactory pathway for mate detection), index.html (toolbar button).
