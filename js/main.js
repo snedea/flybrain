@@ -527,6 +527,11 @@ var helpOverlay = document.getElementById('helpOverlay');
 var helpBtn = document.getElementById('helpBtn');
 var helpCloseBtn = document.getElementById('helpCloseBtn');
 
+// Show splash on first visit
+if (!localStorage.getItem('flybrain_seen_splash')) {
+	helpOverlay.style.display = 'block';
+}
+
 helpBtn.addEventListener('click', function () {
 	var isVisible = helpOverlay.style.display !== 'none';
 	helpOverlay.style.display = isVisible ? 'none' : 'block';
@@ -534,6 +539,7 @@ helpBtn.addEventListener('click', function () {
 
 helpCloseBtn.addEventListener('click', function () {
 	helpOverlay.style.display = 'none';
+	localStorage.setItem('flybrain_seen_splash', '1');
 });
 
 // Close help overlay when clicking outside of it
@@ -542,6 +548,7 @@ document.addEventListener('click', function (e) {
 		!helpOverlay.contains(e.target) &&
 		e.target !== helpBtn) {
 		helpOverlay.style.display = 'none';
+		localStorage.setItem('flybrain_seen_splash', '1');
 	}
 });
 

@@ -259,6 +259,12 @@ canvas {
     border-color: var(--accent);
 }
 
+.tool-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+    border-color: var(--border);
+}
+
 .tool-btn.active {
     border-color: #5b9cf6;
     background: rgba(91, 156, 246, 0.15);
@@ -428,7 +434,9 @@ canvas {
     position: fixed;
     top: 54px;
     left: 1rem;
-    width: 280px;
+    width: 340px;
+    max-height: calc(100vh - 70px);
+    overflow-y: auto;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -471,6 +479,40 @@ canvas {
 
 .help-item strong {
     color: var(--accent);
+}
+
+.help-about p {
+    font-size: 0.8rem;
+    color: var(--text);
+    line-height: 1.5;
+    margin: 0 0 0.6rem 0;
+}
+
+.help-about a {
+    color: var(--accent);
+    text-decoration: none;
+}
+
+.help-about a:hover {
+    text-decoration: underline;
+}
+
+.help-credits {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    margin-top: 0.5rem;
+}
+
+.help-overlay-divider {
+    border-top: 1px solid var(--border);
+    margin: 0.75rem 0;
+}
+
+.help-overlay-section-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 0.5rem;
 }
 
 /* --- Connectome Header (label + toggle) --- */

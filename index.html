@@ -19,7 +19,7 @@
             <button class="tool-btn" data-tool="water">Water</button>
             <button class="tool-btn" data-tool="mate">Mate</button>
             <button class="tool-btn" id="brain3dBtn" aria-pressed="false">Brain 3D</button>
-            <button class="tool-btn" id="activityToggle">Activity</button>
+            <button class="tool-btn" id="activityToggle" disabled title="Coming soon">Activity</button>
             <button class="tool-btn" id="learnBtn">Learn</button>
             <button class="tool-btn" id="helpBtn">?</button>
             <button class="tool-btn" id="liteBtn">Lite</button>
@@ -40,9 +40,18 @@
     </div>
     <div id="helpOverlay" class="help-overlay" style="display:none;">
         <div class="help-overlay-header">
-            <span>Interaction Guide</span>
+            <span>What is this?</span>
             <button class="help-close-btn" id="helpCloseBtn">&times;</button>
         </div>
+        <div class="help-about">
+            <p>In 2024, a team of researchers mapped every single neuron in a fruit fly's brain -- all 139,255 of them, and the millions of connections between them. It was the first complete wiring diagram of an adult brain of any animal this complex. The work was led by Princeton and published in <em>Nature</em> (<a href="https://doi.org/10.1038/s41586-024-07558-y" target="_blank" rel="noopener noreferrer">Dorkenwald et al. 2024</a>).</p>
+            <p><strong>This is that brain, running live in your browser.</strong></p>
+            <p>The fly you see is not following a script. Its behavior -- walking, eating, grooming, startling, flying -- emerges from real neural signals propagating through those mapped connections. Feed it, touch it, scare it, and watch 139,000 neurons respond.</p>
+            <p>A fruit fly brain fits on a pinhead but contains circuits for memory, navigation, fear, hunger, and decision-making. If we can simulate this brain in a web browser today, imagine what becomes possible as we map larger brains. The human brain has 86 billion neurons. We are probably going to see it mapped in our lifetime.</p>
+            <p class="help-credits">Built on <a href="https://github.com/heyseth/worm-sim" target="_blank" rel="noopener noreferrer">worm-sim</a> by Seth Miller, which simulated the 302-neuron <em>C. elegans</em> worm brain. Connectome data from the <a href="https://codex.flywire.ai" target="_blank" rel="noopener noreferrer">FlyWire Consortium</a>.</p>
+        </div>
+        <div class="help-overlay-divider"></div>
+        <div class="help-overlay-section-title">How to play</div>
         <div class="help-item"><strong>Feed</strong> -- Click on the canvas to place food. The fly will seek and eat it when hungry.</div>
         <div class="help-item"><strong>Touch</strong> -- Click on the fly to touch it. Location matters: head, thorax, abdomen, or leg each triggers different grooming. Tap 3+ times in 4 seconds for a pain response.</div>
         <div class="help-item"><strong>Air</strong> -- Click and drag near the fly to blow wind. Drag distance controls wind strength.</div>
@@ -50,7 +59,6 @@
         <div class="help-item"><strong>Temp</strong> -- Cycles through Neutral, Warm, and Cool. Warm makes the fly more active and avoidant. Cool makes it exploratory.</div>
         <div class="help-item"><strong>Danger</strong> -- Click near the fly to emit a danger odor. The fly detects noxious chemicals via olfactory neurons and triggers an avoidance/flight response.</div>
         <div class="help-item"><strong>Water</strong> -- Click on the canvas to place a water droplet. The fly drinks when thirsty, reducing its thirst drive.</div>
-        <div class="help-item"><strong>Bitter food</strong> -- 10% of placed food is randomly bitter (shown in green). If the fly contacts bitter food, it triggers rejection and aversive learning.</div>
         <div class="help-item"><strong>Mate</strong> -- Click on the canvas to place a mate fly. If the fly is calm (low fear, low fatigue, moderate curiosity), it will approach and perform courtship wing vibration for 5-10 seconds.</div>
     </div>
     <div id="left-panel">
