@@ -1,22 +1,24 @@
 :root {
-    --bg: #1a1a2e;
-    --surface: #16213e;
-    --surface-hover: #1a2744;
-    --surface-alpha: rgba(22, 33, 62, 0.92);
-    --border: #2a3a5c;
-    --text: #e8e8e8;
-    --text-muted: #8892a4;
-    --accent: #E3734B;
-    --accent-hover: #f0855f;
-    --accent-subtle: rgba(227, 115, 75, 0.15);
+    --bg: #0a0c14;
+    --surface: #111420;
+    --surface-hover: #181c2a;
+    --surface-alpha: rgba(11, 13, 22, 0.94);
+    --border: rgba(255, 255, 255, 0.08);
+    --text: #e4e4e8;
+    --text-muted: rgba(255, 255, 255, 0.45);
+    --accent: #8b9cf6;
+    --accent-hover: #a8b4ff;
+    --accent-subtle: rgba(139, 156, 246, 0.12);
     --success: #4ade80;
     --warning: #fbbf24;
     --error: #f87171;
-    --radius: 8px;
+    --radius: 10px;
     --neuron-sensory: #3b82f6;
     --neuron-central: #8b5cf6;
     --neuron-drives: #f59e0b;
     --neuron-motor: #ef4444;
+    --glow-purple: rgba(139, 92, 246, 0.15);
+    --glow-blue: rgba(59, 130, 246, 0.1);
 }
 
 html,
@@ -74,7 +76,7 @@ body {
 
 canvas {
     display: block;
-    background-color: #222;
+    background-color: #0d0f18;
     transition: background-color 0.5s ease;
     touch-action: none;
 }
@@ -202,6 +204,7 @@ canvas {
     padding-top: env(safe-area-inset-top, 0px);
     background: var(--surface-alpha);
     border-bottom: 1px solid var(--border);
+    box-shadow: 0 1px 12px rgba(0, 0, 0, 0.4);
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -243,44 +246,46 @@ canvas {
 }
 
 .tool-btn {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    color: var(--text);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.7);
     padding: 0.25rem 0.75rem;
     border-radius: var(--radius);
     cursor: pointer;
     font-size: 0.8rem;
     font-family: system-ui, -apple-system, sans-serif;
-    transition: border-color 0.2s ease, background 0.2s ease;
+    transition: all 0.15s ease;
     white-space: nowrap;
 }
 
 .tool-btn:hover {
-    border-color: var(--accent);
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(139, 156, 246, 0.3);
+    color: #fff;
 }
 
 .tool-btn:disabled {
-    opacity: 0.35;
+    opacity: 0.25;
     cursor: not-allowed;
-    border-color: var(--border);
+    border-color: rgba(255, 255, 255, 0.04);
 }
 
 .tool-btn.active {
-    border-color: #5b9cf6;
-    background: rgba(91, 156, 246, 0.15);
-    color: #5b9cf6;
+    border-color: rgba(139, 92, 246, 0.5);
+    background: rgba(139, 92, 246, 0.12);
+    color: #b4bfff;
 }
 
 .tool-btn.claude-highlight:not(.active) {
-    border-color: #E3734B;
-    background: rgba(227, 115, 75, 0.15);
-    color: #E3734B;
-    box-shadow: 0 0 10px rgba(227, 115, 75, 0.5);
-    transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+    border-color: rgba(139, 92, 246, 0.5);
+    background: rgba(139, 92, 246, 0.12);
+    color: #b4bfff;
+    box-shadow: 0 0 12px rgba(139, 92, 246, 0.3);
+    transition: all 0.2s ease;
 }
 
 .tool-btn.active.claude-highlight {
-    box-shadow: 0 0 10px rgba(227, 115, 75, 0.5);
+    box-shadow: 0 0 12px rgba(139, 92, 246, 0.3);
     transition: box-shadow 0.2s ease;
 }
 
@@ -290,8 +295,8 @@ canvas {
     gap: 0.35rem;
     padding: 0.2rem 0.6rem;
     border-radius: var(--radius);
-    border: 1px solid #E3734B;
-    background: rgba(227, 115, 75, 0.1);
+    border: 1px solid rgba(139, 92, 246, 0.4);
+    background: rgba(139, 92, 246, 0.08);
     font-family: system-ui, -apple-system, sans-serif;
     cursor: default;
 }
@@ -300,19 +305,19 @@ canvas {
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: #E3734B;
+    background: #8b5cf6;
     animation: claude-pulse 2s ease-in-out infinite;
 }
 
 .claude-status-text {
     font-size: 0.7rem;
     font-weight: 600;
-    color: #E3734B;
+    color: #b4bfff;
     letter-spacing: 0.05em;
 }
 
 @keyframes claude-pulse {
-    0%, 100% { opacity: 1; box-shadow: 0 0 4px #E3734B; }
+    0%, 100% { opacity: 1; box-shadow: 0 0 4px #8b5cf6; }
     50% { opacity: 0.5; box-shadow: none; }
 }
 
@@ -326,6 +331,7 @@ canvas {
     padding-bottom: env(safe-area-inset-bottom, 0px);
     background: var(--surface-alpha);
     border-top: 1px solid var(--border);
+    box-shadow: 0 -1px 16px rgba(0, 0, 0, 0.4);
     display: flex;
     flex-direction: row;
     z-index: 20;
@@ -388,7 +394,7 @@ canvas {
 .drive-bar-bg {
     flex: 1;
     height: 6px;
-    background: rgba(255, 255, 255, 0.06);
+    background: rgba(255, 255, 255, 0.04);
     border-radius: 4px;
     overflow: hidden;
 }
@@ -434,85 +440,154 @@ canvas {
     position: fixed;
     top: 54px;
     left: 1rem;
-    width: 340px;
+    width: 380px;
     max-height: calc(100vh - 70px);
     overflow-y: auto;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 0.75rem 1rem;
+    background: rgba(10, 12, 20, 0.96);
+    border: none;
+    border-radius: 16px;
+    padding: 0;
     z-index: 30;
     font-family: system-ui, -apple-system, sans-serif;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7), 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+.help-overlay::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 16px;
+    padding: 1px;
+    background: linear-gradient(170deg, rgba(139, 92, 246, 0.4) 0%, rgba(59, 130, 246, 0.15) 40%, transparent 70%);
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
 }
 
 .help-overlay-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 0.5rem;
-    color: var(--text);
-    font-size: 0.85rem;
-    font-weight: 600;
+    padding: 1.1rem 1.25rem 0.7rem;
+    color: #fff;
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
 }
 
 .help-close-btn {
     background: none;
-    border: none;
-    color: var(--text-muted);
-    font-size: 1.1rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 0.85rem;
     cursor: pointer;
-    padding: 0 0.25rem;
+    padding: 0.2rem 0.5rem;
     line-height: 1;
+    border-radius: 8px;
+    transition: all 0.15s;
 }
 
 .help-close-btn:hover {
-    color: var(--text);
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.help-about {
+    padding: 0 1.25rem 0.6rem;
+}
+
+.help-about p {
+    font-size: 0.82rem;
+    color: rgba(255, 255, 255, 0.75);
+    line-height: 1.65;
+    margin: 0 0 0.75rem 0;
+}
+
+.help-about p strong {
+    display: block;
+    font-size: 0.95rem;
+    color: #fff;
+    font-weight: 700;
+    margin: 0.4rem 0 0.2rem;
+    background: linear-gradient(90deg, #8b5cf6, #3b82f6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.help-about em {
+    font-style: italic;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.help-about a {
+    color: #8b9cf6;
+    text-decoration: none;
+    transition: color 0.15s;
+}
+
+.help-about a:hover {
+    color: #b4bfff;
+}
+
+.help-credits {
+    font-size: 0.72rem;
+    color: rgba(255, 255, 255, 0.4);
+    margin-top: 0.5rem;
+    padding-top: 0.65rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    line-height: 1.5;
+}
+
+.help-credits a {
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.help-credits a:hover {
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.help-overlay-divider {
+    border: none;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(139, 92, 246, 0.2), rgba(59, 130, 246, 0.15), transparent);
+    margin: 0;
+}
+
+.help-overlay-section-title {
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: rgba(255, 255, 255, 0.35);
+    padding: 0.8rem 1.25rem 0.4rem;
 }
 
 .help-item {
     font-size: 0.75rem;
-    color: var(--text-muted);
-    margin-bottom: 0.4rem;
-    line-height: 1.4;
+    color: rgba(255, 255, 255, 0.55);
+    margin: 0;
+    padding: 0.4rem 1.25rem;
+    line-height: 1.5;
+    transition: all 0.12s;
+    border-left: 2px solid transparent;
+}
+
+.help-item:last-child {
+    padding-bottom: 1rem;
+}
+
+.help-item:hover {
+    background: rgba(255, 255, 255, 0.03);
+    color: rgba(255, 255, 255, 0.75);
+    border-left-color: rgba(139, 92, 246, 0.4);
 }
 
 .help-item strong {
-    color: var(--accent);
-}
-
-.help-about p {
-    font-size: 0.8rem;
-    color: var(--text);
-    line-height: 1.5;
-    margin: 0 0 0.6rem 0;
-}
-
-.help-about a {
-    color: var(--accent);
-    text-decoration: none;
-}
-
-.help-about a:hover {
-    text-decoration: underline;
-}
-
-.help-credits {
-    font-size: 0.7rem;
-    color: var(--text-muted);
-    margin-top: 0.5rem;
-}
-
-.help-overlay-divider {
-    border-top: 1px solid var(--border);
-    margin: 0.75rem 0;
-}
-
-.help-overlay-section-title {
-    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.85);
     font-weight: 600;
-    color: var(--text);
-    margin-bottom: 0.5rem;
 }
 
 /* --- Connectome Header (label + toggle) --- */
@@ -549,9 +624,9 @@ canvas {
 .zoom-btn {
     width: 36px;
     height: 36px;
-    background: var(--surface-alpha);
-    border: 1px solid var(--border);
-    color: var(--text);
+    background: rgba(11, 13, 22, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.6);
     font-size: 1.2rem;
     font-weight: 600;
     border-radius: var(--radius);
@@ -582,34 +657,35 @@ canvas {
 .neuron-tooltip {
     display: none;
     position: fixed;
-    background: var(--surface);
-    border: 1px solid var(--border);
+    background: rgba(10, 12, 20, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     color: var(--text);
     font-size: 0.7rem;
     font-family: system-ui, -apple-system, sans-serif;
     padding: 0.25rem 0.5rem;
-    border-radius: 4px;
+    border-radius: 8px;
     pointer-events: none;
     z-index: 40;
     white-space: nowrap;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
 }
 
 .connectome-toggle-btn {
-    background: var(--surface);
-    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     color: var(--text-muted);
     padding: 0 0.4rem;
-    border-radius: 4px;
+    border-radius: 6px;
     cursor: pointer;
     font-size: 0.6rem;
     font-family: system-ui, -apple-system, sans-serif;
-    transition: border-color 0.2s ease;
+    transition: all 0.15s ease;
     line-height: 1.4;
 }
 
 .connectome-toggle-btn:hover {
-    border-color: var(--accent);
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(139, 156, 246, 0.3);
     color: var(--text);
 }
 

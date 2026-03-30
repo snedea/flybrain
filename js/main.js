@@ -660,26 +660,19 @@ var connectomeToggleBtn = document.getElementById('connectomeToggleBtn');
 var nodeHolder = document.getElementById('nodeHolder');
 
 connectomeToggleBtn.addEventListener('click', function () {
-	if (BRAIN.workerReady && typeof NeuroRenderer !== 'undefined') {
-		if (NeuroRenderer.isActive()) {
-			NeuroRenderer.destroy();
-			connectomeToggleBtn.textContent = '139K View';
-		} else {
-			if (NeuroRenderer.init()) {
-				connectomeToggleBtn.textContent = 'Groups';
-			}
-		}
+	if (!BRAIN.workerReady || typeof NeuroRenderer === 'undefined') {
+		// Worker still loading -- flash the subtitle to indicate
+		var sub = document.getElementById('connectomeSubtitle');
+		if (sub) { sub.style.color = '#f87171'; setTimeout(function () { sub.style.color = ''; }, 600); }
+		return;
+	}
+	if (NeuroRenderer.isActive()) {
+		NeuroRenderer.destroy();
+		nodeHolder.classList.remove('hidden');
+		connectomeToggleBtn.textContent = '139K View';
 	} else {
-		if (typeof NeuroRenderer !== 'undefined' && NeuroRenderer.isActive()) {
-			NeuroRenderer.destroy();
-			nodeHolder.classList.remove('hidden');
-			connectomeToggleBtn.textContent = 'Hide';
-		} else if (nodeHolder.classList.contains('hidden')) {
-			nodeHolder.classList.remove('hidden');
-			connectomeToggleBtn.textContent = 'Hide';
-		} else {
-			nodeHolder.classList.add('hidden');
-			connectomeToggleBtn.textContent = 'Show';
+		if (NeuroRenderer.init()) {
+			connectomeToggleBtn.textContent = 'Groups';
 		}
 	}
 });
