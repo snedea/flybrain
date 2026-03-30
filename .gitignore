@@ -11,3 +11,7 @@ ios/FlyBrain.xcodeproj/xcuserdata/
 ios/FlyBrain.xcodeproj/project.xcworkspace/xcuserdata/
 ios/build/
 DerivedData/
+
+# Build loop artifacts
+.buildloop/logs/
+.buildloop/checkpoint.json

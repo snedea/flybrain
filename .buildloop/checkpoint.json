@@ -1,6 +1,0 @@
-{
-  "task_id": "T13.3",
-  "task_desc": "Mate interaction (spec stretch goal) and courtship behavior. The spec lists \"Offer mate\" as an interaction with olfactory neuron pathway. Implement as a new toolbar tool: (1) clicking \"Mate\" tool then clicking on canvas spawns a static mate sprite (simple smaller fly silhouette) at the click position, (2) fly detects mate via olfactory pathway (OLF_ORN_FOOD repurposed or new group), (3) if drives are favorable (low fear, moderate curiosity, low fatigue), fly approaches mate and enters new \"courtship\" behavior state with wing vibration animation (rapid small wing angle oscillation), (4) after 5-10s of courtship, mate disappears and curiosity resets. Add \"courtship\" to evaluateBehaviorEntry and the behavior state machine. Files: js/fly-logic.js (new behavior state), js/main.js (tool handler, mate rendering, courtship animation), js/connectome.js (olfactory pathway for mate detection), index.html (toolbar button).",
-  "completed_stage": "builder",
-  "timestamp": "2026-03-29T23:27:50.297472+00:00"
-}
