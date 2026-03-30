@@ -1547,6 +1547,46 @@ var test_neuro_label_skip_empty_sections = function () {
     assertEqual(widths[2].region, 3, 'third visible is region 3');
 };
 
+var test_neuro_normalizeGroupActivation_matches_groups_view = function () {
+    var nr = NeuroRenderer._test;
+    assertEqual(nr.normalizeGroupActivation(0), 0,
+        'zero activation stays dark');
+    assertClose(nr.normalizeGroupActivation(nr.GROUP_PANEL_FULL_SCALE * 0.5), 0.5, 0.01,
+        'half-scale group activation maps to 0.5 brightness');
+    assertEqual(nr.normalizeGroupActivation(nr.GROUP_PANEL_FULL_SCALE * 2), 1,
+        'group activation clamps at full brightness');
+    assertEqual(nr.normalizeGroupActivation(-10), 0,
+        'negative activation clamps to zero');
+};
+
+var test_neuro_computeBrightnessTarget_uses_group_activity = function () {
+    var nr = NeuroRenderer._test;
+    var next = nr.computeBrightnessTarget(0.1, false, 0.6);
+    assertClose(next, 0.6, 0.01,
+        'group activity raises brightness even without a raw spike');
+};
+
+var test_neuro_computeBrightnessTarget_keeps_spike_peak = function () {
+    var nr = NeuroRenderer._test;
+    var next = nr.computeBrightnessTarget(0.3, true, 0.6);
+    assertEqual(next, 1,
+        'raw spikes still drive full brightness');
+};
+
+var test_neuro_computeBrightnessTarget_decays_smoothly = function () {
+    var nr = NeuroRenderer._test;
+    var next = nr.computeBrightnessTarget(1.0, false, 0);
+    assertClose(next, nr.BRIGHTNESS_DECAY, 0.0001,
+        'inactive neurons decay by BRIGHTNESS_DECAY');
+};
+
+var test_neuro_computeBrightnessTarget_preserves_decay_tail = function () {
+    var nr = NeuroRenderer._test;
+    var next = nr.computeBrightnessTarget(1.0, false, 0.5);
+    assertClose(next, nr.BRIGHTNESS_DECAY, 0.0001,
+        'decay tail remains visible when it is brighter than the current group level');
+};
+
 var test_neuro_layout_point_size_capped_at_max = function () {
     var nr = NeuroRenderer._test;
     // Very few neurons (e.g. 2) in a section -- pointSize should not exceed MAX_SMALL_PS

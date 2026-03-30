@@ -1,8 +1,10 @@
 /* neuro-renderer.js — T7.5
  *
- * WebGL2 renderer that draws 139K neurons as GL_POINTS in the left sidebar,
- * colored by region type, brightness driven by fire state from the worker.
- * Replaces the DOM-based dot clusters with a single-draw-call WebGL canvas.
+ * WebGL2 renderer that draws 139K neurons as GL_POINTS in the left sidebar.
+ * Brightness is driven by the same postSynaptic group activity that powers the
+ * DOM "Groups" view, with raw worker fire-state spikes layered on top so the
+ * two views stay semantically aligned while the 139K view keeps per-neuron
+ * flicker detail.
  */
 (function () {
 	'use strict';
@@ -20,6 +22,7 @@
 	var PAD = 2;
 	var PICK_RADIUS_SQ = 16;
 	var BRIGHTNESS_DECAY = 0.82;   // per-frame decay for interpolation at 10Hz tick rate
+	var GROUP_PANEL_FULL_SCALE = 50; // Match main.js DOM group opacity normalization.
 	var SECTION_NAMES = ['Sensory', 'Central', 'Drives', 'Motor'];
 	var LABEL_COLORS = ['#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444'];
 	var LABEL_BGS = ['rgba(59,130,246,0.1)', 'rgba(139,92,246,0.1)', 'rgba(245,158,11,0.1)', 'rgba(239,68,68,0.1)'];
@@ -34,6 +37,7 @@
 	var brightnessBuffer = null;
 	var pointSizeBuffer = null;
 	var brightnessData = null;     // Float32Array(neuronCount)
+	var groupBrightnessData = null;
 	var neuronCount = 0;
 	var cols = 0;                  // columns per row in the grid layout
 	var animFrameId = null;
@@ -95,6 +99,7 @@
 
 		buildLayout();
 		buildLabels();
+		groupBrightnessData = new Float32Array((BRAIN.workerGroupIdToName && BRAIN.workerGroupIdToName.length) || 0);
 
 		tooltipEl = document.getElementById('neuronTooltip');
 
@@ -140,6 +145,7 @@
 		program = null;
 		neuronCount = 0;
 		brightnessData = null;
+		groupBrightnessData = null;
 		neuronPositions = null;
 		sectionBounds = [];
 		posBuffer = null;
@@ -413,25 +419,55 @@
 		buildLabels();
 	}
 
+	function clamp01(val) {
+		if (val <= 0) return 0;
+		if (val >= 1) return 1;
+		return val;
+	}
+
+	function normalizeGroupActivation(rawActivation) {
+		if (!rawActivation || rawActivation <= 0) return 0;
+		return clamp01(rawActivation / GROUP_PANEL_FULL_SCALE);
+	}
+
+	function computeBrightnessTarget(prevBrightness, fired, normalizedGroupBrightness) {
+		var target = fired ? 1.0 : clamp01(normalizedGroupBrightness || 0);
+		return Math.max(target, prevBrightness * BRIGHTNESS_DECAY);
+	}
+
 	function renderLoop() {
 		if (!active) return;
 
-		/* Interpolated brightness: fired neurons snap to 1.0, others decay
-		 * smoothly toward 0. At 10Hz ticks and ~60fps rendering, decay over
-		 * ~6 frames provides a visible but short trail between ticks. */
+		/* Interpolated brightness: raw spikes snap neurons to 1.0 while
+		 * postSynaptic group activation keeps the 139K view aligned with the
+		 * DOM Groups view. Decay smooths transitions between worker ticks. */
 		var fire = BRAIN.latestFireState;
-		if (fire && fire.length >= neuronCount) {
-			for (var i = 0; i < neuronCount; i++) {
-				if (fire[i]) {
-					brightnessData[i] = 1.0;
-				} else {
-					brightnessData[i] *= BRIGHTNESS_DECAY;
-				}
+		var hasFire = !!(fire && fire.length >= neuronCount);
+		var groupBrightness = null;
+		var groupIdArr = BRAIN.workerGroupIdArr;
+		var groupNames = BRAIN.workerGroupIdToName;
+		if (groupIdArr && groupNames && BRAIN.postSynaptic) {
+			if (!groupBrightnessData || groupBrightnessData.length !== groupNames.length) {
+				groupBrightnessData = new Float32Array(groupNames.length);
 			}
-		} else {
-			for (var i = 0; i < neuronCount; i++) {
-				brightnessData[i] *= BRIGHTNESS_DECAY;
+			groupBrightness = groupBrightnessData;
+			for (var g = 0; g < groupNames.length; g++) {
+				var gName = groupNames[g];
+				groupBrightness[g] = (!gName || !BRAIN.postSynaptic[gName]) ? 0 :
+					normalizeGroupActivation(BRAIN.postSynaptic[gName][BRAIN.thisState]);
 			}
+		}
+
+		for (var i = 0; i < neuronCount; i++) {
+			var groupActivation = 0;
+			if (groupBrightness && groupIdArr && i < groupIdArr.length) {
+				groupActivation = groupBrightness[groupIdArr[i]] || 0;
+			}
+			brightnessData[i] = computeBrightnessTarget(
+				brightnessData[i],
+				hasFire && !!fire[i],
+				groupActivation
+			);
 		}
 
 		/* Lite mode: skip GPU update when nothing is firing */
@@ -567,12 +603,16 @@
 			needsResize: needsResize,
 			cssToCanvasCoords: cssToCanvasCoords,
 			computeLabelMaxWidths: computeLabelMaxWidths,
+			normalizeGroupActivation: normalizeGroupActivation,
+			computeBrightnessTarget: computeBrightnessTarget,
 			POINT_SIZE: POINT_SIZE,
 			MIN_SECTION_W: MIN_SECTION_W,
 			MAX_SMALL_PS: MAX_SMALL_PS,
 			SECTION_GAP: SECTION_GAP,
 			PAD: PAD,
-			PICK_RADIUS_SQ: PICK_RADIUS_SQ
+			PICK_RADIUS_SQ: PICK_RADIUS_SQ,
+			BRIGHTNESS_DECAY: BRIGHTNESS_DECAY,
+			GROUP_PANEL_FULL_SCALE: GROUP_PANEL_FULL_SCALE
 		};
 	}
 })();
