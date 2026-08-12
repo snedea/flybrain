@@ -112,6 +112,7 @@
             <button class="sidebar-tab" data-tab="chat">Chat</button>
             <button class="sidebar-tab" data-tab="analytics">Analytics</button>
             <button class="sidebar-tab" data-tab="calendar">Calendar</button>
+            <button class="sidebar-tab" data-tab="workday">Workday</button>
         </div>
         <div class="sidebar-tab-content active" data-tab-content="activity">
             <div class="activity-feed" id="activity-feed-list"></div>
@@ -133,6 +134,17 @@
         <div class="sidebar-tab-content" data-tab-content="calendar">
             <div class="calendar-section" id="calendar-section">
                 <div class="calendar-content" id="calendar-content"></div>
+            </div>
+        </div>
+        <div class="sidebar-tab-content" data-tab-content="workday">
+            <div class="workday-section" id="workday-section">
+                <div class="workday-header">
+                    <span class="workday-blurb">The fly takes care of itself. When a drive crosses a threshold, it files the paperwork.</span>
+                    <span class="workday-pill workday-pill-mock" id="workday-mode">MOCK MODE</span>
+                </div>
+                <div class="workday-feed" id="workday-feed">
+                    <div class="workday-empty">Waiting for the fly to need something...</div>
+                </div>
             </div>
         </div>
     </div>
@@ -166,7 +178,8 @@
     <script type="text/javascript" src="./js/caretaker-sidebar.js?v=24"></script>
     <script type="text/javascript" src="./js/caretaker-analytics.js?v=24"></script>
     <script type="text/javascript" src="./js/caretaker-calendar.js?v=24"></script>
-    <script type="text/javascript" src="./js/caretaker-bridge.js?v=24"></script>
+    <script type="text/javascript" src="./js/workday-panel.js?v=1"></script>
+    <script type="text/javascript" src="./js/caretaker-bridge.js?v=25"></script>
 </body>
 
 </html>

@@ -56,6 +56,20 @@ function createSchema(db) {
     '  avg_response_time REAL,' +
     '  updated_at TEXT NOT NULL' +
     ');' +
+    'CREATE TABLE IF NOT EXISTS workday_actions (' +
+    '  id INTEGER PRIMARY KEY AUTOINCREMENT,' +
+    '  timestamp TEXT NOT NULL,' +
+    '  intent TEXT NOT NULL,' +
+    '  tool TEXT NOT NULL,' +
+    '  args TEXT NOT NULL DEFAULT \'{}\',' +
+    '  reasoning TEXT NOT NULL DEFAULT \'\',' +
+    '  summary TEXT NOT NULL DEFAULT \'\',' +
+    '  status TEXT NOT NULL DEFAULT \'submitted\',' +
+    '  request_id TEXT,' +
+    '  mode TEXT NOT NULL DEFAULT \'mock\',' +
+    '  state_snapshot TEXT' +
+    ');' +
+    'CREATE INDEX IF NOT EXISTS idx_workday_actions_timestamp ON workday_actions(timestamp);' +
     'CREATE INDEX IF NOT EXISTS idx_observations_timestamp ON observations(timestamp);' +
     'CREATE INDEX IF NOT EXISTS idx_actions_timestamp ON actions(timestamp);' +
     'CREATE INDEX IF NOT EXISTS idx_incidents_timestamp ON incidents(timestamp);' +
@@ -99,6 +113,10 @@ function openDb(dbPath) {
 
   var stmtGetLastIncidentByType = db.prepare(
     'SELECT timestamp FROM incidents WHERE type = ? ORDER BY id DESC LIMIT 1'
+  );
+
+  var stmtInsertWorkdayAction = db.prepare(
+    'INSERT INTO workday_actions (timestamp, intent, tool, args, reasoning, summary, status, request_id, mode, state_snapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
   );
 
   return {
@@ -160,6 +178,29 @@ function openDb(dbPath) {
     getLastIncidentTime: function(type) {
       var row = stmtGetLastIncidentByType.get(type);
       return row ? row.timestamp : null;
+    },
+
+    insertWorkdayAction: function(entry) {
+      stmtInsertWorkdayAction.run(
+        entry.timestamp,
+        entry.intent,
+        entry.tool,
+        JSON.stringify(entry.args || {}),
+        entry.reasoning || '',
+        entry.summary || '',
+        entry.status || 'submitted',
+        entry.requestId != null ? String(entry.requestId) : null,
+        entry.mode || 'mock',
+        entry.snapshot ? JSON.stringify(entry.snapshot) : null
+      );
+    },
+
+    getRecentWorkdayActions: function(limit) {
+      if (limit === undefined) limit = 50;
+      var rows = db.prepare(
+        'SELECT id, timestamp, intent, tool, args, reasoning, summary, status, request_id, mode FROM workday_actions ORDER BY id DESC LIMIT ?'
+      ).all(limit);
+      return rows;
     },
 
     getRecentActivity: function(limit) {

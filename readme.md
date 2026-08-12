@@ -16,6 +16,19 @@ Open `index.html` in a browser (or visit the hosted version). The fly loads the 
 
 The bottom panel shows all 139K neurons firing in real time (WebGL), grouped by region: Sensory, Central, Drives, Motor.
 
+## Fly @ Work (Workday integration)
+
+The fly has a job. When the caretaker server is running, the fly's internal
+drives are translated into real Workday actions via native Workday MCP tools:
+hungry with no food means a meal voucher request, exhausted means a PTO
+request for tomorrow, high curiosity becomes a career goal, courtship sends
+kudos to a coworker, and a fear spike files a workplace safety concern.
+
+Watch it happen in the sidebar's **Workday** tab. Runs in mock mode by
+default (no credentials, no network); live mode targets a real tenant through
+the Workday Agent Gateway. Setup, intent thresholds, and API details:
+[docs/WORKDAY.md](docs/WORKDAY.md).
+
 ## Data Source
 
 Connectome data from the FlyWire Whole-Brain Connectome:

@@ -6,7 +6,9 @@
   "scripts": {
     "caretaker": "node server/caretaker.js",
     "query-log": "bash tools/query-log.sh",
-    "migrate-logs": "node server/migrate-logs.js"
+    "migrate-logs": "node server/migrate-logs.js",
+    "test-workday": "node tests/workday-node.js",
+    "smoke-workday": "node tests/workday-smoke.js"
   },
   "dependencies": {
     "better-sqlite3": "^12.8.0",

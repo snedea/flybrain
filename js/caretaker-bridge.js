@@ -128,6 +128,13 @@
           CaretakerSidebar.onHistory(msg);
         }
       }
+      if (typeof WorkdayPanel !== 'undefined') {
+        if (msg.type === 'workday_action') {
+          WorkdayPanel.onAction(msg);
+        } else if (msg.type === 'workday_history') {
+          WorkdayPanel.onHistory(msg);
+        }
+      }
     };
     ws.onclose = function() {
       connected = false;

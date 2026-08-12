@@ -5,12 +5,14 @@ var path = require('path');
 var readline = require('readline');
 var { execSync } = require('child_process');
 var dbModule = require('./db');
+var workdayClientModule = require('./workday-client');
+var workdayAgentModule = require('./workday-agent');
 var chatPolicyPath = path.join(__dirname, '..', 'agent', 'chat-policy.md');
 var chatPolicyContent = fs.readFileSync(chatPolicyPath, 'utf-8');
 // Chat uses claude CLI (OAuth) instead of API key
 
 var PORT = parseInt(process.env.CARETAKER_PORT, 10) || 7600;
-var caretakerDb = dbModule.openDb();
+var caretakerDb = dbModule.openDb(process.env.CARETAKER_DB || undefined);
 var lastObservationTime = 0;
 var OBSERVATION_INTERVAL_MS = 10000;
 var lastState = null;
@@ -19,6 +21,22 @@ var lastActionType = null;
 var preFearLevel = 0;
 var browserSocket = null;
 var VALID_ACTIONS = ['place_food', 'set_light', 'set_temp', 'touch', 'blow_wind', 'clear_food'];
+
+var workdayClient = workdayClientModule.createClient({
+  mode: process.env.WORKDAY_MODE,
+  url: process.env.WORKDAY_MCP_URL,
+  token: process.env.WORKDAY_TOKEN
+});
+var workdayAgent = workdayAgentModule.createAgent({
+  client: workdayClient,
+  db: caretakerDb,
+  broadcast: function(obj) { broadcastActivity(obj); },
+  writeStdout: function(obj) { writeStdout(obj); },
+  config: {
+    workerId: process.env.WORKDAY_WORKER_ID,
+    coworkerId: process.env.WORKDAY_COWORKER_ID
+  }
+});
 
 function writeStdout(obj) {
   process.stdout.write(JSON.stringify(obj) + '\n');
@@ -81,6 +99,7 @@ function handleStateMessage(data) {
   }
   writeStdout({ type: 'state', timestamp: new Date().toISOString(), data: msg.data });
   detectIncidents(msg.data);
+  workdayAgent.onState(msg.data);
 }
 
 function handleStdinCommand(line) {
@@ -294,6 +313,30 @@ var server = http.createServer(function(req, res) {
     }
     return;
   }
+  if (req.method === 'GET' && req.url === '/workday/actions') {
+    try {
+      var wdActions = caretakerDb.getRecentWorkdayActions(50);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(wdActions));
+    } catch (err) {
+      process.stderr.write('[caretaker] workday/actions error: ' + err.message + '\n');
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Internal error' }));
+    }
+    return;
+  }
+  if (req.method === 'GET' && req.url === '/workday/status') {
+    try {
+      var wdStatus = workdayAgent.getStatus();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(wdStatus));
+    } catch (err) {
+      process.stderr.write('[caretaker] workday/status error: ' + err.message + '\n');
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Internal error' }));
+    }
+    return;
+  }
   if (req.method === 'GET' && req.url === '/activity/recent') {
     try {
       var recent = caretakerDb.getRecentActivity(50);
@@ -316,6 +359,12 @@ wss.on('connection', function(ws) {
   process.stderr.write('[caretaker] Browser connected\n');
   var history = caretakerDb.getRecentActivity(50);
   broadcastActivity({ type: 'activity_history', entries: history });
+  try {
+    var wdHistory = caretakerDb.getRecentWorkdayActions(50);
+    broadcastActivity({ type: 'workday_history', mode: workdayClient.getMode(), entries: wdHistory });
+  } catch (e) {
+    process.stderr.write('[caretaker] workday history error: ' + e.message + '\n');
+  }
   ws.on('message', function(data) { handleStateMessage(data.toString()); });
   ws.on('close', function() {
     browserSocket = null;
