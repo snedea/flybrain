@@ -9,12 +9,12 @@
   var CHAT_API_URL = 'http://' + (location.hostname || 'localhost') + ':7600';
 
   var iconMap = {
-    place_food: 'F',
-    clear_food: 'X',
-    set_light: 'L',
-    set_temp: 'T',
-    touch: 'H',
-    blow_wind: 'W'
+    place_food: 'FOOD',
+    clear_food: 'CLEAR',
+    set_light: 'LIGHT',
+    set_temp: 'TEMP',
+    touch: 'TOUCH',
+    blow_wind: 'WIND'
   };
 
   function init() {

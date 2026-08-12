@@ -621,28 +621,8 @@ if (activityCloseBtn) {
 	});
 }
 
-// --- AI badge toggles caretaker sidebar (desktop has no hamburger) ---
-var claudeStatusBadge = document.getElementById('claudeStatus');
-if (claudeStatusBadge) {
-	claudeStatusBadge.addEventListener('click', function(e) {
-		e.stopPropagation();
-		if (typeof CaretakerSidebar !== 'undefined') {
-			CaretakerSidebar.toggle();
-		}
-	});
-}
-
-// --- Workday logo opens the sidebar directly on the Workday tab ---
-var workdayButton = document.getElementById('workdayButton');
-if (workdayButton) {
-	workdayButton.addEventListener('click', function(e) {
-		e.stopPropagation();
-		if (typeof CaretakerSidebar === 'undefined') return;
-		if (!CaretakerSidebar.isOpen()) CaretakerSidebar.toggle();
-		var workdayTab = document.querySelector('.sidebar-tab[data-tab="workday"]');
-		if (workdayTab) workdayTab.click();
-	});
-}
+// The caretaker sidebar is a permanent panel on desktop (CSS keeps it
+// visible; toggle only affects the mobile bottom sheet via the hamburger).
 
 if (drawerBackdrop) {
 	drawerBackdrop.addEventListener('click', function () {

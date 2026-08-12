@@ -246,9 +246,8 @@ canvas {
 }
 
 .workday-logo {
-    opacity: 1;
     border-radius: 6px;
-    margin-right: 0.25rem;
+    flex-shrink: 0;
 }
 
 .tool-btn {
@@ -303,7 +302,6 @@ canvas {
     border-radius: var(--radius);
     border: 1px solid rgba(139, 92, 246, 0.4);
     background: rgba(139, 92, 246, 0.08);
-    cursor: pointer;
     font-family: system-ui, -apple-system, sans-serif;
     cursor: default;
 }
@@ -1081,13 +1079,19 @@ canvas {
     display: flex;
     flex-direction: column;
     box-shadow: 2px 0 10px rgba(0,0,0,0.3);
-    transform: translateX(-100%);
+    /* Desktop: permanent panel, never hidden. Mobile overrides below. */
+    transform: none;
     transition: transform 0.3s ease;
 }
 
 .caretaker-sidebar.sheet-peek,
 .caretaker-sidebar.sheet-full {
-    transform: translateX(0);
+    transform: none;
+}
+
+/* Desktop: no closing the panel */
+.caretaker-sidebar-close {
+    display: none;
 }
 
 .caretaker-sidebar-handle {
@@ -1143,9 +1147,11 @@ canvas {
     border: none;
     border-bottom: 2px solid transparent;
     color: var(--text-muted);
-    font-size: 0.85rem;
+    font-size: 0.76rem;
     font-family: system-ui, -apple-system, sans-serif;
-    padding: 0.75rem 0.5rem;
+    white-space: nowrap;
+    min-width: 0;
+    padding: 0.75rem 0.15rem;
     cursor: pointer;
     transition: color 0.15s, border-color 0.15s;
     text-align: center;
@@ -1350,8 +1356,9 @@ canvas {
 
 .activity-icon {
     font-weight: 700;
-    font-size: 0.7rem;
-    width: 1rem;
+    font-size: 0.6rem;
+    letter-spacing: 0.04em;
+    min-width: 1rem;
     text-align: center;
     flex-shrink: 0;
 }
@@ -2017,12 +2024,21 @@ canvas {
         padding-bottom: env(safe-area-inset-bottom, 0px);
     }
 
+    .caretaker-sidebar {
+        transform: translateY(100%);
+    }
+
     .caretaker-sidebar.sheet-peek {
         transform: translateY(50%);
     }
 
     .caretaker-sidebar.sheet-full {
         transform: translateY(0);
+    }
+
+    /* Mobile keeps the close control for the bottom sheet */
+    .caretaker-sidebar-close {
+        display: inline-block;
     }
 
     .caretaker-sidebar-handle {

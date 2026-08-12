@@ -144,7 +144,7 @@ function buildChatContext(userMessage) {
   } else {
     for (var i = 0; i < observations.length; i++) {
       var obs = observations[i];
-      context += '- ' + obs.timestamp + ' | behavior=' + obs.behavior + ' hunger=' + (obs.hunger != null ? obs.hunger.toFixed(2) : '?') + ' fear=' + (obs.fear != null ? obs.fear.toFixed(2) : '?') + ' fatigue=' + (obs.fatigue != null ? obs.fatigue.toFixed(2) : '?') + ' curiosity=' + (obs.curiosity != null ? obs.curiosity.toFixed(2) : '?') + ' food_count=' + obs.food_count + '\n';
+      context += '- ' + obs.timestamp + ' | behavior=' + obs.behavior + ' hunger=' + (obs.hunger != null ? obs.hunger.toFixed(2) : '?') + ' fear=' + (obs.fear != null ? obs.fear.toFixed(2) : '?') + ' fatigue=' + (obs.fatigue != null ? obs.fatigue.toFixed(2) : '?') + ' curiosity=' + (obs.curiosity != null ? obs.curiosity.toFixed(2) : '?') + ' food_count=' + obs.food_count + ' pos=(' + (obs.pos_x != null ? Math.round(obs.pos_x) : '?') + ',' + (obs.pos_y != null ? Math.round(obs.pos_y) : '?') + ')\n';
     }
   }
   context += '\n## Recent Actions (last ' + actions.length + ')\n\n';
