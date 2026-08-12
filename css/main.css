@@ -1070,7 +1070,8 @@ canvas {
     position: fixed;
     top: 42px;
     left: 0;
-    bottom: 0;
+    /* Stop above the 180px connectome strip so the neuron view stays fully visible */
+    bottom: 180px;
     width: 380px;
     background: var(--surface);
     border-right: 1px solid var(--border);
