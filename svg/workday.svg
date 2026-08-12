@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#15376e"/>
+  <path d="M 148 196 A 118 118 0 0 1 364 196" fill="none" stroke="#f4511e" stroke-width="52" stroke-linecap="round"/>
+  <text x="256" y="418" text-anchor="middle" font-family="system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="240" font-weight="800" fill="#ffffff">W</text>
+</svg>

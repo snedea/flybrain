@@ -245,6 +245,12 @@ canvas {
     opacity: 1;
 }
 
+.workday-logo {
+    opacity: 1;
+    border-radius: 6px;
+    margin-right: 0.25rem;
+}
+
 .tool-btn {
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -297,6 +303,7 @@ canvas {
     border-radius: var(--radius);
     border: 1px solid rgba(139, 92, 246, 0.4);
     background: rgba(139, 92, 246, 0.08);
+    cursor: pointer;
     font-family: system-ui, -apple-system, sans-serif;
     cursor: default;
 }
@@ -1064,17 +1071,17 @@ canvas {
 .caretaker-sidebar {
     position: fixed;
     top: 42px;
-    right: 0;
+    left: 0;
     bottom: 0;
-    width: 360px;
+    width: 380px;
     background: var(--surface);
-    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
     z-index: 30;
     font-family: system-ui, -apple-system, sans-serif;
     display: flex;
     flex-direction: column;
-    box-shadow: -2px 0 10px rgba(0,0,0,0.3);
-    transform: translateX(100%);
+    box-shadow: 2px 0 10px rgba(0,0,0,0.3);
+    transform: translateX(-100%);
     transition: transform 0.3s ease;
 }
 
@@ -1089,7 +1096,7 @@ canvas {
 
 @media (min-width: 1200px) {
     .caretaker-sidebar {
-        width: 260px;
+        width: 380px;
     }
 }
 
@@ -1845,6 +1852,7 @@ canvas {
 .workday-entry-summary {
     font-size: 0.78rem;
     font-weight: 600;
+    color: var(--text);
 }
 
 .workday-entry-reasoning {
@@ -2080,16 +2088,16 @@ canvas {
 
     .caretaker-sidebar {
         top: calc(32px + env(safe-area-inset-top, 0px));
-        right: 0;
+        left: 0;
         bottom: 0;
-        left: auto;
+        right: auto;
         width: 260px;
         height: auto;
         border-radius: 0;
         border-top: none;
-        border-left: 1px solid var(--border);
-        box-shadow: -2px 0 10px rgba(0,0,0,0.3);
-        transform: translateX(100%);
+        border-right: 1px solid var(--border);
+        box-shadow: 2px 0 10px rgba(0,0,0,0.3);
+        transform: translateX(-100%);
         transition: transform 0.3s ease;
     }
 
