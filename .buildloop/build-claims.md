@@ -1,41 +1,37 @@
 AUDIT_PAYLOAD::v1
 AGENT: claude-fable-5/flybrain
 TARGET: /Users/Shared/homelab/flybrain
-SCOPE: uncommitted diff on top of 38ac3bd only (prior increments audited PASS)
+SCOPE: uncommitted diff on top of ae52307 only (batched: UI modal pass + spin fixes)
 
 == DELTA_MANIFEST ==
-FILES_MODIFIED: 9
-  server/workday-agent.js | intents reworded to agent-voice (agent observes behavior, interprets, files on the fly's behalf); kudos trigger CHANGED courtship -> behavior 'feed' && hunger < 0.5, texts PC-scrubbed (no mate/courtship words in Workday surfaces); buildFulfillment RENAMED buildResolution(intentId, requestId, state, approved) with denied variants for all 5 intents (denials NEVER carry a command); fulfill(): approved = Math.random() >= denyChance (config.denyChance clamped 0..1 default 0.15), entry status 'fulfilled'|'denied', tool 'claude_resolution', detail approved/denied by Claude; exports buildResolution (buildFulfillment export REMOVED)
-  server/caretaker.js | config.denyChance from WORKDAY_DENY_CHANCE env
-  server/db.js | getRecentWorkdayActions SELECT now includes state_snapshot
-  js/workday-panel.js | per-entry actor label (submitted -> FLY'S AGENT, else CLAUDE, ADMINISTRATOR); submitted entries render 'Observed: hunger X, fatigue Y... | behavior: Z' line from entry.snapshot (live) or JSON-parsed entry.state_snapshot (history); DENIED pill (workday-pill-fail) + workday-entry-denied red border; FAILED path unchanged
-  js/main.js | OBSERVER_MODE=true: handleCanvasMousedown returns immediately (no user world edits; zoom/pinch/wheel unaffected since separate handlers); brainGuideBtn wiring inside help overlay (closes overlay, sets splash flag, clicks hidden learnBtn)
-  index.html | Mate tool button REMOVED from DOM entirely (PC requirement: word must not appear); learnBtn hidden inline, relabeled Brain Guide; helpBtn relabeled 'Learn'; help overlay rewritten: original science section + 'And now it has a job' (agent/administrator/Workday story) + 'What you're watching' + Open the Brain Guide button; blurb: 'The fly cannot use Workday. Its agent...'; versions css v35, main.js v31 (panel v3 from prior)
-  css/main.css | observer mode: #toolbar .tool-btn[data-tool] and #clearButton display none !important; .workday-entry-actor, .workday-entry-observed, .workday-entry-denied styles
-  tests/workday-node.js | kudos tests updated (feed+low hunger fires; feed+high hunger does not); buildResolution tests (approved/denied variants, denied has null command) -- 25 total
-  tests/workday-smoke.js | WORKDAY_DENY_CHANCE=0 for determinism
-  docs/WORKDAY.md + readme.md | agent framing intro, denial mechanics, WORKDAY_DENY_CHANCE env row, kudos row 'Content after a meal', tool claude_resolution, readme Usage section rewritten for observer mode
+FILES_MODIFIED: 3
+  index.html | Brain 3D button REMOVED; Calendar tab button + content div + caretaker-calendar.js script include REMOVED (tabs now Inbox/Chat/Analytics); help overlay restructured: #helpOverlay is now a full-screen backdrop containing new .help-modal wrapper (header title 'A fly that works here', NEW .help-chain strip with 3 nodes THE FLY/ITS AGENT/CLAUDE + arrows, existing sections, brainGuideBtn gains .help-modal-cta); versions css v36, main.js v33
+  css/main.css | .help-overlay rewritten as backdrop (inset 0, flex center, blur, z-index 90 -- above sidebar 30 and education 40); NEW .help-modal (min(620px,100%), max-height 84vh, scroll, entrance animation help-modal-in 0.18s, disabled under prefers-reduced-motion); gradient hairline moved .help-overlay::before -> .help-modal::before; NEW .help-chain* styles (eyebrow caps, accent); .help-modal-cta; mobile media rule that pinned overlay top replaced with padding-only rule
+  js/main.js | display 'block' -> 'flex' for overlay show paths; NEW closeHelpOverlay() sets splash flag; backdrop click (e.target === helpOverlay) closes; Escape keydown closes when visible; helpCloseBtn/brainGuideBtn use closeHelpOverlay; SPIN FIXES: (1) walk/explore targetSpeed floor 0.25 (fly-logic walk entry threshold ~5 vs speed totalWalk/100 scale mismatch), (2) phototaxis dead-zone: dist<40 to canvas center -> targetDir=facingDir, targetSpeed=0 (atan2 flip oscillation), (3) boundary steering gated on speed > 0.05 (was rotating stationary flies), (4) headBiasSign persists across ticks, flips only when |accumWalkLeft-accumWalkRight| > 1 (jitter is +-0.04)
 
 == SPEC ==
-STORY: fly communicates only via behavior -> agent observes state stream, interprets, files Workday request (card labeled FLY'S AGENT with Observed line) -> Claude administrator resolves after WORKDAY_FULFILL_MS: approve (85% default, world delivery where applicable) or deny (15%, reason, no world effect)
-OBSERVER_MODE: users cannot alter the world (tools hidden, canvas mousedown inert); Learn popup auto-shows on first visit (flybrain_seen_splash, pre-existing), explains connectome + Workday/agent story; Brain Guide reachable only from inside popup
-PC_CONSTRAINT: the words mate/courtship must not appear anywhere in index.html, docs/WORKDAY.md, readme.md, server/workday-agent.js, js/workday-panel.js (sim-internal js/fly-logic.js, js/main.js, SPEC.md are out of scope)
+MODAL: Learn button (helpBtn) opens centered modal over blurred backdrop; closes via X, backdrop click, Escape; auto-shows first visit (flybrain_seen_splash unchanged); Brain Guide opens from CTA inside modal (hidden learnBtn.click())
+SPIN: heading update at main.js applyframe (facingDir += angleDiff * ...) is unconditional; fixes ensure targetDir cannot keep moving while speed ~0: floor in walk/explore, dead-zone stop in phototaxis, steer gate at boundary, stable head bias sign
+REMOVED: Brain 3D toolbar button (Brain3D module untouched, unreachable from toolbar), Calendar tab/panel/script (caretaker-calendar.js file remains on disk, unloaded; CaretakerSidebar 'calendar' activation branch remains but unreachable -- typeof-guarded)
 
 == BUG_FIXES ==
-(none claimed)
+FIX:spin_walk_floor | js/main.js computeMovementForBehavior walk/explore | targetSpeed floor 0.25 | was: totalWalk/100 ~0.05 at entry threshold, visually stationary while explore jitter turned heading
+FIX:spin_phototaxis_deadzone | js/main.js phototaxis branch | dist<40 -> stop and hold heading | was: atan2 to hardcoded canvas center flips 180deg on overshoot, endless oscillation
+FIX:spin_boundary_gate | js/main.js edge steering | requires speed > 0.05 | was: rotated stationary flies toward center every frame
+FIX:head_bias_jitter | js/main.js head bias | sign persists, flips on real asymmetry > 1 | was: sign keyed to +-0.04 jitter, random per-tick heading flips
 
 == KNOWN_GAPS ==
-GAP:agent_loop_still_acts | agent/run.sh Claude caretaker still places food independently of the meal-voucher flow, so the fly sometimes gets fed without a voucher; acceptable (Claude the caretaker's job) but the Inbox no longer shows those placements
-GAP:kudos_depends_on_low_hunger_feed | kudos fires only if fly still in 'feed' behavior after hunger drops below 0.5; frequency in practice unverified
-GAP:hidden_tools_dom | tool buttons remain in DOM hidden (caretaker-bridge updates lightBtn/tempBtn text); keyboard shortcuts, if any exist for tools, may still work -- check and neutralize if found (MEDIUM if user can still alter world via keyboard)
-GAP:education_panel_reachability | Brain Guide only reachable via Learn popup button
+GAP:motor_scale_uncalibrated | MOTOR_SCALE 0.6 remains the pre-calibration guess; D23 calibration tasks in TASKS.md still unfinished; the speed floor masks the symptom at walk entry | acceptable: deliberate choice, floor vs recalibration double-correction avoided
+GAP:spin_fix_visual | fixes verified by static reasoning + suite, not by long-run visual observation; residual slow rotation may persist in rest/groom (no targetDir change there, so expected none)
+GAP:calendar_code_orphaned | caretaker-calendar.js + calendar CSS + db daily_scores/calendar endpoints remain server-side and on disk, now unused by UI | LOW, harmless
+GAP:modal_visual | modal layout verified by markup/CSS reasoning, not screenshot
 
 == VERIFICATION_MATRIX ==
-CHECK:syntax | node --check js/main.js server/workday-agent.js server/caretaker.js server/db.js js/workday-panel.js | pass | PASS
-CHECK:unit | node tests/workday-node.js | 25 passed, 0 failed | PASS
+CHECK:syntax | node --check js/main.js | pass | PASS
 CHECK:existing_suite | node tests/run-node.js | 104 passed / 0 failed | PASS
-CHECK:e2e | node tests/workday-smoke.js | SMOKE PASS | PASS
-CHECK:pc_scrub | grep -rin 'courtship\|\bmate\b\|\bmating\b' index.html docs/WORKDAY.md readme.md server/workday-agent.js js/workday-panel.js | zero hits | UNTESTED
-CHECK:observer_inert | with OBSERVER_MODE true, handleCanvasMousedown has early return before any world mutation; no other user-reachable world-mutation path in index.html toolbar (visible buttons: hamburger, Brain 3D, Learn, Lite, center, github) | UNTESTED
-CHECK:denied_no_food | buildResolution meal_voucher denied returns command null (unit-covered); fulfill with denyChance=1 produces status denied and no sendCommand call | UNTESTED
-CHECK:snapshot_in_history | GET /workday/actions rows include state_snapshot | UNTESTED
+CHECK:no_calendar_refs | grep -n "caretaker-calendar\|data-tab=\"calendar\"\|calendar-content" index.html returns nothing | UNTESTED
+CHECK:no_brain3d_button | grep -c 'id="brain3dBtn"' index.html returns 0; grep 'if (brain3dBtn)' js/main.js confirms guard so missing element is safe | UNTESTED
+CHECK:modal_z | .help-overlay z-index 90 > .caretaker-sidebar 30 and education-panel 40 | UNTESTED
+CHECK:overlay_show_flex | no remaining helpOverlay.style.display = 'block' in js/main.js | UNTESTED
+CHECK:spin_conditions | in computeMovementForBehavior: walk/explore targetSpeed floor present BEFORE speedChangeInterval calc; phototaxis dead-zone sets targetSpeed 0 and speedChangeInterval uses it; boundary steer wrapped in speed guard; headBiasSign module-level not per-call | UNTESTED
+CHECK:escape_close | keydown handler closes only when overlay visible; backdrop click closes only on e.target === helpOverlay (not clicks inside modal) | UNTESTED

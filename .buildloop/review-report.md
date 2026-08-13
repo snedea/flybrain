@@ -1,84 +1,94 @@
-# Doubt Review -- observer-mode + Claude-resolution increment
+# Doubt Review -- UI modal pass + spin fixes
 
-SCOPE: uncommitted diff on top of HEAD 38ac3bd (confirmed via git rev-parse).
-AUDITOR: fresh-context sub-agent. Verdict basis: commands re-run, not trusted.
+Scope: uncommitted diff on top of HEAD ae52307. Auditor: fresh-context sub-agent.
 
-## Verdict: NO HIGH/MEDIUM FINDINGS (one LOW noted)
+## Verdict: NO HIGH/MEDIUM FINDINGS (one LOW noted, not fixed)
 
 ## DELTA_MANIFEST verification
 
-- server/workday-agent.js -- PASS. buildResolution(intentId, requestId, state, approved)
-  present (line 127); all 5 intents have approved+denied branches; denied branches
-  return command null (lines 133/155/170/184/198). fulfill() computes
-  approved = Math.random() >= denyChance with denyChance clamped 0..1 default 0.15
-  (lines 242-243, 250); entry.status 'fulfilled'|'denied', tool 'claude_resolution',
-  detail approved/denied by Claude (lines 259-265). kudos condition changed to
-  feed && hunger < 0.5 (line 84). Exports: createAgent, evaluateIntents,
-  buildResolution, INTENTS -- buildFulfillment export REMOVED and zero dangling
-  references repo-wide (grep exit 1). PASS.
-- server/caretaker.js -- PASS. denyChance wired from WORKDAY_DENY_CHANCE via parseFloat,
-  undefined when unset (line 42).
-- server/db.js -- PASS. getRecentWorkdayActions SELECT includes state_snapshot (line 201);
-  insertWorkdayAction persists entry.snapshot as JSON into state_snapshot (line 194);
-  schema column exists (line 70).
-- js/workday-panel.js -- PASS. Per-entry actor label FLY'S AGENT (submitted) vs
-  CLAUDE, ADMINISTRATOR; getSnapshot reads entry.snapshot (live) or JSON.parses
-  entry.state_snapshot (history); Observed line rendered for submitted entries;
-  DENIED pill (workday-pill-fail) + workday-entry-denied border.
-- js/main.js -- PASS. OBSERVER_MODE=true (line 175); handleCanvasMousedown early-returns
-  before any mutation (line 921); zoom/pinch/wheel handlers separate and untouched;
-  brainGuideBtn closes overlay, sets splash flag, clicks hidden learnBtn (lines 550-557).
-- index.html -- PASS. Mate button removed from DOM; learnBtn inline display:none and
-  relabeled Brain Guide; helpBtn relabeled Learn; help overlay rewritten with agent/
-  administrator story + Open the Brain Guide button; blurb reworded; css v35, main.js v31,
-  workday-panel v3.
-- css/main.css -- PASS. #toolbar .tool-btn[data-tool] and #clearButton set
-  display:none !important; .workday-entry-actor/-observed/-denied styles present.
-- tests/workday-node.js -- PASS. 25 tests, 0 failed (re-run).
-- tests/workday-smoke.js -- PASS. WORKDAY_DENY_CHANCE=0 present; SMOKE PASS (re-run).
-- docs/WORKDAY.md + readme.md -- PASS (content updated per manifest; PC scrub clean).
+index.html | PASS. Brain 3D button removed (grep -c id="brain3dBtn" -> 0).
+Calendar tab button, calendar content div, and caretaker-calendar.js script
+include all removed (grep for caretaker-calendar / data-tab="calendar" /
+calendar-content -> no matches). Tabs now Inbox/Chat/Analytics.
+#helpOverlay restructured into full-screen backdrop wrapping new .help-modal;
+header title "A fly that works here"; new .help-chain strip with 3 nodes
+(THE FLY / ITS AGENT / CLAUDE) and -> arrows; brainGuideBtn has help-modal-cta.
+Versions bumped css v36, main.js v33. All confirmed in diff.
 
-## VERIFICATION_MATRIX (all re-run by auditor)
+css/main.css | PASS. .help-overlay rewritten as backdrop (inset 0, flex center,
+blur, z-index 90). New .help-modal (min(620px,100%), max-height min(84vh,46rem),
+scroll, help-modal-in 0.18s entrance, disabled under prefers-reduced-motion).
+Gradient hairline moved .help-overlay::before -> .help-modal::before (no orphan
+::before on .help-overlay; grep confirms only .help-modal::before at line 482).
+New .help-chain* styles and .help-modal-cta present. Mobile rule now padding-only.
 
-- CHECK:syntax -- PASS. node --check on all 5 files: ALL SYNTAX OK.
-- CHECK:unit -- PASS. node tests/workday-node.js -> 25 passed, 0 failed.
-- CHECK:existing_suite -- PASS. node tests/run-node.js -> 104 passed / 0 failed.
-- CHECK:e2e -- PASS. node tests/workday-smoke.js -> SMOKE PASS.
-- CHECK:pc_scrub -- PASS. grep -rin 'courtship|\bmate\b|\bmating\b|\bmates\b|\bmated\b'
-  over index.html docs/WORKDAY.md readme.md server/workday-agent.js js/workday-panel.js
-  -> zero hits (exit 1). Broader 'mate|courtship' substring scan also zero.
-  Positive control (grep 'fly') returns 5 files with hits, confirming grep reads content.
-- CHECK:observer_inert -- PASS. All world-mutating controls hidden: feed/touch/air/
-  light/temp/danger/water carry data-tool (hidden by CSS); clearButton hidden by
-  #clearButton rule (its onclick clears food/water/mates). Visible toolbar elements are
-  camera/panel only (hamburger, Brain 3D, Learn, Lite, center, github). Canvas mousedown
-  early-returns under OBSERVER_MODE.
-- CHECK:denied_no_food -- PASS. Harness with denyChance=1 driving a meal_voucher:
-  resolution status 'denied', args {}, sendCommand calls 0.
-- CHECK:snapshot_in_history -- PASS. Temp-db harness: insertWorkdayAction persists
-  snapshot, getRecentWorkdayActions returns state_snapshot which JSON-parses back to
-  {drives:{hunger:0.91,...},behavior:"walk"}.
+js/main.js | PASS. display 'block' -> 'flex' on both show paths (first-visit and
+helpBtn toggle); no remaining `helpOverlay.style.display = 'block'` (grep empty).
+New closeHelpOverlay() sets flybrain_seen_splash. Backdrop click closes only on
+e.target === helpOverlay (main.js:552). Escape closes only when visible
+(main.js:556). helpCloseBtn and brainGuideBtn route through closeHelpOverlay.
+Spin fixes all present: walk/explore floor 0.25 (1182), phototaxis dead-zone
+dist<40 -> targetDir=facingDir/targetSpeed=0 (1210-1214), boundary steer gated on
+speed > 0.05 (2170), headBiasSign module-level (1164) flipping only on
+|walkAsym| > 1 (1203).
 
-## KNOWN_GAPS validation
+## VERIFICATION_MATRIX re-run (all PASS)
 
-- GAP:agent_loop_still_acts -- accurately described (live caretaker loop, out of diff scope).
-- GAP:kudos_depends_on_low_hunger_feed -- accurate; condition at workday-agent.js:84 matches.
-- GAP:hidden_tools_dom -- accurate AND the load-bearing concern is CLEARED. Enumerated every
-  keydown/keyup/keypress handler in js/ (non-vendor): only main.js:763 'v' toggles the
-  connectome VIEW (display only, no world state), and caretaker-sidebar Enter for chat.
-  cycleLightLevel/cycleTempLevel are wired ONLY to click handlers on now-hidden buttons;
-  there is no keyboard path to place food, cycle light/temp, or clear the world. No MEDIUM.
-- GAP:education_panel_reachability -- accurate; Brain Guide reachable via overlay button ->
-  hidden learnBtn.click().
+- syntax: `node --check js/main.js` -> OK.
+- existing_suite: `node tests/run-node.js` -> 104 passed / 0 failed / 104 total.
+- no_calendar_refs: grep -> no matches (exit 1). PASS.
+- no_brain3d_button: grep -c -> 0; guard `if (brain3dBtn)` at main.js:499. PASS.
+- modal_z: .help-overlay z-index 90 > .caretaker-sidebar 30 > .education-panel 25.
+  Modal renders above the permanent sidebar. PASS. (See LOW below re: claim text.)
+- overlay_show_flex: no `display = 'block'` remains. PASS.
+- spin_conditions: floor precedes speedChangeInterval calc; phototaxis dead-zone
+  feeds speedChangeInterval; boundary steer wrapped in speed guard; headBiasSign
+  is module-level. PASS.
+- escape_close: keydown gated on display !== 'none'; backdrop click gated on
+  e.target === helpOverlay (inside-modal clicks do not close). PASS.
 
-## LOW findings (filed, not fixed)
+## Targeted concerns from the task
 
-- FILES_MODIFIED header says 9, but 11 source files are modified (10 bullet lines, with
-  docs/WORKDAY.md + readme.md sharing one line, and tests being two files). Every modified
-  file IS described in the manifest body -- no unclaimed changes; only the tally is off.
-  build-claims.md itself is the sole other working-tree change (expected audit artifact).
+(a) Phototaxis dead-zone deadlock -- CLEARED. Behavior transitions are decided by
+evaluateBehaviorEntry() (fly-logic.js:67-110), which reads only BRAIN
+accumulators, drives, light level, totalWalk, and cooldown/min-duration timers.
+None reference fly.x/fly.y or speed. updateBehaviorState (main.js:1093) calls it
+every tick and switches state independent of movement. The dead-zone only zeroes
+visual translation; it cannot introduce a state lock that would not also exist
+without the fix. Exits available regardless of position: light drop, curiosity
+< 0.2, totalWalk <= 3, rising fatigue (rest outranks phototaxis), or any
+higher-priority behavior. No permanent center-lock.
 
-## Cross-check vs git status
+(b) Walk floor 0.25 vs feed/food-seek -- CLEARED. The 0.25 floor lives only in the
+walk/explore branch (main.js:1182). The food-seek steering block that follows in
+the same branch (1187-1198) sets its own higher floor of 0.3 and recomputes
+speedChangeInterval, so 0.25 never suppresses food approach. The `feed` behavior
+is a separate branch (1247-1258) with its own targetSpeed 0.25-approach / 0-contact
+logic, untouched by the walk floor. No breakage.
 
-11 tracked source files modified, all described in the manifest. No unclaimed or stray
-changes. build-claims.md modification is the audit doc itself.
+(c) Modal layering and first-visit -- CLEARED. Backdrop is z-index 90, above the
+permanent sidebar (30) and education panel (25/23 mobile). .help-overlay CSS uses
+display:flex; first visit sets inline display 'flex' to match centering, so
+auto-show renders correctly and centered, not behind the sidebar.
+
+## git scope
+
+Only 4 files differ from HEAD: build-claims.md (expected artifact) + the 3 claimed
+source files. No unclaimed changes.
+
+## KNOWN_GAPS accuracy
+
+- motor_scale_uncalibrated: accurate. MOTOR_SCALE = 0.6 at
+  brain-worker-bridge.js:261.
+- calendar_code_orphaned: accurate. js/caretaker-calendar.js still on disk (9301 B);
+  CaretakerSidebar 'calendar' branch remains typeof-guarded
+  (caretaker-sidebar.js:285) and is unreachable now that the script is not loaded.
+- spin_fix_visual / modal_visual: accurate as stated (reasoning + suite, no long
+  visual run / screenshot).
+
+## LOW finding (not fixed -- claim text only, no code impact)
+
+- build-claims CHECK:modal_z and the css/main.js manifest note state
+  ".education-panel 40". Actual value is z-index 25 (mobile 23). The conclusion
+  (90 > all) is unaffected and modal_z still PASSES. Numeric inaccuracy in the
+  claims document, not in shipped code. Filed as LOW; no fix applied.

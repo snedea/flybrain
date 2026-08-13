@@ -533,25 +533,38 @@ var helpCloseBtn = document.getElementById('helpCloseBtn');
 
 // Show splash on first visit
 if (!localStorage.getItem('flybrain_seen_splash')) {
-	helpOverlay.style.display = 'block';
+	helpOverlay.style.display = 'flex';
+}
+
+function closeHelpOverlay() {
+	helpOverlay.style.display = 'none';
+	localStorage.setItem('flybrain_seen_splash', '1');
 }
 
 helpBtn.addEventListener('click', function () {
 	var isVisible = helpOverlay.style.display !== 'none';
-	helpOverlay.style.display = isVisible ? 'none' : 'block';
+	if (isVisible) closeHelpOverlay();
+	else helpOverlay.style.display = 'flex';
 });
 
-helpCloseBtn.addEventListener('click', function () {
-	helpOverlay.style.display = 'none';
-	localStorage.setItem('flybrain_seen_splash', '1');
+// Centered modal: backdrop click and Escape both close it
+helpOverlay.addEventListener('click', function (e) {
+	if (e.target === helpOverlay) closeHelpOverlay();
 });
+
+document.addEventListener('keydown', function (e) {
+	if (e.key === 'Escape' && helpOverlay.style.display !== 'none') {
+		closeHelpOverlay();
+	}
+});
+
+helpCloseBtn.addEventListener('click', closeHelpOverlay);
 
 // Brain Guide lives inside the Learn popup (toolbar button is hidden)
 var brainGuideBtn = document.getElementById('brainGuideBtn');
 if (brainGuideBtn) {
 	brainGuideBtn.addEventListener('click', function () {
-		helpOverlay.style.display = 'none';
-		localStorage.setItem('flybrain_seen_splash', '1');
+		closeHelpOverlay();
 		if (learnBtn) learnBtn.click();
 	});
 }
@@ -1148,6 +1161,10 @@ function syncBrainFlags() {
  * current behavioral state. Called on the 500ms brain tick.
  * Replaces the old hardcoded accumleft/right -> speed/dir computation.
  */
+// Head-turn bias sign persists across ticks; it only flips on a real
+// left/right motor asymmetry (jitter is +-0.04, so require > 1).
+var headBiasSign = 1;
+
 function computeMovementForBehavior() {
 	var scalingFactor = 20;
 	var state = behavior.current;
@@ -1159,6 +1176,10 @@ function computeMovementForBehavior() {
 		newDir = Math.max(-0.05, Math.min(0.05, newDir));
 		targetDir = facingDir + newDir * Math.PI;
 		targetSpeed = (Math.abs(BRAIN.accumleft) + Math.abs(BRAIN.accumright)) / (scalingFactor * 5);
+		// A fly that qualifies for walk must visibly translate, otherwise
+		// heading jitter turns it in place (walk entry threshold and the
+		// speed formula are on different scales).
+		if (targetSpeed < 0.25) targetSpeed = 0.25;
 		speedChangeInterval = (targetSpeed - speed) / (scalingFactor * 1.5);
 		if (state === 'explore') {
 			targetDir += (Math.random() - 0.5) * 0.3;
@@ -1178,16 +1199,24 @@ function computeMovementForBehavior() {
 		// Head-turn bias from MN_HEAD (capped to prevent erratic turns)
 		if (BRAIN.accumHead > 3) {
 			var headBias = Math.min((BRAIN.accumHead / 40) * 0.15, 0.08);
-			var headSign = (BRAIN.accumWalkLeft - BRAIN.accumWalkRight > 0) ? 1 : -1;
-			targetDir += headBias * headSign;
+			var walkAsym = BRAIN.accumWalkLeft - BRAIN.accumWalkRight;
+			if (Math.abs(walkAsym) > 1) headBiasSign = walkAsym > 0 ? 1 : -1;
+			targetDir += headBias * headBiasSign;
 		}
 	} else if (state === 'phototaxis') {
 		// Steer toward canvas center (light source placeholder)
 		var dx = window.innerWidth / 2 - fly.x;
 		var dy = -(window.innerHeight / 2 - fly.y);
-		targetDir = Math.atan2(dy, dx);
-		targetSpeed = (Math.abs(BRAIN.accumleft) + Math.abs(BRAIN.accumright)) / (scalingFactor * 5);
-		if (targetSpeed < 0.3) targetSpeed = 0.3;
+		if (Math.hypot(dx, dy) < 40) {
+			// Dead-zone at the light target: atan2 is unstable here and the
+			// fly would oscillate/orbit forever. Arrived means stop.
+			targetDir = facingDir;
+			targetSpeed = 0;
+		} else {
+			targetDir = Math.atan2(dy, dx);
+			targetSpeed = (Math.abs(BRAIN.accumleft) + Math.abs(BRAIN.accumright)) / (scalingFactor * 5);
+			if (targetSpeed < 0.3) targetSpeed = 0.3;
+		}
 		speedChangeInterval = (targetSpeed - speed) / (scalingFactor * 1.5);
 	} else if (state === 'fly') {
 		var newDir = (BRAIN.accumleft - BRAIN.accumright) / scalingFactor;
@@ -2138,7 +2167,9 @@ function update(dt) {
 		edgeBiasY = (edgeMargin - (wb.bottom - fly.y)) / edgeMargin;
 	}
 
-	if (edgeBiasX !== 0 || edgeBiasY !== 0) {
+	// Only steer a fly that is actually moving; rotating a stationary fly
+	// toward center just spins it in place.
+	if ((edgeBiasX !== 0 || edgeBiasY !== 0) && speed > 0.05) {
 		var awayAngle = Math.atan2(edgeBiasY, edgeBiasX);
 		var awayStrength = Math.min(1, Math.sqrt(edgeBiasX * edgeBiasX + edgeBiasY * edgeBiasY));
 		var angleDiffEdge = normalizeAngle(awayAngle - targetDir);

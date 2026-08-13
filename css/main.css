@@ -443,21 +443,43 @@ canvas {
 /* --- Help Overlay --- */
 .help-overlay {
     position: fixed;
-    top: 54px;
-    left: 1rem;
-    width: 380px;
-    max-height: calc(100vh - 70px);
-    overflow-y: auto;
-    background: rgba(10, 12, 20, 0.96);
-    border: none;
-    border-radius: 16px;
-    padding: 0;
-    z-index: 30;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    background: rgba(4, 6, 14, 0.6);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 90;
     font-family: system-ui, -apple-system, sans-serif;
-    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7), 0 0 1px rgba(255, 255, 255, 0.1);
 }
 
-.help-overlay::before {
+.help-modal {
+    position: relative;
+    width: min(620px, 100%);
+    max-height: min(84vh, 46rem);
+    overflow-y: auto;
+    background: rgba(10, 12, 20, 0.97);
+    border-radius: 16px;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7), 0 0 1px rgba(255, 255, 255, 0.1);
+    animation: help-modal-in 0.18s ease-out;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(136, 146, 164, 0.3) transparent;
+}
+
+@keyframes help-modal-in {
+    from { opacity: 0; transform: scale(0.97) translateY(8px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .help-modal {
+        animation: none;
+    }
+}
+
+.help-modal::before {
     content: '';
     position: absolute;
     inset: 0;
@@ -468,6 +490,55 @@ canvas {
     -webkit-mask-composite: xor;
     mask-composite: exclude;
     pointer-events: none;
+}
+
+/* The communication chain: how a drive becomes a Workday request */
+.help-chain {
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    gap: 0.5rem;
+    margin: 0.25rem 1.25rem 0.75rem;
+    padding: 0.7rem 0.75rem;
+    background: rgba(139, 156, 246, 0.06);
+    border: 1px solid rgba(139, 156, 246, 0.15);
+    border-radius: 12px;
+}
+
+.help-chain-node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 0.15rem;
+    flex: 1;
+}
+
+.help-chain-eyebrow {
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--accent);
+}
+
+.help-chain-desc {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    line-height: 1.25;
+}
+
+.help-chain-arrow {
+    align-self: center;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+.help-modal-cta {
+    display: block;
+    margin: 0 1.25rem 1.25rem;
+    padding: 0.55rem 1rem;
 }
 
 .help-overlay-header {
@@ -2094,9 +2165,9 @@ canvas {
         display: none;
     }
 
-    /* --- Help overlay repositioned for compact toolbar --- */
+    /* --- Help modal breathing room on small screens --- */
     .help-overlay {
-        top: calc(46px + env(safe-area-inset-top, 0px));
+        padding: 0.75rem;
     }
 }
 
