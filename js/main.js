@@ -244,7 +244,7 @@ var neuronDescriptions = {
 	SEZ_GROOM: 'Grooming command center',
 	SEZ_WATER: 'Water intake command',
 	ANTENNAL_MECH: 'Antennal mechanosensory',
-	GNG_DESC: 'Gnathal ganglia (arousal)',
+	GNG_DESC: 'Gnathal ganglia (alertness)',
 	DN_WALK: 'Walk command',
 	DN_FLIGHT: 'Flight command',
 	DN_TURN: 'Turn command',
