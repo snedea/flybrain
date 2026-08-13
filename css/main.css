@@ -445,9 +445,10 @@ canvas {
     position: fixed;
     inset: 0;
     display: flex;
-    align-items: center;
-    justify-content: center;
+    /* margin:auto on the child centers it AND keeps tall content
+       scrollable; align-items:center clips overflow at the edges */
     padding: 1.5rem;
+    overflow-y: auto;
     background: rgba(4, 6, 14, 0.6);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
@@ -457,9 +458,9 @@ canvas {
 
 .help-modal {
     position: relative;
+    margin: auto;
     width: min(620px, 100%);
-    max-height: min(84vh, 46rem);
-    overflow-y: auto;
+    max-height: none;
     background: rgba(10, 12, 20, 0.97);
     border-radius: 16px;
     box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7), 0 0 1px rgba(255, 255, 255, 0.1);
@@ -1910,12 +1911,12 @@ canvas {
     color: var(--accent);
 }
 
-.workday-entry-fulfilled {
-    border-left-color: var(--success);
-}
-
-.workday-entry-denied {
-    border-left-color: #f87171;
+.claude-activity {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    margin-left: auto;
+    padding-right: 0.5rem;
+    white-space: nowrap;
 }
 
 .workday-entry-actor {
@@ -1953,7 +1954,6 @@ canvas {
     padding: 0.4rem 0.5rem;
     border-radius: var(--radius);
     margin-bottom: 0.25rem;
-    border-left: 3px solid var(--accent);
     background: transparent;
 }
 

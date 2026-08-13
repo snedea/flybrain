@@ -12,7 +12,7 @@
     mode = newMode;
     var el = modeEl();
     if (!el) return;
-    el.textContent = mode === 'live' ? 'LIVE TENANT' : 'MOCK MODE';
+    el.textContent = mode === 'live' ? 'LIVE' : 'DEMO';
     el.className = 'workday-pill ' + (mode === 'live' ? 'workday-pill-live' : 'workday-pill-mock');
   }
 

@@ -1,94 +1,111 @@
-# Doubt Review -- UI modal pass + spin fixes
+# Doubt Review: caretaker single-fly + Claude activity indicator batch
 
-Scope: uncommitted diff on top of HEAD ae52307. Auditor: fresh-context sub-agent.
+Auditor: fresh-context sub-agent. Scope: uncommitted diff vs HEAD 75b6304.
+Verdict: findings present, one HIGH fixed. Re-ran all affected checks after the fix.
 
-## Verdict: NO HIGH/MEDIUM FINDINGS (one LOW noted, not fixed)
+## DELTA_MANIFEST verdicts
 
-## DELTA_MANIFEST verification
+- server/caretaker.js (ws message guard) | PASS | harness T1a: stale socket's
+  hunger=0.11 never reflected in GET /state (stayed null); T1b: current socket's
+  hunger=0.99 reflected. Guard at server/caretaker.js:381 works.
+- js/caretaker-bridge.js (activity indicator) | PASS | activityLabel maps at
+  :30-43; setClaudeActivity at :45-54 with ACTIVITY_HOLD_MS=6000 (:27) revert;
+  called before the switch at :63; WS-open init 'Claude: watching' at :146.
+- index.html (id, copy, versions) | PASS | claudeStatusText id at :27; blurb
+  shortened; pill 'DEMO'; bridge v26 / panel v4 / main.js v34 all present.
+- js/workday-panel.js (LIVE/DEMO) | PASS | :15 'LIVE'/'DEMO'.
+- js/main.js (stopPropagation) | PASS | e.stopPropagation() added before
+  closeHelpOverlay()/learnBtn.click() at brainGuideBtn handler.
+- agent/chat-policy.md (commentator role) | PASS | appended section present.
+- agent/caretaker-policy.md (no redundant env cmds) | PASS | appended section
+  present.
 
-index.html | PASS. Brain 3D button removed (grep -c id="brain3dBtn" -> 0).
-Calendar tab button, calendar content div, and caretaker-calendar.js script
-include all removed (grep for caretaker-calendar / data-tab="calendar" /
-calendar-content -> no matches). Tabs now Inbox/Chat/Analytics.
-#helpOverlay restructured into full-screen backdrop wrapping new .help-modal;
-header title "A fly that works here"; new .help-chain strip with 3 nodes
-(THE FLY / ITS AGENT / CLAUDE) and -> arrows; brainGuideBtn has help-modal-cta.
-Versions bumped css v36, main.js v33. All confirmed in diff.
+## VERIFICATION_MATRIX re-run (mine, not recorded)
 
-css/main.css | PASS. .help-overlay rewritten as backdrop (inset 0, flex center,
-blur, z-index 90). New .help-modal (min(620px,100%), max-height min(84vh,46rem),
-scroll, help-modal-in 0.18s entrance, disabled under prefers-reduced-motion).
-Gradient hairline moved .help-overlay::before -> .help-modal::before (no orphan
-::before on .help-overlay; grep confirms only .help-modal::before at line 482).
-New .help-chain* styles and .help-modal-cta present. Mobile rule now padding-only.
+- CHECK:syntax | node --check on all 4 files | PASS
+- CHECK:unit | node tests/workday-node.js | 25 passed | PASS
+- CHECK:suite | node tests/run-node.js | 104 passed | PASS
+- CHECK:smoke | node tests/workday-smoke.js | SMOKE PASS | PASS
+- CHECK:stale_socket_ignored | two-client WS harness, ephemeral port 49227,
+  temp DB, WORKDAY_MODE=mock | PASS (T1a false, T1b true)
+- CHECK:no_mock_mode_copy | grep -n 'MOCK MODE' index.html js/workday-panel.js |
+  no matches (exit 1) | PASS
+- CHECK:indicator_wiring | grep confirmed claudeStatusText + 6000ms + call site |
+  PASS
+- CHECK:stopprop | git diff js/main.js | PASS
 
-js/main.js | PASS. display 'block' -> 'flex' on both show paths (first-visit and
-helpBtn toggle); no remaining `helpOverlay.style.display = 'block'` (grep empty).
-New closeHelpOverlay() sets flybrain_seen_splash. Backdrop click closes only on
-e.target === helpOverlay (main.js:552). Escape closes only when visible
-(main.js:556). helpCloseBtn and brainGuideBtn route through closeHelpOverlay.
-Spin fixes all present: walk/explore floor 0.25 (1182), phototaxis dead-zone
-dist<40 -> targetDir=facingDir/targetSpeed=0 (1210-1214), boundary steer gated on
-speed > 0.05 (2170), headBiasSign module-level (1164) flipping only on
-|walkAsym| > 1 (1203).
+## FINDINGS
 
-## VERIFICATION_MATRIX re-run (all PASS)
+### HIGH (FIXED) -- stale tab closing silences the live tab
 
-- syntax: `node --check js/main.js` -> OK.
-- existing_suite: `node tests/run-node.js` -> 104 passed / 0 failed / 104 total.
-- no_calendar_refs: grep -> no matches (exit 1). PASS.
-- no_brain3d_button: grep -c -> 0; guard `if (brain3dBtn)` at main.js:499. PASS.
-- modal_z: .help-overlay z-index 90 > .caretaker-sidebar 30 > .education-panel 25.
-  Modal renders above the permanent sidebar. PASS. (See LOW below re: claim text.)
-- overlay_show_flex: no `display = 'block'` remains. PASS.
-- spin_conditions: floor precedes speedChangeInterval calc; phototaxis dead-zone
-  feeds speedChangeInterval; boundary steer wrapped in speed guard; headBiasSign
-  is module-level. PASS.
-- escape_close: keydown gated on display !== 'none'; backdrop click gated on
-  e.target === helpOverlay (inside-modal clicks do not close). PASS.
+server/caretaker.js close handler nulled browserSocket unconditionally
+(`browserSocket = null` for ANY socket close). Combined with the newly added
+message guard (`if (ws !== browserSocket) return;`), this produced wrong
+behavior in the exact multi-tab flow the change targets:
 
-## Targeted concerns from the task
+1. Tab A connects (browserSocket = A).
+2. Tab B connects (browserSocket = B) -- B is the live fly.
+3. Tab A (the stale one) closes -> close handler set browserSocket = null.
+4. Tab B keeps sending state, but `B !== null` -> every message dropped.
+   The fly the user is actively watching goes silent; the caretaker loop and
+   the Workday agent keep evaluating frozen state.
 
-(a) Phototaxis dead-zone deadlock -- CLEARED. Behavior transitions are decided by
-evaluateBehaviorEntry() (fly-logic.js:67-110), which reads only BRAIN
-accumulators, drives, light level, totalWalk, and cooldown/min-duration timers.
-None reference fly.x/fly.y or speed. updateBehaviorState (main.js:1093) calls it
-every tick and switches state independent of movement. The dead-zone only zeroes
-visual translation; it cannot introduce a state lock that would not also exist
-without the fix. Exits available regardless of position: light drop, curiosity
-< 0.2, totalWalk <= 3, rising fatigue (rest outranks phototaxis), or any
-higher-priority behavior. No permanent center-lock.
+Reproduced with the two-client harness BEFORE the fix:
+`T2 current_still_processed_after_stale_close=false` (GET /state frozen at the
+old 0.99 instead of the new 0.42).
 
-(b) Walk floor 0.25 vs feed/food-seek -- CLEARED. The 0.25 floor lives only in the
-walk/explore branch (main.js:1182). The food-seek steering block that follows in
-the same branch (1187-1198) sets its own higher floor of 0.3 and recomputes
-speedChangeInterval, so 0.25 never suppresses food approach. The `feed` behavior
-is a separate branch (1247-1258) with its own targetSpeed 0.25-approach / 0-contact
-logic, untouched by the walk floor. No breakage.
+Fix (server/caretaker.js close handler): only clear the primary when the socket
+that closed IS the primary:
 
-(c) Modal layering and first-visit -- CLEARED. Backdrop is z-index 90, above the
-permanent sidebar (30) and education panel (25/23 mobile). .help-overlay CSS uses
-display:flex; first visit sets inline display 'flex' to match centering, so
-auto-show renders correctly and centered, not behind the sidebar.
+    ws.on('close', function() {
+      if (ws !== browserSocket) return;
+      browserSocket = null;
+      process.stderr.write('[caretaker] Browser disconnected\n');
+    });
 
-## git scope
+After the fix the harness reports `T2 ...=true` (GET /state reflects 0.42), and
+T1a/T1b still hold. node --check, the 104-test suite, and the smoke test all
+still pass.
 
-Only 4 files differ from HEAD: build-claims.md (expected artifact) + the 3 claimed
-source files. No unclaimed changes.
+### Documented behavior (per context-note probe) -- ACCEPTABLE
 
-## KNOWN_GAPS accuracy
+When the CURRENT primary tab closes, browserSocket goes null and a still-open
+older tab CANNOT become primary again without reconnecting: the older tab's
+messages satisfy `ws !== browserSocket` (ws !== null) and are dropped, so it
+appears frozen to the backend until its WS reconnects. This is by design
+(newest connection wins; there is no promotion of an existing socket) and is
+acceptable -- the older tab is stale precisely because a newer one superseded
+it. Worth noting as a known limitation. The HIGH fix above narrows the blast
+radius: closing a stale tab no longer harms the live tab; only closing the
+live tab leaves the enclosure without a primary until some tab reconnects.
 
-- motor_scale_uncalibrated: accurate. MOTOR_SCALE = 0.6 at
-  brain-worker-bridge.js:261.
-- calendar_code_orphaned: accurate. js/caretaker-calendar.js still on disk (9301 B);
-  CaretakerSidebar 'calendar' branch remains typeof-guarded
-  (caretaker-sidebar.js:285) and is unreachable now that the script is not loaded.
-- spin_fix_visual / modal_visual: accurate as stated (reasoning + suite, no long
-  visual run / screenshot).
+### MEDIUM (NOT this batch; left untouched) -- unclaimed css/main.css change
 
-## LOW finding (not fixed -- claim text only, no code impact)
+`git status` shows css/main.css modified, but it is NOT in the DELTA_MANIFEST.
+It was NOT present at the start of this audit and appeared mid-review, so it is
+a concurrent edit (the live :7600 server workflow / another session), not part
+of the audited caretaker batch. Content: help-modal centering switched from
+flex align/justify-center to margin:auto + overflow-y:auto on the overlay
+(tall-modal scroll fix). Left as-is: reverting would clobber concurrent work
+and it is out of this batch's scope. Flagged here per the manifest cross-check
+rule so it is not mistaken for part of this commit.
 
-- build-claims CHECK:modal_z and the css/main.js manifest note state
-  ".education-panel 40". Actual value is z-index 25 (mobile 23). The conclusion
-  (90 > all) is unaffected and modal_z still PASSES. Numeric inaccuracy in the
-  claims document, not in shipped code. Filed as LOW; no fix applied.
+### LOW (not fixed) -- indicator label claim wording
+
+build-claims says setClaudeActivity is "called ... for every valid command."
+It is actually called for every message with type==='command', including
+unknown actions (which fall through to the 'tending the enclosure' label).
+Harmless; label copy only.
+
+## KNOWN_GAPS validation
+
+- GAP:policy_effect_unverified | accurate | policy text steers a probabilistic LLM.
+- GAP:indicator_shows_any_source | accurate | label does not distinguish
+  caretaker-loop vs Workday-fulfillment commands; both arrive as WS commands.
+- GAP:public_site_no_caretaker | accurate | file:// short-circuits in
+  caretaker-bridge.js init(); https page cannot open ws://:7600.
+
+## Net
+
+One HIGH bug in the batch's own changed path found and fixed; affected checks
+re-run green. One out-of-batch concurrent css change flagged, not touched.

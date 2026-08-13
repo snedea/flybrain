@@ -375,8 +375,17 @@ wss.on('connection', function(ws) {
   } catch (e) {
     process.stderr.write('[caretaker] workday history error: ' + e.message + '\n');
   }
-  ws.on('message', function(data) { handleStateMessage(data.toString()); });
+  ws.on('message', function(data) {
+    // Only the most recent browser connection is the live fly; stale tabs
+    // otherwise interleave a second frozen fly into the state stream.
+    if (ws !== browserSocket) return;
+    handleStateMessage(data.toString());
+  });
   ws.on('close', function() {
+    // Only clear the primary if the socket that closed IS the primary.
+    // A stale tab closing must not null out the live tab's socket, or the
+    // message guard above would then drop the live tab's states too.
+    if (ws !== browserSocket) return;
     browserSocket = null;
     process.stderr.write('[caretaker] Browser disconnected\n');
   });

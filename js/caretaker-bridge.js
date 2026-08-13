@@ -22,6 +22,42 @@
     ws.send(JSON.stringify({ type: 'state', data: getState() }));
   }
 
+  // Claude activity indicator (toolbar badge). Shows what Claude is doing
+  // right now; falls back to 'watching' a few seconds after each action.
+  var ACTIVITY_HOLD_MS = 6000;
+  var activityTimer = null;
+
+  function activityLabel(action, params) {
+    if (action === 'place_food') return 'delivering food';
+    if (action === 'clear_food') return 'clearing food';
+    if (action === 'touch') return 'checking on the fly';
+    if (action === 'blow_wind') return 'stirring the air';
+    if (action === 'set_temp') return 'adjusting the temperature';
+    if (action === 'set_light') {
+      var level = params && params.level;
+      if (level === 'dim' || level === 1) return 'dimming the lights';
+      if (level === 'dark' || level === 2) return 'turning the lights off';
+      return 'turning the lights up';
+    }
+    return 'tending the enclosure';
+  }
+
+  function setActivityText(text) {
+    var toolbar = document.getElementById('claudeStatusText');
+    if (toolbar) toolbar.textContent = text;
+    var sidebar = document.getElementById('claudeActivitySidebar');
+    if (sidebar) sidebar.textContent = text;
+  }
+
+  function setClaudeActivity(action, params) {
+    setActivityText('Claude: ' + activityLabel(action, params));
+    if (activityTimer !== null) clearTimeout(activityTimer);
+    activityTimer = setTimeout(function() {
+      setActivityText('Claude: watching');
+      activityTimer = null;
+    }, ACTIVITY_HOLD_MS);
+  }
+
   function executeCommand(raw) {
     var msg;
     try { msg = JSON.parse(raw); } catch (e) {
@@ -29,6 +65,7 @@
       return;
     }
     if (msg.type !== 'command') return;
+    setClaudeActivity(msg.action, msg.params || {});
     var action = msg.action, params = msg.params || {};
     var lightMap = { bright: 0, dim: 1, dark: 2 };
     var tempMap = { neutral: 0, warm: 1, cool: 2 };
@@ -110,6 +147,7 @@
       if (typeof CaretakerRenderer !== 'undefined') { CaretakerRenderer.setConnected(true); }
       var statusEl = document.getElementById('claudeStatus');
       if (statusEl) statusEl.style.display = '';
+      setActivityText('Claude: watching');
       console.log('[caretaker] Connected to ' + WS_URL);
       stateTimer = setInterval(sendState, STATE_INTERVAL);
       sendState();

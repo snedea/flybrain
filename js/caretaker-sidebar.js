@@ -286,11 +286,8 @@
         CaretakerCalendar.activate();
       }
 
-      // Update header title
-      var title = sidebar.querySelector('.caretaker-sidebar-title');
-      if (title) {
-        title.textContent = btn.textContent;
-      }
+      // Header shows the Workday logo and Claude's activity; it does not
+      // mirror the active tab name.
     });
   }
 

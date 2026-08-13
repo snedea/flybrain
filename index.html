@@ -3,7 +3,7 @@
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>FlyBrain</title>
-    <link rel="stylesheet" type="text/css" href="./css/main.css?v=36">
+    <link rel="stylesheet" type="text/css" href="./css/main.css?v=37">
 </head>
 
 <body>
@@ -24,7 +24,7 @@
         <div class="toolbar-right">
             <span id="claudeStatus" class="claude-status" style="display:none;">
                 <span class="claude-dot"></span>
-                <span class="claude-status-text">AI</span>
+                <span class="claude-status-text" id="claudeStatusText">Claude: watching</span>
             </span>
             <span class="toolbar-title">FlyBrain</span>
             <span id="scaleIndicator" class="scale-indicator" style="display:none;"></span>
@@ -58,15 +58,15 @@
             </div>
         </div>
         <div class="help-about">
-            <p>In 2024, a team of researchers mapped every single neuron in a fruit fly's brain -- all 139,255 of them, and the millions of connections between them. It was the first complete wiring diagram of an adult brain of any animal this complex. The work was led by Princeton and published in <em>Nature</em> (<a href="https://doi.org/10.1038/s41586-024-07558-y" target="_blank" rel="noopener noreferrer">Dorkenwald et al. 2024</a>).</p>
+            <p>In 2024, a team of researchers mapped every single neuron in a fruit fly's brain -- all 139,255 of them, and the millions of connections between them. It was the first complete wiring diagram of an adult brain this complex. The work was led by Princeton and published in <em>Nature</em> (<a href="https://doi.org/10.1038/s41586-024-07558-y" target="_blank" rel="noopener noreferrer">Dorkenwald et al. 2024</a>).</p>
             <p><strong>This is that brain, running live in your browser.</strong></p>
-            <p>The fly you see is not following a script. Its behavior -- walking, eating, grooming, startling, flying -- emerges from real neural signals propagating through those mapped connections. Feed it, touch it, scare it, and watch 139,000 neurons respond.</p>
+            <p>The fly you see is not following a script. Its behavior -- walking, eating, grooming, startling, flying -- emerges from real neural signals propagating through those mapped connections. Watch closely: every turn, startle, and grooming pass is 139,000 neurons voting.</p>
             <p>A fruit fly brain fits on a pinhead but contains circuits for memory, navigation, fear, hunger, and decision-making. If we can simulate this brain in a web browser today, imagine what becomes possible as we map larger brains. The human brain has 86 billion neurons. We are probably going to see it mapped in our lifetime.</p>
         </div>
         <div class="help-overlay-divider"></div>
         <div class="help-overlay-section-title">And now it has a job</div>
         <div class="help-about">
-            <p>This fly autonomously uses <strong>Workday</strong>. It cannot type and it cannot talk -- its only language is behavior. So an <strong>agent</strong> observes the fly through its neural state, interprets behavior as communication, and files real Workday requests on its behalf: hunger becomes a meal voucher request, fatigue becomes a PTO request, curiosity becomes a career goal, a fright becomes a workplace safety concern.</p>
+            <p>This fly autonomously uses <strong>Workday</strong>. It cannot type and it cannot talk -- its only language is behavior. So an <strong>agent</strong> reads the fly's neural state, interprets behavior as communication, and files real Workday requests on its behalf: hunger becomes a meal voucher request, fatigue becomes a PTO request, curiosity becomes a career goal, a fright becomes a workplace safety concern.</p>
             <p><strong>Claude</strong> plays two roles. As the caretaker, it watches over the enclosure and tends to the fly. As the Workday administrator, it reviews each request the agent files and approves it -- or occasionally denies it. Approvals have real consequences: an approved meal voucher drops food in front of the fly; approved PTO dims the lights so it can rest.</p>
             <p>Follow the whole conversation in the <strong>Inbox</strong> panel on the left: what the agent observed, how it interpreted the behavior, what it filed, and how Claude ruled.</p>
         </div>
@@ -76,7 +76,7 @@
         <div class="help-item"><strong>Inbox</strong> -- the fly's Workday paper trail: requests filed by its agent, resolutions from Claude.</div>
         <div class="help-item"><strong>Drive meters</strong> -- bottom right: hunger, fear, fatigue, curiosity. These are the signals the agent reads.</div>
         <div class="help-item"><strong>Connectome strip</strong> -- bottom: all 139K neurons firing live, grouped Sensory / Central / Drives / Motor.</div>
-        <div class="help-item"><strong>Brain Guide</strong> -- explore the anatomy behind it all. Zoom the enclosure with the scroll wheel or pinch.</div>
+        <div class="help-item"><strong>Brain Guide</strong> -- explore the anatomy behind it all. Zoom with the scroll wheel, or pinch on a touch screen.</div>
         <div class="help-overlay-divider"></div>
         <button class="tool-btn help-modal-cta" id="brainGuideBtn">Open the Brain Guide</button>
       </div>
@@ -125,7 +125,8 @@
     <div id="caretaker-sidebar" class="caretaker-sidebar">
         <div class="caretaker-sidebar-handle" id="sheet-handle"></div>
         <div class="caretaker-sidebar-header">
-            <span class="caretaker-sidebar-title">Inbox</span>
+            <img src="./svg/workday.svg" height="22" class="noselect workday-logo" alt="Inbox">
+            <span class="claude-activity" id="claudeActivitySidebar">Claude: watching</span>
             <button class="caretaker-sidebar-close" id="caretaker-sidebar-close">&times;</button>
         </div>
         <div class="sidebar-tabs" id="sidebar-tabs">
@@ -155,9 +156,7 @@
         <div class="sidebar-tab-content active" data-tab-content="workday">
             <div class="workday-section" id="workday-section">
                 <div class="workday-header">
-                    <img src="./svg/workday.svg" height="28" class="noselect workday-logo" alt="Workday">
-                    <span class="workday-blurb">The fly cannot use Workday. Its agent watches its behavior, interprets it, and files on its behalf. Claude reviews, approves, or denies.</span>
-                    <span class="workday-pill workday-pill-mock" id="workday-mode">MOCK MODE</span>
+                    <span class="workday-blurb">Requests filed by the fly's agent, reviewed and resolved by Claude.</span>
                 </div>
                 <div class="workday-feed" id="workday-feed">
                     <div class="workday-empty">Waiting for the fly to need something...</div>
@@ -190,12 +189,12 @@
     <script type="text/javascript" src="./js/fly-logic.js?v=24"></script>
     <script type="text/javascript" src="./js/brain3d.js?v=24"></script>
     <script type="text/javascript" src="./js/education.js?v=24"></script>
-    <script type="text/javascript" src="./js/main.js?v=33"></script>
+    <script type="text/javascript" src="./js/main.js?v=34"></script>
     <script type="text/javascript" src="./js/caretaker-renderer.js?v=24"></script>
-    <script type="text/javascript" src="./js/caretaker-sidebar.js?v=25"></script>
+    <script type="text/javascript" src="./js/caretaker-sidebar.js?v=26"></script>
     <script type="text/javascript" src="./js/caretaker-analytics.js?v=24"></script>
-    <script type="text/javascript" src="./js/workday-panel.js?v=3"></script>
-    <script type="text/javascript" src="./js/caretaker-bridge.js?v=25"></script>
+    <script type="text/javascript" src="./js/workday-panel.js?v=4"></script>
+    <script type="text/javascript" src="./js/caretaker-bridge.js?v=27"></script>
 </body>
 
 </html>

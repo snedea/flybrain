@@ -563,7 +563,11 @@ helpCloseBtn.addEventListener('click', closeHelpOverlay);
 // Brain Guide lives inside the Learn popup (toolbar button is hidden)
 var brainGuideBtn = document.getElementById('brainGuideBtn');
 if (brainGuideBtn) {
-	brainGuideBtn.addEventListener('click', function () {
+	brainGuideBtn.addEventListener('click', function (e) {
+		// Without this, the click bubbles to the document-level
+		// "close education panel on outside click" handler and closes
+		// the guide in the same click that opened it.
+		e.stopPropagation();
 		closeHelpOverlay();
 		if (learnBtn) learnBtn.click();
 	});

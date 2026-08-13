@@ -106,3 +106,11 @@ Evaluate these rules in priority order (highest priority first). Apply the FIRST
 - Never place food at the fly's exact position -- always offset by at least 60px.
 - The FEAR_BACKOFF and CURRENT_TIME fields are injected by the launch script into your prompt, not part of the state JSON.
 - Replace <value> placeholders with actual numeric values from the state.
+
+## No redundant environment commands
+
+Before outputting set_light or set_temp, check the current state:
+environment.lightLevel (0=bright, 1=dim, 2=dark) and
+environment.temperature (0=neutral, 1=warm, 2=cool). If the requested
+level is already in effect, output wait instead. Repeating a setting that
+is already active wastes an action and floods the activity log.

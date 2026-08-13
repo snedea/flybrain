@@ -1,37 +1,38 @@
 AUDIT_PAYLOAD::v1
 AGENT: claude-fable-5/flybrain
 TARGET: /Users/Shared/homelab/flybrain
-SCOPE: uncommitted diff on top of ae52307 only (batched: UI modal pass + spin fixes)
+SCOPE: uncommitted diff on top of 75b6304 only
 
 == DELTA_MANIFEST ==
-FILES_MODIFIED: 3
-  index.html | Brain 3D button REMOVED; Calendar tab button + content div + caretaker-calendar.js script include REMOVED (tabs now Inbox/Chat/Analytics); help overlay restructured: #helpOverlay is now a full-screen backdrop containing new .help-modal wrapper (header title 'A fly that works here', NEW .help-chain strip with 3 nodes THE FLY/ITS AGENT/CLAUDE + arrows, existing sections, brainGuideBtn gains .help-modal-cta); versions css v36, main.js v33
-  css/main.css | .help-overlay rewritten as backdrop (inset 0, flex center, blur, z-index 90 -- above sidebar 30 and education 40); NEW .help-modal (min(620px,100%), max-height 84vh, scroll, entrance animation help-modal-in 0.18s, disabled under prefers-reduced-motion); gradient hairline moved .help-overlay::before -> .help-modal::before; NEW .help-chain* styles (eyebrow caps, accent); .help-modal-cta; mobile media rule that pinned overlay top replaced with padding-only rule
-  js/main.js | display 'block' -> 'flex' for overlay show paths; NEW closeHelpOverlay() sets splash flag; backdrop click (e.target === helpOverlay) closes; Escape keydown closes when visible; helpCloseBtn/brainGuideBtn use closeHelpOverlay; SPIN FIXES: (1) walk/explore targetSpeed floor 0.25 (fly-logic walk entry threshold ~5 vs speed totalWalk/100 scale mismatch), (2) phototaxis dead-zone: dist<40 to canvas center -> targetDir=facingDir, targetSpeed=0 (atan2 flip oscillation), (3) boundary steering gated on speed > 0.05 (was rotating stationary flies), (4) headBiasSign persists across ticks, flips only when |accumWalkLeft-accumWalkRight| > 1 (jitter is +-0.04)
+FILES_MODIFIED: 7
+  server/caretaker.js | ws message handler ignores state from sockets that are not the current browserSocket (stale tabs no longer interleave a frozen second fly into the stream)
+  js/caretaker-bridge.js | NEW Claude activity indicator: activityLabel(action, params) maps commands to plain-language labels (place_food -> delivering food, set_light dim -> dimming the lights, etc.); setClaudeActivity updates #claudeStatusText, reverts to 'Claude: watching' after 6 s; called at top of executeCommand for every valid command; on WS open text initialized to 'Claude: watching'
+  index.html | claude-status-text span gains id claudeStatusText, default text 'Claude: watching'; Inbox blurb shortened to 'Requests filed by the fly's agent, reviewed and resolved by Claude.'; mode pill initial text MOCK MODE -> DEMO; versions bridge v26, panel v4, main.js v34
+  js/workday-panel.js | setMode pill text 'LIVE TENANT'/'MOCK MODE' -> 'LIVE'/'DEMO'
+  js/main.js | brainGuideBtn handler adds e.stopPropagation() (click bubbled to the document-level 'close education panel on outside click' handler, closing the guide in the same click that opened it -> button appeared dead)
+  agent/chat-policy.md | appended role section: chat Claude is a commentator, cannot act, must not offer/ask to act, speaks of the caretaker in third person
+  agent/caretaker-policy.md | appended rule: check environment.lightLevel/temperature before set_light/set_temp; if already in effect output wait (stops repeated dim spam)
 
 == SPEC ==
-MODAL: Learn button (helpBtn) opens centered modal over blurred backdrop; closes via X, backdrop click, Escape; auto-shows first visit (flybrain_seen_splash unchanged); Brain Guide opens from CTA inside modal (hidden learnBtn.click())
-SPIN: heading update at main.js applyframe (facingDir += angleDiff * ...) is unconditional; fixes ensure targetDir cannot keep moving while speed ~0: floor in walk/explore, dead-zone stop in phototaxis, steer gate at boundary, stable head bias sign
-REMOVED: Brain 3D toolbar button (Brain3D module untouched, unreachable from toolbar), Calendar tab/panel/script (caretaker-calendar.js file remains on disk, unloaded; CaretakerSidebar 'calendar' activation branch remains but unreachable -- typeof-guarded)
+INDICATOR: toolbar badge shows Claude: watching | delivering food | dimming the lights | ... for 6 s per command, event-driven, no polling loops
+SINGLE_FLY: only the latest WS connection's states are processed; commands already went only to latest
+COPY: no 'MOCK MODE' language user-facing; DEMO (amber) / LIVE (green)
 
 == BUG_FIXES ==
-FIX:spin_walk_floor | js/main.js computeMovementForBehavior walk/explore | targetSpeed floor 0.25 | was: totalWalk/100 ~0.05 at entry threshold, visually stationary while explore jitter turned heading
-FIX:spin_phototaxis_deadzone | js/main.js phototaxis branch | dist<40 -> stop and hold heading | was: atan2 to hardcoded canvas center flips 180deg on overshoot, endless oscillation
-FIX:spin_boundary_gate | js/main.js edge steering | requires speed > 0.05 | was: rotated stationary flies toward center every frame
-FIX:head_bias_jitter | js/main.js head bias | sign persists, flips on real asymmetry > 1 | was: sign keyed to +-0.04 jitter, random per-tick heading flips
+FIX:brain_guide_dead_button | js/main.js brainGuideBtn handler | stopPropagation added | was: education panel opened then instantly closed by document outside-click handler on the same bubbled event
+FIX:phantom_fly_states | server/caretaker.js ws message handler | non-primary sockets ignored | was: two tabs interleaved states (one throttled/frozen), producing phantom hunger spikes and wrong food counts in chat context and workday agent evaluation
 
 == KNOWN_GAPS ==
-GAP:motor_scale_uncalibrated | MOTOR_SCALE 0.6 remains the pre-calibration guess; D23 calibration tasks in TASKS.md still unfinished; the speed floor masks the symptom at walk entry | acceptable: deliberate choice, floor vs recalibration double-correction avoided
-GAP:spin_fix_visual | fixes verified by static reasoning + suite, not by long-run visual observation; residual slow rotation may persist in rest/groom (no targetDir change there, so expected none)
-GAP:calendar_code_orphaned | caretaker-calendar.js + calendar CSS + db daily_scores/calendar endpoints remain server-side and on disk, now unused by UI | LOW, harmless
-GAP:modal_visual | modal layout verified by markup/CSS reasoning, not screenshot
+GAP:policy_effect_unverified | chat-policy/caretaker-policy text changes steer a haiku LLM; compliance is probabilistic, not guaranteed
+GAP:indicator_shows_any_source | activity indicator reflects commands from both the caretaker loop and workday fulfillments (both arrive as WS commands); label does not distinguish who ordered it -- acceptable, both are Claude
+GAP:public_site_no_caretaker | flybrain.app (GitHub Pages) has no reachable caretaker server; public visitors get sim + empty Inbox, no Claude badge (WS to :7600 fails; https page cannot open ws://). Known deployment gap, out of scope for this batch
 
 == VERIFICATION_MATRIX ==
-CHECK:syntax | node --check js/main.js | pass | PASS
-CHECK:existing_suite | node tests/run-node.js | 104 passed / 0 failed | PASS
-CHECK:no_calendar_refs | grep -n "caretaker-calendar\|data-tab=\"calendar\"\|calendar-content" index.html returns nothing | UNTESTED
-CHECK:no_brain3d_button | grep -c 'id="brain3dBtn"' index.html returns 0; grep 'if (brain3dBtn)' js/main.js confirms guard so missing element is safe | UNTESTED
-CHECK:modal_z | .help-overlay z-index 90 > .caretaker-sidebar 30 and education-panel 40 | UNTESTED
-CHECK:overlay_show_flex | no remaining helpOverlay.style.display = 'block' in js/main.js | UNTESTED
-CHECK:spin_conditions | in computeMovementForBehavior: walk/explore targetSpeed floor present BEFORE speedChangeInterval calc; phototaxis dead-zone sets targetSpeed 0 and speedChangeInterval uses it; boundary steer wrapped in speed guard; headBiasSign module-level not per-call | UNTESTED
-CHECK:escape_close | keydown handler closes only when overlay visible; backdrop click closes only on e.target === helpOverlay (not clicks inside modal) | UNTESTED
+CHECK:syntax | node --check js/main.js js/caretaker-bridge.js js/workday-panel.js server/caretaker.js | pass | PASS
+CHECK:unit | node tests/workday-node.js | 25 passed | PASS
+CHECK:suite | node tests/run-node.js | 104 passed | PASS
+CHECK:smoke | node tests/workday-smoke.js | SMOKE PASS | PASS
+CHECK:stale_socket_ignored | two WS clients connect to an ephemeral-port server; first (stale) client sends hungry state -> no workday_action broadcast and GET /state does not reflect it; second (current) client's state IS processed | UNTESTED
+CHECK:no_mock_mode_copy | grep -n 'MOCK MODE' index.html js/workday-panel.js returns nothing | UNTESTED
+CHECK:indicator_wiring | claudeStatusText exists in index.html; setClaudeActivity called in executeCommand before switch; revert timer 6000 | UNTESTED
+CHECK:stopprop | brainGuideBtn handler calls e.stopPropagation() before opening guide | UNTESTED
