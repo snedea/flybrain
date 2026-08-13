@@ -687,10 +687,9 @@ canvas {
     flex-wrap: wrap;
 }
 
+/* Telemetry line retired from the UI; JS still writes to the element */
 .connectome-subtitle {
-    font-size: 0.55rem;
-    color: var(--text-muted);
-    opacity: 0.7;
+    display: none;
 }
 
 .scale-indicator {
@@ -2128,20 +2127,12 @@ canvas {
         transition: none;
     }
 
-    /* The telemetry subtitle eats the neuron field's height on phones;
-       hide it so the connectome strip is actually visible */
-    .connectome-subtitle {
-        display: none;
-    }
 
     #left-panel.drawer-open {
         height: 50vh;
         flex-direction: column;
     }
 
-    #left-panel.drawer-open .connectome-subtitle {
-        display: block;
-    }
 
     /* Drawer handle indicator */
     #left-panel::before {
