@@ -49,45 +49,28 @@ Watch the fly work: flybrain.app
 
 ### What I'm seeking to achieve
 
-This is a demonstration piece for one message: there has never been a
-better time to be a Workday developer. Workday just shipped real
-agentic tooling, Agents, the Agent Gateway, and agent-callable APIs,
-and I wanted to show what that actually makes possible rather than
-describe it. So I built something memorable: a real fruit fly brain
-(139,255 mapped neurons, published in Nature) running live in the
-browser, with an ambient agent named Buzz that reads the fly's state
-and files genuine Workday requests on its behalf, and a reviewer that
-approves or denies each one before anything happens. It is
-deliberately playful on the surface, but the pattern underneath is the
-serious part: agents that act on signals instead of forms, with
-governance built into the loop. It was built in a day, which is itself
-part of the message. It also puts the Kainos Workday AI CoE visibly at
-the front of this tooling; the site carries our branding and
-watermark.
+Show, not tell, that there has never been a better time to be a
+Workday developer. A real fruit fly brain runs live in the browser; an
+ambient agent named Buzz reads its state and files genuine Workday
+requests; a reviewer approves or denies each one. Playful surface,
+serious pattern: agents acting on signals instead of forms, with
+governance in the loop. Built in a day on Workday's new agentic
+tooling, under Kainos Workday AI CoE branding.
 
 ### Intended audience
 
-The same two groups my article series has been speaking to. Decision
-makers, who should come away thinking "if this works for a fly's
-behavior, it works for the signals in my organization, and the
-approval step means it can be governed." And Workday developers, who
-will recognize the actual APIs and the Agent Gateway in the demo and
-realize how reachable this is.
+The same audience as my article series: Workday decision makers (the
+pattern is governable) and Workday developers (the tooling is
+reachable).
 
 ### Call to action
 
-Layered, and leaning on the articles. First: visit flybrain.app and
-watch it work; the site explains itself. Second: the article series
-carries the education for anyone who wants to understand how to build
-this way, so the post and the site funnel curious readers there.
-Third, for organizations: talk to the Kainos Workday AI CoE about what
-an ambient agent could read off the systems they already have. The fly
-is the hook, the articles are the depth, and the CoE is the door.
+Visit flybrain.app, read the article series for the how, and talk to
+the Kainos Workday AI CoE about what an ambient agent could read off
+the systems you already have.
 
-### Disclosure notes for marketing
+### Disclosures
 
-- The public demo simulates the Workday calls end to end; the post
-  says so in one sentence. Same code files real paperwork against a
-  real tenant.
-- The Workday logo on the site marks the integration surface, as in
-  any partner demo.
+The public demo simulates the Workday calls (the post says so); the
+same code runs against a real tenant. The Workday logo marks the
+integration surface, as in any partner demo.
