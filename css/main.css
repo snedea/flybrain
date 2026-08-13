@@ -598,7 +598,7 @@ canvas {
     justify-content: space-between;
     align-items: center;
     padding: 1.1rem 1.25rem 0.7rem;
-    color: #fff;
+    color: var(--text);
     font-size: 1rem;
     font-weight: 700;
     letter-spacing: -0.01em;
@@ -618,7 +618,7 @@ canvas {
 
 .help-close-btn:hover {
     background: var(--k-tint);
-    color: #fff;
+    color: var(--accent);
     border-color: var(--accent);
 }
 
@@ -635,7 +635,7 @@ canvas {
 
 .help-about p strong {
     font-weight: 700;
-    color: #fff;
+    color: var(--k-blue);
 }
 
 /* Standalone headline line keeps the gradient treatment */
@@ -668,9 +668,10 @@ canvas {
     font-size: 0.72rem;
     color: var(--text-muted);
     margin-top: 0.5rem;
-    padding-top: 0.65rem;
+    padding: 0.65rem 1.25rem 0;
     border-top: 1px solid var(--border);
     line-height: 1.5;
+    text-align: center;
 }
 
 .help-credits a {
