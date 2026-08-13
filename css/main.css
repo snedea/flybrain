@@ -2048,9 +2048,11 @@ canvas {
     font-variant-numeric: tabular-nums;
 }
 
-.workday-stat-num {
-    color: #33384a;
-}
+#wd-stat-meal_voucher { color: #c25705; }
+#wd-stat-pto_request { color: var(--accent); }
+#wd-stat-career_goal { color: var(--success); }
+#wd-stat-kudos { color: var(--warning); }
+#wd-stat-safety_concern { color: var(--error); }
 
 .workday-actions-title {
     font-size: 0.62rem;
