@@ -28,10 +28,14 @@ function fail(msg) {
 function pass() {
   if (finished) return;
   finished = true;
-  console.log('SMOKE PASS: workday_action broadcast + persisted entry verified');
+  console.log('SMOKE PASS: request + fulfillment broadcast, food command, persisted entries verified');
   child.kill();
   process.exit(0);
 }
+
+var sawRequest = false;
+var sawFulfillment = false;
+var sawFoodCommand = false;
 
 var hungryState = {
   drives: { hunger: 0.95, fear: 0.0, fatigue: 0.1, curiosity: 0.5, groom: 0.1 },
@@ -46,7 +50,8 @@ child = spawn(process.execPath, [serverPath], {
   env: Object.assign({}, process.env, {
     CARETAKER_PORT: String(PORT),
     CARETAKER_DB: tmpDb,
-    WORKDAY_MODE: 'mock'
+    WORKDAY_MODE: 'mock',
+    WORKDAY_FULFILL_MS: '500'
   }),
   stdio: ['pipe', 'pipe', 'pipe']
 });
@@ -65,11 +70,14 @@ function checkHttp() {
       var rows;
       try { rows = JSON.parse(body); } catch (e) { return fail('bad JSON from /workday/actions'); }
       if (!Array.isArray(rows) || rows.length === 0) return fail('/workday/actions is empty');
-      var found = false;
+      var foundRequest = false;
+      var foundFulfillment = false;
       for (var i = 0; i < rows.length; i++) {
-        if (rows[i].intent === 'meal_voucher' && rows[i].status === 'submitted') found = true;
+        if (rows[i].intent === 'meal_voucher' && rows[i].status === 'submitted') foundRequest = true;
+        if (rows[i].intent === 'meal_voucher' && rows[i].status === 'fulfilled') foundFulfillment = true;
       }
-      if (!found) return fail('no submitted meal_voucher row in /workday/actions');
+      if (!foundRequest) return fail('no submitted meal_voucher row in /workday/actions');
+      if (!foundFulfillment) return fail('no fulfilled meal_voucher row in /workday/actions');
       pass();
     });
   }).on('error', function(e) { fail('http error: ' + e.message); });
@@ -85,13 +93,24 @@ setTimeout(function() {
   ws.on('message', function(data) {
     var msg;
     try { msg = JSON.parse(data.toString()); } catch (e) { return; }
+    if (msg.type === 'command' && msg.action === 'place_food') {
+      if (typeof msg.params.x !== 'number' || typeof msg.params.y !== 'number') {
+        return fail('place_food command missing coordinates');
+      }
+      sawFoodCommand = true;
+    }
     if (msg.type === 'workday_action') {
       if (msg.mode !== 'mock') return fail('expected mock mode, got ' + msg.mode);
       if (!msg.entry || msg.entry.intent !== 'meal_voucher') {
         return fail('expected meal_voucher, got ' + JSON.stringify(msg.entry && msg.entry.intent));
       }
-      if (!/^MOCK-/.test(msg.entry.requestId)) return fail('bad request id: ' + msg.entry.requestId);
-      // Broadcast verified; now check persistence over HTTP.
+      if (msg.entry.status === 'submitted') {
+        if (!/^MOCK-/.test(msg.entry.requestId)) return fail('bad request id: ' + msg.entry.requestId);
+        sawRequest = true;
+      }
+      if (msg.entry.status === 'fulfilled') sawFulfillment = true;
+    }
+    if (sawRequest && sawFulfillment && sawFoodCommand) {
       checkHttp();
     }
   });

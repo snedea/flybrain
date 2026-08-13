@@ -156,6 +156,37 @@ test('every intent buildAction returns tool, args, reasoning, summary', function
   }
 });
 
+test('buildFulfillment: meal_voucher drops food in front of the fly', function() {
+  var state = makeState();
+  state.position = { x: 200, y: 300, facingDir: 0, speed: 0 };
+  var f = agentModule.buildFulfillment('meal_voucher', 'MOCK-1', state);
+  assert.ok(f.summary.indexOf('approved') !== -1, f.summary);
+  assert.ok(f.command && f.command.action === 'place_food');
+  assert.ok(Math.abs(f.command.params.x - 260) < 0.001, 'x: ' + f.command.params.x);
+  assert.ok(Math.abs(f.command.params.y - 300) < 0.001, 'y: ' + f.command.params.y);
+});
+
+test('buildFulfillment: meal_voucher without state still approves, no command', function() {
+  var f = agentModule.buildFulfillment('meal_voucher', 'MOCK-2', null);
+  assert.ok(f !== null && f.command === null);
+});
+
+test('buildFulfillment: pto_request dims the lights', function() {
+  var f = agentModule.buildFulfillment('pto_request', 'MOCK-3', makeState());
+  assert.ok(f.command && f.command.action === 'set_light' && f.command.params.level === 'dim');
+});
+
+test('buildFulfillment: every intent has a fulfillment', function() {
+  for (var i = 0; i < INTENTS.length; i++) {
+    var f = agentModule.buildFulfillment(INTENTS[i].id, 'MOCK-N', makeState());
+    assert.ok(f && f.summary.length > 0 && f.reasoning.length > 0, INTENTS[i].id);
+  }
+});
+
+test('buildFulfillment: unknown intent returns null', function() {
+  assert.strictEqual(agentModule.buildFulfillment('nonsense', 'X', makeState()), null);
+});
+
 test('mock client returns ok with a MOCK request id', function() {
   var client = clientModule.createClient({ mode: 'mock' });
   assert.strictEqual(client.getMode(), 'mock');

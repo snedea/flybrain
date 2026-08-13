@@ -22,12 +22,15 @@ The fly has a job. When the caretaker server is running, the fly's internal
 drives are translated into real Workday actions via native Workday MCP tools:
 hungry with no food means a meal voucher request, exhausted means a PTO
 request for tomorrow, high curiosity becomes a career goal, courtship sends
-kudos to a coworker, and a fear spike files a workplace safety concern.
+kudos to a coworker, and a fear spike files a workplace safety concern. A few
+seconds after each request, Claude plays the administrator and approves it,
+delivering a real effect where one fits (an approved meal voucher drops food
+in front of the fly; approved PTO dims the lights).
 
-Watch it happen in the sidebar's **Workday** tab. Runs in mock mode by
-default (no credentials, no network); live mode targets a real tenant through
-the Workday Agent Gateway. Setup, intent thresholds, and API details:
-[docs/WORKDAY.md](docs/WORKDAY.md).
+Watch the request/approval pairs land in the sidebar's **Inbox** tab. Runs in
+mock mode by default (no credentials, no network); live mode targets a real
+tenant through the Workday Agent Gateway. Setup, intent thresholds, and API
+details: [docs/WORKDAY.md](docs/WORKDAY.md).
 
 ## Data Source
 

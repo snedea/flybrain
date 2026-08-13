@@ -120,6 +120,60 @@ var INTENTS = [
   }
 ];
 
+// Claude is also the Workday administrator: every submitted request gets
+// approved and fulfilled a few seconds later, with a real in-world effect
+// where one makes sense. Pure builder, exported for tests.
+function buildFulfillment(intentId, requestId, state) {
+  var ref = requestId ? ' (' + requestId + ')' : '';
+  if (intentId === 'meal_voucher') {
+    var command = null;
+    if (state && state.position) {
+      var dir = typeof state.position.facingDir === 'number' ? state.position.facingDir : 0;
+      command = {
+        action: 'place_food',
+        params: {
+          x: state.position.x + Math.cos(dir) * 60,
+          y: state.position.y + Math.sin(dir) * 60
+        }
+      };
+    }
+    return {
+      summary: 'Meal voucher approved -- food delivered',
+      reasoning: 'Claude (administrator): approved the meal voucher' + ref + ' and dropped food right in front of the fly. Bon appetit.',
+      command: command
+    };
+  }
+  if (intentId === 'pto_request') {
+    return {
+      summary: 'PTO approved -- lights dimmed for rest',
+      reasoning: 'Claude (administrator): time off request' + ref + ' approved effective immediately. Dimming the enclosure lights so the fly can actually rest.',
+      command: { action: 'set_light', params: { level: 'dim' } }
+    };
+  }
+  if (intentId === 'career_goal') {
+    return {
+      summary: 'Career goal approved',
+      reasoning: 'Claude (administrator): development goal' + ref + ' approved and added to the fly\'s growth plan. Ambition noted.',
+      command: null
+    };
+  }
+  if (intentId === 'kudos') {
+    return {
+      summary: 'Kudos delivered to the coworker',
+      reasoning: 'Claude (administrator): anytime feedback' + ref + ' routed to the recipient. The enclosure is a kinder place for it.',
+      command: null
+    };
+  }
+  if (intentId === 'safety_concern') {
+    return {
+      summary: 'Hazard review complete -- enclosure declared safe',
+      reasoning: 'Claude (administrator): investigated the safety concern' + ref + '. The large fast-moving object was the user. Monitoring continues.',
+      command: null
+    };
+  }
+  return null;
+}
+
 // Pure: returns the first intent whose condition holds and whose cooldown
 // (and the global gap) has elapsed, or null. Exported for tests.
 function evaluateIntents(state, lastFiredMap, nowMs, lastAnyMs) {
@@ -142,15 +196,46 @@ function createAgent(deps) {
   var broadcast = deps.broadcast;
   var writeStdout = deps.writeStdout;
   var config = deps.config || {};
+  var sendCommand = deps.sendCommand || function() { return false; };
   var workerCfg = {
     workerId: config.workerId || '21001',
     coworkerId: config.coworkerId || '21002'
   };
+  var fulfillDelayMs = config.fulfillDelayMs != null && !isNaN(config.fulfillDelayMs)
+    ? config.fulfillDelayMs : 6000;
   var lastFiredMap = {};
   var lastAnyMs = 0;
   var inFlight = false;
+  var lastState = null;
+
+  function fulfill(intentId, requestId) {
+    var fulfillment = buildFulfillment(intentId, requestId, lastState);
+    if (fulfillment === null) return;
+    if (fulfillment.command !== null) {
+      sendCommand(fulfillment.command.action, fulfillment.command.params, fulfillment.summary);
+    }
+    var entry = {
+      timestamp: new Date().toISOString(),
+      intent: intentId,
+      tool: 'claude_fulfillment',
+      args: fulfillment.command || {},
+      reasoning: fulfillment.reasoning,
+      summary: fulfillment.summary,
+      status: 'fulfilled',
+      requestId: requestId,
+      detail: 'fulfilled by Claude',
+      mode: client.getMode(),
+      snapshot: lastState ? { drives: lastState.drives, behavior: lastState.behavior.current } : null
+    };
+    try { db.insertWorkdayAction(entry); } catch (e) {
+      process.stderr.write('[workday] db insert error: ' + e.message + '\n');
+    }
+    broadcast({ type: 'workday_action', mode: entry.mode, entry: entry });
+    writeStdout({ type: 'workday_action', entry: entry });
+  }
 
   function onState(state) {
+    lastState = state;
     if (inFlight) return;
     var nowMs = Date.now();
     var intent = evaluateIntents(state, lastFiredMap, nowMs, lastAnyMs);
@@ -179,6 +264,9 @@ function createAgent(deps) {
       }
       broadcast({ type: 'workday_action', mode: entry.mode, entry: entry });
       writeStdout({ type: 'workday_action', entry: entry });
+      if (result.ok) {
+        setTimeout(function() { fulfill(intent.id, entry.requestId); }, fulfillDelayMs);
+      }
       inFlight = false;
     }).catch(function(err) {
       process.stderr.write('[workday] dispatch error: ' + err.message + '\n');
@@ -199,4 +287,4 @@ function createAgent(deps) {
   return { onState: onState, getStatus: getStatus };
 }
 
-module.exports = { createAgent: createAgent, evaluateIntents: evaluateIntents, INTENTS: INTENTS };
+module.exports = { createAgent: createAgent, evaluateIntents: evaluateIntents, buildFulfillment: buildFulfillment, INTENTS: INTENTS };

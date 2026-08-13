@@ -32,9 +32,13 @@ var workdayAgent = workdayAgentModule.createAgent({
   db: caretakerDb,
   broadcast: function(obj) { broadcastActivity(obj); },
   writeStdout: function(obj) { writeStdout(obj); },
+  sendCommand: function(action, params, reasoning) {
+    return dispatchCommand({ action: action, params: params, reasoning: reasoning });
+  },
   config: {
     workerId: process.env.WORKDAY_WORKER_ID,
-    coworkerId: process.env.WORKDAY_COWORKER_ID
+    coworkerId: process.env.WORKDAY_COWORKER_ID,
+    fulfillDelayMs: process.env.WORKDAY_FULFILL_MS ? parseInt(process.env.WORKDAY_FULFILL_MS, 10) : undefined
   }
 });
 
@@ -102,17 +106,11 @@ function handleStateMessage(data) {
   workdayAgent.onState(msg.data);
 }
 
-function handleStdinCommand(line) {
-  var cmd;
-  try { cmd = JSON.parse(line); } catch (e) {
-    process.stderr.write('[caretaker] Bad JSON from stdin: ' + e.message + '\n');
-    writeStdout({ type: 'error', message: 'Invalid JSON: ' + e.message });
-    return;
-  }
+function dispatchCommand(cmd) {
   if (VALID_ACTIONS.indexOf(cmd.action) === -1) {
     process.stderr.write('[caretaker] Unknown action: ' + cmd.action + '\n');
     writeStdout({ type: 'error', message: 'Unknown action: ' + cmd.action });
-    return;
+    return false;
   }
   preFearLevel = lastState ? lastState.drives.fear : 0;
   lastActionTime = Date.now();
@@ -127,9 +125,20 @@ function handleStdinCommand(line) {
       process.stderr.write('[caretaker] WebSocket send error: ' + e.message + '\n');
     }
     writeStdout({ type: 'action_ack', action: cmd.action, success: true });
-  } else {
-    writeStdout({ type: 'action_ack', action: cmd.action, success: false, error: 'no browser connected' });
+    return true;
   }
+  writeStdout({ type: 'action_ack', action: cmd.action, success: false, error: 'no browser connected' });
+  return false;
+}
+
+function handleStdinCommand(line) {
+  var cmd;
+  try { cmd = JSON.parse(line); } catch (e) {
+    process.stderr.write('[caretaker] Bad JSON from stdin: ' + e.message + '\n');
+    writeStdout({ type: 'error', message: 'Invalid JSON: ' + e.message });
+    return;
+  }
+  dispatchCommand(cmd);
 }
 
 function buildChatContext(userMessage) {

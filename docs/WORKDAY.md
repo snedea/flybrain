@@ -6,6 +6,12 @@ threshold, the caretaker server translates the biological need into a Workday
 action through native Workday MCP tools. Hungry fly, meal voucher. Tired fly,
 PTO request. It is exactly as serious as it sounds.
 
+Then the loop closes: a few seconds after each request is submitted, Claude
+plays the Workday administrator, approves it, and where it makes sense delivers
+a real in-world effect (an approved meal voucher drops food in front of the
+fly; approved PTO dims the enclosure lights). Every request/approval pair shows
+up in the sidebar's **Inbox** tab.
+
 ## How it works
 
 ```
@@ -14,7 +20,7 @@ browser (flybrain.app)                 caretaker server (node)          Workday
 | 139K-neuron sim     | ------------> | workday-agent.js       |  MCP tools/call
 | drives: hunger,     |   WebSocket   |  thresholds+cooldowns  | --------------->
 | fatigue, fear, ...  | <------------ | workday-client.js      |  Agent Gateway
-| Workday tab (feed)  | workday_action|  mock | live           |  us.agent.workday.com
+| Inbox tab (feed)    | workday_action|  mock | live           |  us.agent.workday.com
 +---------------------+               +------------------------+
 ```
 
@@ -26,20 +32,30 @@ browser (flybrain.app)                 caretaker server (node)          Workday
   fabricates a request ID locally. In `live` mode it POSTs a JSON-RPC 2.0
   `tools/call` to the Workday Agent Gateway MCP endpoint.
 - Results are stored in SQLite (`workday_actions` table), broadcast to the
-  browser, and rendered in the sidebar's **Workday** tab.
+  browser, and rendered in the sidebar's **Inbox** tab.
+- After a submitted action, `server/workday-agent.js` schedules a fulfillment
+  `WORKDAY_FULFILL_MS` (default 6000 ms) later. `buildFulfillment()` produces
+  the approval summary/reasoning and, for some intents, a world command routed
+  back through the caretaker's `dispatchCommand` (meal_voucher drops food in
+  front of the fly, pto_request dims the lights). The fulfillment is persisted
+  as a second `workday_actions` row with `status: 'fulfilled'` and
+  `tool: 'claude_fulfillment'`, then broadcast. Only successfully submitted
+  actions are fulfilled.
 
 ## The intent map
 
-| The fly is... | Trigger | Workday action | MCP tool | Cooldown |
-|---|---|---|---|---|
-| Hungry | hunger > 0.88 and no food in the enclosure | Meal voucher (one-time payment request) | `create_compensation_workers_requestOneTimePayment` | 10 min |
-| Tired | fatigue > 0.8, or resting with fatigue > 0.6 | PTO request for tomorrow | `create_absenceManagement_workers_requestTimeOff` | 30 min |
-| Curious | curiosity > 0.85 while exploring or walking | Adds a career goal (e.g. "Map the eastern rim of the petri dish") | `create_performanceEnablement_workerGoalEvents` | 60 min |
-| In love | courtship behavior | Sends anytime feedback (kudos) to a coworker | `create_performanceEnablement_workers_anytimeFeedbackEvents` | 30 min |
-| Scared | fear > 0.85 | Files a workplace safety concern | `create_performanceEnablement_workers_anytimeFeedbackEvents` | 20 min |
+| The fly is... | Trigger | Workday action | MCP tool | Cooldown | Fulfillment (approval effect) |
+|---|---|---|---|---|---|
+| Hungry | hunger > 0.88 and no food in the enclosure | Meal voucher (one-time payment request) | `create_compensation_workers_requestOneTimePayment` | 10 min | Approved; drops food ~60px in front of the fly (`place_food`) |
+| Tired | fatigue > 0.8, or resting with fatigue > 0.6 | PTO request for tomorrow | `create_absenceManagement_workers_requestTimeOff` | 30 min | Approved; dims the enclosure lights (`set_light` dim) |
+| Curious | curiosity > 0.85 while exploring or walking | Adds a career goal (e.g. "Map the eastern rim of the petri dish") | `create_performanceEnablement_workerGoalEvents` | 60 min | Approved; log entry only, no world command |
+| In love | courtship behavior | Sends anytime feedback (kudos) to a coworker | `create_performanceEnablement_workers_anytimeFeedbackEvents` | 30 min | Delivered; log entry only, no world command |
+| Scared | fear > 0.85 | Files a workplace safety concern | `create_performanceEnablement_workers_anytimeFeedbackEvents` | 20 min | Reviewed; log entry only, no world command |
 
 At most one action fires per state tick, with a 60 second global gap between
-any two actions. Priority is table order (hunger wins ties).
+any two actions. Priority is table order (hunger wins ties). Each submitted
+action is then approved and fulfilled by Claude (the administrator) after
+`WORKDAY_FULFILL_MS`, adding a second `fulfilled` row per request.
 
 ## Running it
 
@@ -50,8 +66,9 @@ npm run caretaker
 # then open http://localhost:<your static server port>/index.html
 ```
 
-Open the sidebar, pick the **Workday** tab. Starve the fly (no food) and watch
-it escalate to Compensation. The MOCK MODE badge means no network calls leave
+Open the sidebar, pick the **Inbox** tab. Starve the fly (no food) and watch
+it escalate to Compensation, then watch Claude approve the voucher and drop
+food a few seconds later. The MOCK MODE badge means no network calls leave
 the machine.
 
 ### Live mode (real Workday tenant)
@@ -90,21 +107,23 @@ the environment (or `source` the file).
 | `WORKDAY_TOKEN` | (empty) | Bearer tenant token, live mode only |
 | `WORKDAY_WORKER_ID` | `21001` | The fly's Employee_ID |
 | `WORKDAY_COWORKER_ID` | `21002` | Kudos recipient |
+| `WORKDAY_FULFILL_MS` | `6000` | Delay before Claude approves/fulfills a submitted action (ms) |
 | `CARETAKER_DB` | `data/caretaker.db` | SQLite path override (used by tests) |
 
 ## API surface added to the caretaker server
 
 - `GET /workday/actions` -- last 50 Workday actions (JSON).
 - `GET /workday/status` -- mode, worker ID, per-intent cooldown state.
-- WS broadcast `workday_action` -- fired per submitted/failed action.
+- WS broadcast `workday_action` -- fired per submitted/failed action and per
+  fulfilled action (the `fulfilled` approval row).
 - WS broadcast `workday_history` -- last 50 actions, sent on connect.
 - stdout event `workday_action` -- for the agent loop / log pipeline.
 
 ## Testing
 
 ```bash
-npm run test-workday    # 18 unit tests on the intent engine + client modes
-npm run smoke-workday   # end-to-end: server + fake browser + mock Workday
+npm run test-workday    # 23 unit tests on the intent engine + fulfillment + client modes
+npm run smoke-workday   # end-to-end: server + fake browser + mock Workday, request through fulfillment
 node tests/run-node.js  # existing sim test suite (unaffected)
 ```
 
@@ -121,5 +140,8 @@ node tests/run-node.js  # existing sim test suite (unaffected)
   against mock mode only; expect to adjust field shapes (especially
   `businessProcessParameters` and time-off plan references) the first time
   you point at a real tenant.
-- **The fly does not read your HR data.** State flows one way: sim to
-  Workday. The only writes are the five intents above.
+- **The fly does not read your HR data.** No Workday data flows back into the
+  sim. The only Workday writes are the five intents above; the only effects on
+  the fly are the local world commands the fulfillment step issues (food drop,
+  light dim), which are generated by `buildFulfillment` and never carry tenant
+  data.

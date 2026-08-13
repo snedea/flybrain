@@ -1834,6 +1834,15 @@ canvas {
     color: #f87171;
 }
 
+.workday-pill-fulfilled {
+    background: var(--accent-subtle);
+    color: var(--accent);
+}
+
+.workday-entry-fulfilled {
+    border-left-color: var(--success);
+}
+
 .workday-feed {
     flex: 1;
     overflow-y: auto;

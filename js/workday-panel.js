@@ -24,8 +24,9 @@
   }
 
   function renderEntry(entry) {
+    var fulfilled = entry.status === 'fulfilled';
     var div = document.createElement('div');
-    div.className = 'workday-entry';
+    div.className = 'workday-entry' + (fulfilled ? ' workday-entry-fulfilled' : '');
 
     var head = document.createElement('div');
     head.className = 'workday-entry-head';
@@ -36,9 +37,16 @@
     head.appendChild(summary);
 
     var status = document.createElement('span');
-    var ok = entry.status === 'submitted';
-    status.className = 'workday-pill ' + (ok ? 'workday-pill-ok' : 'workday-pill-fail');
-    status.textContent = ok ? 'SUBMITTED' : 'FAILED';
+    if (fulfilled) {
+      status.className = 'workday-pill workday-pill-fulfilled';
+      status.textContent = 'APPROVED';
+    } else if (entry.status === 'submitted') {
+      status.className = 'workday-pill workday-pill-ok';
+      status.textContent = 'SUBMITTED';
+    } else {
+      status.className = 'workday-pill workday-pill-fail';
+      status.textContent = 'FAILED';
+    }
     head.appendChild(status);
     div.appendChild(head);
 
@@ -83,7 +91,7 @@
     if (entries.length === 0) {
       var empty = document.createElement('div');
       empty.className = 'workday-empty';
-      empty.textContent = 'No Workday actions yet. The fly is either well cared for or between crises.';
+      empty.textContent = 'Inbox zero. The fly is either well cared for or between crises.';
       el.appendChild(empty);
       return;
     }
