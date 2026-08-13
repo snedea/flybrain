@@ -1920,11 +1920,13 @@ canvas {
     justify-content: center;
 }
 
-/* Public site: Chat and Analytics require the private local server */
+/* Public site: Chat and Analytics require the private local server.
+   With Inbox as the only tab left, the whole tab row goes too. */
 .public-mode .sidebar-tab[data-tab="chat"],
 .public-mode .sidebar-tab[data-tab="analytics"],
 .public-mode [data-tab-content="chat"],
-.public-mode [data-tab-content="analytics"] {
+.public-mode [data-tab-content="analytics"],
+.public-mode .sidebar-tabs {
     display: none !important;
 }
 

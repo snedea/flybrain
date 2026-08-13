@@ -4,12 +4,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>FlyBrain</title>
-    <link rel="stylesheet" type="text/css" href="./css/main.css?v=56">
+    <link rel="stylesheet" type="text/css" href="./css/main.css?v=57">
 </head>
 
 <body>
     <div id="toolbar">
         <div class="toolbar-left">
+            <img src="./svg/workday.svg" height="22" class="noselect workday-logo" alt="Workday">
             <button class="tool-btn sidebar-toggle" id="sidebarToggle" aria-label="Toggle panel">&#9776;</button>
             <button class="tool-btn active" data-tool="feed">Feed</button>
             <button class="tool-btn" data-tool="touch">Touch</button>
@@ -120,9 +121,7 @@
     <div id="caretaker-sidebar" class="caretaker-sidebar">
         <div class="caretaker-sidebar-handle" id="sheet-handle"></div>
         <div class="sidebar-tabs" id="sidebar-tabs">
-            <button class="sidebar-tab active sidebar-tab-logo" data-tab="workday" aria-label="Inbox">
-                <img src="./svg/workday.svg" height="26" class="noselect workday-logo" alt="Inbox">
-            </button>
+            <button class="sidebar-tab active" data-tab="workday">Inbox</button>
             <button class="sidebar-tab" data-tab="chat">Chat</button>
             <button class="caretaker-sidebar-close" id="caretaker-sidebar-close">&times;</button>
         </div>
