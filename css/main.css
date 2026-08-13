@@ -2197,13 +2197,13 @@ canvas {
    MOBILE LAYOUT (max-width: 768px)
    ======================================== */
 @media (max-width: 768px) {
-    /* --- Hamburger visible on mobile --- */
-    #sidebarToggle {
-        display: inline-block;
+    /* --- Region labels overlap on a squeezed strip; colors suffice --- */
+    #neuro-labels {
+        display: none;
     }
 
-    /* --- Lite button visible on mobile --- */
-    #liteBtn {
+    /* --- Hamburger visible on mobile --- */
+    #sidebarToggle {
         display: inline-block;
     }
 
@@ -2354,14 +2354,19 @@ canvas {
 
     .caretaker-sidebar-handle {
         display: block;
+        box-sizing: content-box;
         width: 36px;
         height: 4px;
+        /* Big invisible touch zone; the visible bar stays 36x4 */
+        padding: 14px 60px 10px;
         background: var(--text-muted);
+        background-clip: content-box;
         border-radius: 2px;
-        margin: 8px auto 4px auto;
+        margin: 0 auto;
         flex-shrink: 0;
         opacity: 0.5;
         cursor: grab;
+        touch-action: none;
     }
 
     #activityToggle {
