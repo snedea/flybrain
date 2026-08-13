@@ -300,10 +300,21 @@ canvas {
 }
 
 .claude-status {
+    position: fixed;
+    right: 1rem;
+    /* Bottom-right corner of the enclosure, above the connectome strip */
+    bottom: calc(180px + 0.9rem);
     display: flex;
     align-items: center;
     gap: 0.4rem;
+    z-index: 15;
     font-family: system-ui, -apple-system, sans-serif;
+}
+
+@media (max-width: 768px) {
+    .claude-status {
+        bottom: calc(140px + 0.9rem);
+    }
 }
 
 .claude-spark {

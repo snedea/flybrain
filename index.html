@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>FlyBrain</title>
-    <link rel="stylesheet" type="text/css" href="./css/main.css?v=49">
+    <link rel="stylesheet" type="text/css" href="./css/main.css?v=50">
 </head>
 
 <body>
@@ -20,10 +20,6 @@
             <button class="tool-btn" data-tool="water">Water</button>
             <button class="tool-btn" id="learnBtn" style="display:none;">Brain Guide</button>
             <button class="tool-btn" id="helpBtn" style="display:none;">Learn</button>
-            <span id="claudeStatus" class="claude-status" style="display:none;">
-                <span class="claude-spark" id="claudeSpark">&#10035;</span>
-                <span class="claude-status-text" id="claudeStatusText">Claude: watching&#8230;</span>
-            </span>
             <button class="tool-btn" id="liteBtn">Lite</button>
         </div>
         <div class="toolbar-right">
@@ -157,6 +153,10 @@
         <button class="zoom-btn" id="zoomIn">+</button>
         <button class="zoom-btn" id="zoomOut">&minus;</button>
     </div>
+    <span id="claudeStatus" class="claude-status" style="display:none;">
+        <span class="claude-spark" id="claudeSpark">&#10035;</span>
+        <span class="claude-status-text" id="claudeStatusText">Claude: watching&#8230;</span>
+    </span>
     <div id="education-panel" class="education-panel" style="display:none;">
         <div class="education-panel-header">
             <span class="education-panel-title">Brain Guide</span>
