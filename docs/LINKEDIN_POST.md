@@ -22,12 +22,13 @@ thanks to the Workday tooling, could easily work on a WD tenant.
 Here is why I built it on Workday. Most of what employees need never
 gets typed into a form. It shows up as signals in the systems around
 them: time entries that stop showing up, project dates that quietly
-slip, invoice approvals sitting for two weeks, and PTO balances nobody
-is touching. If an agent can turn a fly's behavior into clean Workday
+slip, invoice approvals sitting for two weeks, and weekend logins
+creeping in. If an agent can turn a fly's behavior into clean Workday
 transactions with an approval step in the loop, then the same pattern
-can read the signals your people are already giving off. I think the
-fly is just proof that the rails work: the APIs, the Agent Gateway, and
-someone, human or Claude, saying yes or no.
+can read the signals your people are already giving off. The fly is
+the proof of concept. The APIs, the Agent Gateway, and the ambient
+agent are not. Those are real today, waiting for better signals than
+a hungry fly.
 
 Watch the fly work: flybrain.app
 
