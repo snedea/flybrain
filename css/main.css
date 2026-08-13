@@ -1297,6 +1297,11 @@ canvas {
 .kainos-mark {
     display: flex;
     align-items: center;
+    cursor: pointer;
+}
+
+.kainos-mark:hover svg {
+    opacity: 1;
 }
 
 .kainos-mark svg {
