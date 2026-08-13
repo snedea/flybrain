@@ -325,40 +325,38 @@ canvas {
     }
 }
 
-/* Ghost watermark in the fly's space, above the connectome strip */
+/* Kainos watermark, studio-style: small wordmark in the corner of the
+   fly's space (mirrors the agent builder diagram attribution) */
 .coe-watermark {
     position: fixed;
-    left: calc(320px + (100vw - 320px) / 2);
-    bottom: calc(180px + 2.2rem);
-    transform: translateX(-50%);
-    text-align: center;
+    left: calc(320px + 16px);
+    bottom: calc(180px + 12px);
+    width: 104px;
     z-index: 5;
     pointer-events: none;
-    color: var(--k-navy);
-    opacity: 0.07;
+    color: var(--text-muted);
+    opacity: 0.4;
     font-family: system-ui, -apple-system, sans-serif;
 }
 
-.coe-watermark .coe-k {
-    font-size: 3rem;
-    font-weight: 800;
-    letter-spacing: 0.3em;
-    margin-right: -0.3em;
-    line-height: 1;
+.coe-watermark svg {
+    display: block;
+    width: 100%;
+    height: auto;
 }
 
 .coe-watermark .coe-sub {
-    font-size: 0.9rem;
+    font-size: 0.5rem;
     font-weight: 700;
-    letter-spacing: 0.5em;
-    margin-right: -0.5em;
-    margin-top: 0.4rem;
+    letter-spacing: 0.18em;
+    margin-top: 2px;
+    text-align: center;
 }
 
 @media (max-width: 768px) {
     .coe-watermark {
-        left: 50vw;
-        bottom: calc(140px + 2rem);
+        left: 12px;
+        bottom: calc(140px + 10px);
     }
 }
 

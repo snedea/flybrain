@@ -187,8 +187,11 @@
 			'in float v_brightness;',
 			'out vec4 fragColor;',
 			'void main() {',
-			'    float b = 0.15 + v_brightness * 0.85;',
-			'    fragColor = vec4(v_color * b, 1.0);',
+			// Light theme: idle neurons are a faint tint of their region color
+			// on the light surface; firing neurons saturate toward full color.
+			'    float b = 0.12 + v_brightness * 0.88;',
+			'    vec3 surface = vec3(0.933, 0.941, 0.965);',
+			'    fragColor = vec4(mix(surface, v_color, b), 1.0);',
 			'}'
 		].join('\n');
 
@@ -490,7 +493,7 @@
 			gl.bindBuffer(gl.ARRAY_BUFFER, brightnessBuffer);
 			gl.bufferSubData(gl.ARRAY_BUFFER, 0, brightnessData);
 
-			gl.clearColor(0.086, 0.129, 0.243, 1.0);
+			gl.clearColor(0.933, 0.941, 0.965, 1.0);
 			gl.clear(gl.COLOR_BUFFER_BIT);
 
 			gl.useProgram(program);
