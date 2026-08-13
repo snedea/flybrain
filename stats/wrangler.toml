@@ -1,0 +1,11 @@
+name = "flybrain-stats"
+main = "worker.js"
+compatibility_date = "2026-08-01"
+account_id = "4845299d3631fda0ba15f8a1d753e855"
+
+routes = [
+  { pattern = "stats.flybrain.app", custom_domain = true }
+]
+
+[vars]
+ZONE_NAME = "flybrain.app"
