@@ -64,10 +64,11 @@
   }, 300);
 
   function setActivityText(text) {
+    var terminalText = text + '…';
     var toolbar = document.getElementById('claudeStatusText');
-    if (toolbar) toolbar.textContent = text;
+    if (toolbar) toolbar.textContent = terminalText;
     var sidebar = document.getElementById('claudeActivitySidebar');
-    if (sidebar) sidebar.textContent = text;
+    if (sidebar) sidebar.textContent = terminalText;
   }
 
   function setClaudeActivity(action, params) {

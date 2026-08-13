@@ -311,10 +311,10 @@ canvas {
 }
 
 .claude-status-text {
-    font-size: 0.7rem;
-    font-weight: 600;
-    color: #b4bfff;
-    letter-spacing: 0.05em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: #d97757;
 }
 
 /* --- Bottom Panel --- */
