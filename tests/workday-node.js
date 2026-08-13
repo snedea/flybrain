@@ -108,10 +108,15 @@ test('curious but idle fires nothing', function() {
   assert.strictEqual(evaluateIntents(s, {}, NOW, 0), null);
 });
 
-test('courtship fires kudos', function() {
-  var s = makeState({ behavior: { current: 'courtship' } });
+test('contented feeding fires kudos', function() {
+  var s = makeState({ drives: { hunger: 0.3 }, behavior: { current: 'feed' } });
   var intent = evaluateIntents(s, {}, NOW, 0);
   assert.ok(intent && intent.id === 'kudos');
+});
+
+test('feeding while still very hungry does not fire kudos', function() {
+  var s = makeState({ drives: { hunger: 0.7 }, behavior: { current: 'feed' } });
+  assert.strictEqual(evaluateIntents(s, {}, NOW, 0), null);
 });
 
 test('high fear fires safety_concern', function() {
@@ -143,7 +148,7 @@ test('every intent buildAction returns tool, args, reasoning, summary', function
     meal_voucher: makeState({ drives: { hunger: 0.92 } }),
     pto_request: makeState({ drives: { fatigue: 0.85 } }),
     career_goal: makeState({ drives: { curiosity: 0.9 }, behavior: { current: 'explore' } }),
-    kudos: makeState({ behavior: { current: 'courtship' } }),
+    kudos: makeState({ drives: { hunger: 0.3 }, behavior: { current: 'feed' } }),
     safety_concern: makeState({ drives: { fear: 0.9 } })
   };
   for (var i = 0; i < INTENTS.length; i++) {
@@ -156,35 +161,48 @@ test('every intent buildAction returns tool, args, reasoning, summary', function
   }
 });
 
-test('buildFulfillment: meal_voucher drops food in front of the fly', function() {
+test('buildResolution: approved meal_voucher drops food in front of the fly', function() {
   var state = makeState();
   state.position = { x: 200, y: 300, facingDir: 0, speed: 0 };
-  var f = agentModule.buildFulfillment('meal_voucher', 'MOCK-1', state);
-  assert.ok(f.summary.indexOf('approved') !== -1, f.summary);
-  assert.ok(f.command && f.command.action === 'place_food');
-  assert.ok(Math.abs(f.command.params.x - 260) < 0.001, 'x: ' + f.command.params.x);
-  assert.ok(Math.abs(f.command.params.y - 300) < 0.001, 'y: ' + f.command.params.y);
+  var r = agentModule.buildResolution('meal_voucher', 'MOCK-1', state, true);
+  assert.ok(r.summary.indexOf('approved') !== -1, r.summary);
+  assert.ok(r.command && r.command.action === 'place_food');
+  assert.ok(Math.abs(r.command.params.x - 260) < 0.001, 'x: ' + r.command.params.x);
+  assert.ok(Math.abs(r.command.params.y - 300) < 0.001, 'y: ' + r.command.params.y);
 });
 
-test('buildFulfillment: meal_voucher without state still approves, no command', function() {
-  var f = agentModule.buildFulfillment('meal_voucher', 'MOCK-2', null);
-  assert.ok(f !== null && f.command === null);
+test('buildResolution: denied meal_voucher has no command, no food', function() {
+  var state = makeState();
+  state.position = { x: 200, y: 300, facingDir: 0, speed: 0 };
+  var r = agentModule.buildResolution('meal_voucher', 'MOCK-1', state, false);
+  assert.ok(r.summary.toLowerCase().indexOf('denied') !== -1, r.summary);
+  assert.strictEqual(r.command, null);
 });
 
-test('buildFulfillment: pto_request dims the lights', function() {
-  var f = agentModule.buildFulfillment('pto_request', 'MOCK-3', makeState());
-  assert.ok(f.command && f.command.action === 'set_light' && f.command.params.level === 'dim');
+test('buildResolution: approved meal_voucher without state still approves, no command', function() {
+  var r = agentModule.buildResolution('meal_voucher', 'MOCK-2', null, true);
+  assert.ok(r !== null && r.command === null);
 });
 
-test('buildFulfillment: every intent has a fulfillment', function() {
+test('buildResolution: approved pto_request dims the lights, denied does not', function() {
+  var ok = agentModule.buildResolution('pto_request', 'MOCK-3', makeState(), true);
+  assert.ok(ok.command && ok.command.action === 'set_light' && ok.command.params.level === 'dim');
+  var no = agentModule.buildResolution('pto_request', 'MOCK-3', makeState(), false);
+  assert.strictEqual(no.command, null);
+});
+
+test('buildResolution: every intent has approved and denied variants', function() {
   for (var i = 0; i < INTENTS.length; i++) {
-    var f = agentModule.buildFulfillment(INTENTS[i].id, 'MOCK-N', makeState());
-    assert.ok(f && f.summary.length > 0 && f.reasoning.length > 0, INTENTS[i].id);
+    var ok = agentModule.buildResolution(INTENTS[i].id, 'MOCK-N', makeState(), true);
+    var no = agentModule.buildResolution(INTENTS[i].id, 'MOCK-N', makeState(), false);
+    assert.ok(ok && ok.summary.length > 0 && ok.reasoning.length > 0, INTENTS[i].id + ' approved');
+    assert.ok(no && no.summary.length > 0 && no.reasoning.length > 0, INTENTS[i].id + ' denied');
+    assert.strictEqual(no.command, null, INTENTS[i].id + ' denied must have no world effect');
   }
 });
 
-test('buildFulfillment: unknown intent returns null', function() {
-  assert.strictEqual(agentModule.buildFulfillment('nonsense', 'X', makeState()), null);
+test('buildResolution: unknown intent returns null', function() {
+  assert.strictEqual(agentModule.buildResolution('nonsense', 'X', makeState(), true), null);
 });
 
 test('mock client returns ok with a MOCK request id', function() {

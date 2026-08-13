@@ -51,7 +51,8 @@ child = spawn(process.execPath, [serverPath], {
     CARETAKER_PORT: String(PORT),
     CARETAKER_DB: tmpDb,
     WORKDAY_MODE: 'mock',
-    WORKDAY_FULFILL_MS: '500'
+    WORKDAY_FULFILL_MS: '500',
+    WORKDAY_DENY_CHANCE: '0'
   }),
   stdio: ['pipe', 'pipe', 'pipe']
 });

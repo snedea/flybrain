@@ -169,6 +169,10 @@ var behavior = {
 
 // --- Tool state ---
 var activeTool = 'feed';
+// Observer mode: Claude runs the enclosure (feeding, light, temp). User
+// interaction tools are hidden and canvas clicks do not change the world.
+// Zoom/pan gestures still work.
+var OBSERVER_MODE = true;
 var isDragging = false;
 var dragStart = { x: 0, y: 0 };
 var canvasTouchActive = false;
@@ -542,6 +546,16 @@ helpCloseBtn.addEventListener('click', function () {
 	localStorage.setItem('flybrain_seen_splash', '1');
 });
 
+// Brain Guide lives inside the Learn popup (toolbar button is hidden)
+var brainGuideBtn = document.getElementById('brainGuideBtn');
+if (brainGuideBtn) {
+	brainGuideBtn.addEventListener('click', function () {
+		helpOverlay.style.display = 'none';
+		localStorage.setItem('flybrain_seen_splash', '1');
+		if (learnBtn) learnBtn.click();
+	});
+}
+
 // Close help overlay when clicking outside of it
 document.addEventListener('click', function (e) {
 	if (helpOverlay.style.display !== 'none' &&
@@ -904,6 +918,7 @@ canvas.addEventListener('wheel', function (event) {
 }, { passive: false });
 
 function handleCanvasMousedown(event) {
+	if (OBSERVER_MODE) return;
 	var world = screenToWorld(event.clientX, event.clientY);
 	var cx = world.x;
 	var cy = world.y;

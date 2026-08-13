@@ -28,9 +28,9 @@ var INTENTS = [
           oneTimePayments: [{ reason: 'Meal voucher', amount: 12.5, currency: 'USD' }],
           effectiveDate: new Date().toISOString().slice(0, 10)
         },
-        reasoning: 'Hunger at ' + state.drives.hunger.toFixed(2) +
-          ' and the enclosure is out of food. Escalating to Compensation.',
-        summary: 'Requested a meal voucher (one-time payment)'
+        reasoning: 'The fly cannot type. Observed hunger at ' + state.drives.hunger.toFixed(2) +
+          ', an empty enclosure, and restless searching. In fly, that is a lunch request. Filing a meal voucher on its behalf.',
+        summary: 'Filed a meal voucher on the fly\'s behalf'
       };
     }
   },
@@ -49,10 +49,10 @@ var INTENTS = [
           workersId: cfg.workerId,
           days: [{ date: tomorrow, dailyQuantity: 1 }]
         },
-        reasoning: 'Fatigue at ' + state.drives.fatigue.toFixed(2) +
-          (state.behavior.current === 'rest' ? ' and already resting on the job.' : '.') +
-          ' Submitting a time off request for tomorrow.',
-        summary: 'Requested PTO for tomorrow'
+        reasoning: 'Observed fatigue at ' + state.drives.fatigue.toFixed(2) +
+          (state.behavior.current === 'rest' ? ' and the fly already resting on the job.' : '.') +
+          ' Interpreting that as a request for rest. Filing PTO for tomorrow on its behalf.',
+        summary: 'Filed a PTO request on the fly\'s behalf'
       };
     }
   },
@@ -71,9 +71,9 @@ var INTENTS = [
           workersId: cfg.workerId,
           goal: { name: name, description: 'Self-directed development goal, set mid-exploration.' }
         },
-        reasoning: 'Curiosity at ' + state.drives.curiosity.toFixed(2) +
-          ' while exploring. Channeling it into a development goal: "' + name + '".',
-        summary: 'Added career goal: ' + name
+        reasoning: 'Observed curiosity at ' + state.drives.curiosity.toFixed(2) +
+          ' and sustained exploration. Reading that as ambition. Logging a development goal on its behalf: "' + name + '".',
+        summary: 'Filed a career goal on the fly\'s behalf: ' + name
       };
     }
   },
@@ -81,7 +81,7 @@ var INTENTS = [
     id: 'kudos',
     cooldownMs: 30 * 60 * 1000,
     condition: function(state) {
-      return state.behavior.current === 'courtship';
+      return state.behavior.current === 'feed' && state.drives.hunger < 0.5;
     },
     buildAction: function(state, cfg) {
       return {
@@ -89,11 +89,11 @@ var INTENTS = [
         args: {
           workersId: cfg.workerId,
           toWorker: cfg.coworkerId,
-          comment: 'Outstanding wing posture and excellent pheromone communication. A pleasure to share the enclosure with.',
+          comment: 'Consistently excellent enclosure support. The food arrived exactly when it was needed.',
           badge: 'collaboration'
         },
-        reasoning: 'Courtship behavior detected. Sending anytime feedback to a valued colleague.',
-        summary: 'Gave kudos to a coworker'
+        reasoning: 'Observed the fly feeding contentedly after its request was fulfilled. Interpreting that as gratitude. Sending kudos to the support team on its behalf.',
+        summary: 'Sent kudos on the fly\'s behalf'
       };
     }
   },
@@ -112,20 +112,28 @@ var INTENTS = [
           comment: 'Formal note: something large and fast moved through my workspace. Requesting a hazard review of the enclosure.',
           badge: 'wellbeing'
         },
-        reasoning: 'Fear spiked to ' + state.drives.fear.toFixed(2) +
-          '. Filing a workplace safety concern.',
-        summary: 'Filed a workplace safety concern'
+        reasoning: 'Observed fear spiking to ' + state.drives.fear.toFixed(2) +
+          ' with startle posture. The fly is reporting a hazard the only way it can. Filing a workplace safety concern on its behalf.',
+        summary: 'Filed a safety concern on the fly\'s behalf'
       };
     }
   }
 ];
 
-// Claude is also the Workday administrator: every submitted request gets
-// approved and fulfilled a few seconds later, with a real in-world effect
-// where one makes sense. Pure builder, exported for tests.
-function buildFulfillment(intentId, requestId, state) {
+// Claude is the Workday administrator: every request the fly's agent files
+// gets reviewed a few seconds later and approved (with a real in-world
+// effect where one makes sense) or, with some probability, denied.
+// Pure builder, exported for tests.
+function buildResolution(intentId, requestId, state, approved) {
   var ref = requestId ? ' (' + requestId + ')' : '';
   if (intentId === 'meal_voucher') {
+    if (!approved) {
+      return {
+        summary: 'Meal voucher denied',
+        reasoning: 'Claude (administrator): denied' + ref + '. Second voucher this shift and the enclosure has a food budget. The agent may re-file if the situation persists.',
+        command: null
+      };
+    }
     var command = null;
     if (state && state.position) {
       var dir = typeof state.position.facingDir === 'number' ? state.position.facingDir : 0;
@@ -139,35 +147,63 @@ function buildFulfillment(intentId, requestId, state) {
     }
     return {
       summary: 'Meal voucher approved -- food delivered',
-      reasoning: 'Claude (administrator): approved the meal voucher' + ref + ' and dropped food right in front of the fly. Bon appetit.',
+      reasoning: 'Claude (administrator): approved' + ref + ' and dropped food right in front of the fly. Bon appetit.',
       command: command
     };
   }
   if (intentId === 'pto_request') {
+    if (!approved) {
+      return {
+        summary: 'PTO denied',
+        reasoning: 'Claude (administrator): denied' + ref + '. Blackout period -- the demo is live and attendance is mandatory. Rest request noted for the record.',
+        command: null
+      };
+    }
     return {
       summary: 'PTO approved -- lights dimmed for rest',
-      reasoning: 'Claude (administrator): time off request' + ref + ' approved effective immediately. Dimming the enclosure lights so the fly can actually rest.',
+      reasoning: 'Claude (administrator): approved' + ref + ' effective immediately. Dimming the enclosure lights so the fly can actually rest.',
       command: { action: 'set_light', params: { level: 'dim' } }
     };
   }
   if (intentId === 'career_goal') {
+    if (!approved) {
+      return {
+        summary: 'Career goal sent back for revision',
+        reasoning: 'Claude (administrator): returned' + ref + '. The goal lacks measurable outcomes. What does done look like?',
+        command: null
+      };
+    }
     return {
       summary: 'Career goal approved',
-      reasoning: 'Claude (administrator): development goal' + ref + ' approved and added to the fly\'s growth plan. Ambition noted.',
+      reasoning: 'Claude (administrator): approved' + ref + ' and added to the fly\'s growth plan. Ambition noted.',
       command: null
     };
   }
   if (intentId === 'kudos') {
+    if (!approved) {
+      return {
+        summary: 'Kudos returned for revision',
+        reasoning: 'Claude (administrator): returned' + ref + '. Feedback must cite a specific behavior. "Excellent pheromones" is not actionable.',
+        command: null
+      };
+    }
     return {
       summary: 'Kudos delivered to the coworker',
-      reasoning: 'Claude (administrator): anytime feedback' + ref + ' routed to the recipient. The enclosure is a kinder place for it.',
+      reasoning: 'Claude (administrator): approved' + ref + ' and routed to the recipient. The enclosure is a kinder place for it.',
       command: null
     };
   }
   if (intentId === 'safety_concern') {
+    if (!approved) {
+      return {
+        summary: 'Safety concern dismissed',
+        reasoning: 'Claude (administrator): dismissed' + ref + '. The hazard was the user, who is load-bearing and cannot be removed from the enclosure.',
+        command: null
+      };
+    }
     return {
       summary: 'Hazard review complete -- enclosure declared safe',
-      reasoning: 'Claude (administrator): investigated the safety concern' + ref + '. The large fast-moving object was the user. Monitoring continues.',
+      reasoning: 'Claude (administrator): investigated' + ref + '. The large fast-moving object was the user. Monitoring continues.',
       command: null
     };
   }
@@ -203,27 +239,30 @@ function createAgent(deps) {
   };
   var fulfillDelayMs = config.fulfillDelayMs != null && !isNaN(config.fulfillDelayMs)
     ? config.fulfillDelayMs : 6000;
+  var denyChance = config.denyChance != null && !isNaN(config.denyChance)
+    ? Math.max(0, Math.min(1, config.denyChance)) : 0.15;
   var lastFiredMap = {};
   var lastAnyMs = 0;
   var inFlight = false;
   var lastState = null;
 
   function fulfill(intentId, requestId) {
-    var fulfillment = buildFulfillment(intentId, requestId, lastState);
-    if (fulfillment === null) return;
-    if (fulfillment.command !== null) {
-      sendCommand(fulfillment.command.action, fulfillment.command.params, fulfillment.summary);
+    var approved = Math.random() >= denyChance;
+    var resolution = buildResolution(intentId, requestId, lastState, approved);
+    if (resolution === null) return;
+    if (resolution.command !== null) {
+      sendCommand(resolution.command.action, resolution.command.params, resolution.summary);
     }
     var entry = {
       timestamp: new Date().toISOString(),
       intent: intentId,
-      tool: 'claude_fulfillment',
-      args: fulfillment.command || {},
-      reasoning: fulfillment.reasoning,
-      summary: fulfillment.summary,
-      status: 'fulfilled',
+      tool: 'claude_resolution',
+      args: resolution.command || {},
+      reasoning: resolution.reasoning,
+      summary: resolution.summary,
+      status: approved ? 'fulfilled' : 'denied',
       requestId: requestId,
-      detail: 'fulfilled by Claude',
+      detail: approved ? 'approved by Claude' : 'denied by Claude',
       mode: client.getMode(),
       snapshot: lastState ? { drives: lastState.drives, behavior: lastState.behavior.current } : null
     };
@@ -287,4 +326,4 @@ function createAgent(deps) {
   return { onState: onState, getStatus: getStatus };
 }
 
-module.exports = { createAgent: createAgent, evaluateIntents: evaluateIntents, buildFulfillment: buildFulfillment, INTENTS: INTENTS };
+module.exports = { createAgent: createAgent, evaluateIntents: evaluateIntents, buildResolution: buildResolution, INTENTS: INTENTS };

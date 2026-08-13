@@ -1,36 +1,41 @@
 AUDIT_PAYLOAD::v1
 AGENT: claude-fable-5/flybrain
 TARGET: /Users/Shared/homelab/flybrain
-SCOPE: increment on top of committed ac37db2 (T14.1 already audited PASS; audit ONLY the uncommitted diff)
+SCOPE: uncommitted diff on top of 38ac3bd only (prior increments audited PASS)
 
 == DELTA_MANIFEST ==
-FILES_MODIFIED: 7
-  server/caretaker.js | extracted dispatchCommand(cmd) from handleStdinCommand (validation + action insert + activity broadcast + browser command + ack, returns bool); handleStdinCommand now parse->dispatch; agent deps gain sendCommand wrapper + config.fulfillDelayMs from WORKDAY_FULFILL_MS env
-  server/workday-agent.js | new pure buildFulfillment(intentId, requestId, state) -> {summary, reasoning, command|null} for all 5 intents (meal_voucher: place_food at position + 60px along facingDir; pto_request: set_light dim; others: no command); createAgent tracks lastState, fulfillDelayMs default 6000; after result.ok setTimeout fulfill -> optional sendCommand + insert entry status 'fulfilled' tool 'claude_fulfillment' + broadcast + stdout; exports buildFulfillment
-  js/workday-panel.js | renderEntry: status 'fulfilled' -> APPROVED pill (workday-pill-fulfilled) + workday-entry-fulfilled class; 'submitted' -> SUBMITTED; else FAILED; empty text 'Inbox zero...'
-  index.html | tabs merged: Activity tab button REMOVED, Workday button renamed 'Inbox' and moved first + active; workday content div active; legacy activity content div kept in DOM hidden (no button) with comment so CaretakerSidebar init/WS handlers survive; header title 'Inbox'; blurb updated; versions css v33, workday-panel v2
-  css/main.css | .workday-pill-fulfilled (accent), .workday-entry-fulfilled (green border-left)
-  tests/workday-node.js | +5 buildFulfillment tests (23 total)
-  tests/workday-smoke.js | now requires submitted broadcast + fulfilled broadcast + place_food command with numeric coords + both rows persisted; WORKDAY_FULFILL_MS=500
+FILES_MODIFIED: 9
+  server/workday-agent.js | intents reworded to agent-voice (agent observes behavior, interprets, files on the fly's behalf); kudos trigger CHANGED courtship -> behavior 'feed' && hunger < 0.5, texts PC-scrubbed (no mate/courtship words in Workday surfaces); buildFulfillment RENAMED buildResolution(intentId, requestId, state, approved) with denied variants for all 5 intents (denials NEVER carry a command); fulfill(): approved = Math.random() >= denyChance (config.denyChance clamped 0..1 default 0.15), entry status 'fulfilled'|'denied', tool 'claude_resolution', detail approved/denied by Claude; exports buildResolution (buildFulfillment export REMOVED)
+  server/caretaker.js | config.denyChance from WORKDAY_DENY_CHANCE env
+  server/db.js | getRecentWorkdayActions SELECT now includes state_snapshot
+  js/workday-panel.js | per-entry actor label (submitted -> FLY'S AGENT, else CLAUDE, ADMINISTRATOR); submitted entries render 'Observed: hunger X, fatigue Y... | behavior: Z' line from entry.snapshot (live) or JSON-parsed entry.state_snapshot (history); DENIED pill (workday-pill-fail) + workday-entry-denied red border; FAILED path unchanged
+  js/main.js | OBSERVER_MODE=true: handleCanvasMousedown returns immediately (no user world edits; zoom/pinch/wheel unaffected since separate handlers); brainGuideBtn wiring inside help overlay (closes overlay, sets splash flag, clicks hidden learnBtn)
+  index.html | Mate tool button REMOVED from DOM entirely (PC requirement: word must not appear); learnBtn hidden inline, relabeled Brain Guide; helpBtn relabeled 'Learn'; help overlay rewritten: original science section + 'And now it has a job' (agent/administrator/Workday story) + 'What you're watching' + Open the Brain Guide button; blurb: 'The fly cannot use Workday. Its agent...'; versions css v35, main.js v31 (panel v3 from prior)
+  css/main.css | observer mode: #toolbar .tool-btn[data-tool] and #clearButton display none !important; .workday-entry-actor, .workday-entry-observed, .workday-entry-denied styles
+  tests/workday-node.js | kudos tests updated (feed+low hunger fires; feed+high hunger does not); buildResolution tests (approved/denied variants, denied has null command) -- 25 total
+  tests/workday-smoke.js | WORKDAY_DENY_CHANCE=0 for determinism
+  docs/WORKDAY.md + readme.md | agent framing intro, denial mechanics, WORKDAY_DENY_CHANCE env row, kudos row 'Content after a meal', tool claude_resolution, readme Usage section rewritten for observer mode
 
 == SPEC ==
-LOOP: fly state -> intent submit (status submitted) -> after fulfillDelayMs Claude-the-administrator fulfills: world command via dispatchCommand where applicable + second feed entry (status fulfilled) -> panel shows request/approval pairs
-INBOX: single Inbox tab (data-tab workday) = workday_actions stream only; old activity feed hidden (noise cut); Chat/Analytics/Calendar unchanged
-CONSTRAINTS: repo style var/ES5; no emojis/em-dashes; mock default; no secrets
+STORY: fly communicates only via behavior -> agent observes state stream, interprets, files Workday request (card labeled FLY'S AGENT with Observed line) -> Claude administrator resolves after WORKDAY_FULFILL_MS: approve (85% default, world delivery where applicable) or deny (15%, reason, no world effect)
+OBSERVER_MODE: users cannot alter the world (tools hidden, canvas mousedown inert); Learn popup auto-shows on first visit (flybrain_seen_splash, pre-existing), explains connectome + Workday/agent story; Brain Guide reachable only from inside popup
+PC_CONSTRAINT: the words mate/courtship must not appear anywhere in index.html, docs/WORKDAY.md, readme.md, server/workday-agent.js, js/workday-panel.js (sim-internal js/fly-logic.js, js/main.js, SPEC.md are out of scope)
 
 == BUG_FIXES ==
-(none claimed in this increment)
+(none claimed)
 
 == KNOWN_GAPS ==
-GAP:fulfill_uses_latest_state | food drop position uses lastState at fulfillment time (fly moved during delay) -- intended, drops near current position, 'in front of' is approximate
-GAP:activity_tab_orphaned | legacy activity DOM + CaretakerSidebar handlers still render into hidden div (dead-ish UI path kept deliberately to avoid breaking init); acceptable, documented in HTML comment
-GAP:docs_stale | docs/WORKDAY.md not yet updated for fulfillment/Inbox rename -- FIX THIS during audit if you confirm it is stale (MEDIUM doc gap): API surface unchanged but intent table lacks the fulfillment column and tab is now Inbox
-GAP:pto_light_side_effect | set_light dim changes phototaxis behavior (intended whimsy, may surprise)
+GAP:agent_loop_still_acts | agent/run.sh Claude caretaker still places food independently of the meal-voucher flow, so the fly sometimes gets fed without a voucher; acceptable (Claude the caretaker's job) but the Inbox no longer shows those placements
+GAP:kudos_depends_on_low_hunger_feed | kudos fires only if fly still in 'feed' behavior after hunger drops below 0.5; frequency in practice unverified
+GAP:hidden_tools_dom | tool buttons remain in DOM hidden (caretaker-bridge updates lightBtn/tempBtn text); keyboard shortcuts, if any exist for tools, may still work -- check and neutralize if found (MEDIUM if user can still alter world via keyboard)
+GAP:education_panel_reachability | Brain Guide only reachable via Learn popup button
 
 == VERIFICATION_MATRIX ==
-CHECK:syntax | cd /Users/Shared/homelab/flybrain && node --check server/caretaker.js server/workday-agent.js js/workday-panel.js | pass | PASS
-CHECK:unit | node tests/workday-node.js | 23 passed, 0 failed | PASS
+CHECK:syntax | node --check js/main.js server/workday-agent.js server/caretaker.js server/db.js js/workday-panel.js | pass | PASS
+CHECK:unit | node tests/workday-node.js | 25 passed, 0 failed | PASS
 CHECK:existing_suite | node tests/run-node.js | 104 passed / 0 failed | PASS
-CHECK:e2e_fulfillment | node tests/workday-smoke.js | SMOKE PASS line listing request + fulfillment + food command | PASS
-CHECK:inbox_markup | grep -c 'data-tab="activity"' index.html returns 0 (no button); grep -c 'data-tab-content="activity"' returns 1 (hidden div); Inbox button active + workday content active | UNTESTED
-CHECK:stdin_path_intact | echo '{"action":"clear_food","params":{}}' piped to a test server still yields action_ack (dispatch refactor did not break stdin) | UNTESTED
+CHECK:e2e | node tests/workday-smoke.js | SMOKE PASS | PASS
+CHECK:pc_scrub | grep -rin 'courtship\|\bmate\b\|\bmating\b' index.html docs/WORKDAY.md readme.md server/workday-agent.js js/workday-panel.js | zero hits | UNTESTED
+CHECK:observer_inert | with OBSERVER_MODE true, handleCanvasMousedown has early return before any world mutation; no other user-reachable world-mutation path in index.html toolbar (visible buttons: hamburger, Brain 3D, Learn, Lite, center, github) | UNTESTED
+CHECK:denied_no_food | buildResolution meal_voucher denied returns command null (unit-covered); fulfill with denyChance=1 produces status denied and no sendCommand call | UNTESTED
+CHECK:snapshot_in_history | GET /workday/actions rows include state_snapshot | UNTESTED

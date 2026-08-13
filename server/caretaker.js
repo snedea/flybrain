@@ -38,7 +38,8 @@ var workdayAgent = workdayAgentModule.createAgent({
   config: {
     workerId: process.env.WORKDAY_WORKER_ID,
     coworkerId: process.env.WORKDAY_COWORKER_ID,
-    fulfillDelayMs: process.env.WORKDAY_FULFILL_MS ? parseInt(process.env.WORKDAY_FULFILL_MS, 10) : undefined
+    fulfillDelayMs: process.env.WORKDAY_FULFILL_MS ? parseInt(process.env.WORKDAY_FULFILL_MS, 10) : undefined,
+    denyChance: process.env.WORKDAY_DENY_CHANCE !== undefined ? parseFloat(process.env.WORKDAY_DENY_CHANCE) : undefined
   }
 });
 

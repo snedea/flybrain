@@ -1843,6 +1843,33 @@ canvas {
     border-left-color: var(--success);
 }
 
+.workday-entry-denied {
+    border-left-color: #f87171;
+}
+
+.workday-entry-actor {
+    font-size: 0.58rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    margin-bottom: 0.15rem;
+}
+
+.workday-entry-observed {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    font-style: italic;
+    margin-top: 0.15rem;
+    line-height: 1.35;
+}
+
+/* Observer mode: Claude runs the enclosure; user interaction tools hidden.
+   Buttons stay in the DOM (caretaker-bridge updates lightBtn/tempBtn text). */
+#toolbar .tool-btn[data-tool],
+#clearButton {
+    display: none !important;
+}
+
 .workday-feed {
     flex: 1;
     overflow-y: auto;

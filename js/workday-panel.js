@@ -23,10 +23,39 @@
     } catch (e) { return ''; }
   }
 
+  function getSnapshot(entry) {
+    if (entry.snapshot && entry.snapshot.drives) return entry.snapshot;
+    if (entry.state_snapshot) {
+      try { return JSON.parse(entry.state_snapshot); } catch (e) { return null; }
+    }
+    return null;
+  }
+
+  function formatObserved(snapshot) {
+    if (!snapshot || !snapshot.drives) return '';
+    var d = snapshot.drives;
+    var parts = [];
+    if (d.hunger != null) parts.push('hunger ' + d.hunger.toFixed(2));
+    if (d.fatigue != null) parts.push('fatigue ' + d.fatigue.toFixed(2));
+    if (d.fear != null) parts.push('fear ' + d.fear.toFixed(2));
+    if (d.curiosity != null) parts.push('curiosity ' + d.curiosity.toFixed(2));
+    var behavior = typeof snapshot.behavior === 'string' ? snapshot.behavior : null;
+    return 'Observed: ' + parts.join(', ') + (behavior ? ' | behavior: ' + behavior : '');
+  }
+
   function renderEntry(entry) {
     var fulfilled = entry.status === 'fulfilled';
+    var denied = entry.status === 'denied';
+    var submitted = entry.status === 'submitted';
     var div = document.createElement('div');
-    div.className = 'workday-entry' + (fulfilled ? ' workday-entry-fulfilled' : '');
+    div.className = 'workday-entry' +
+      (fulfilled ? ' workday-entry-fulfilled' : '') +
+      (denied ? ' workday-entry-denied' : '');
+
+    var actor = document.createElement('div');
+    actor.className = 'workday-entry-actor';
+    actor.textContent = submitted ? 'FLY\'S AGENT' : 'CLAUDE, ADMINISTRATOR';
+    div.appendChild(actor);
 
     var head = document.createElement('div');
     head.className = 'workday-entry-head';
@@ -40,7 +69,10 @@
     if (fulfilled) {
       status.className = 'workday-pill workday-pill-fulfilled';
       status.textContent = 'APPROVED';
-    } else if (entry.status === 'submitted') {
+    } else if (denied) {
+      status.className = 'workday-pill workday-pill-fail';
+      status.textContent = 'DENIED';
+    } else if (submitted) {
       status.className = 'workday-pill workday-pill-ok';
       status.textContent = 'SUBMITTED';
     } else {
@@ -49,6 +81,18 @@
     }
     head.appendChild(status);
     div.appendChild(head);
+
+    // The fly's only communication medium is behavior; show what the
+    // agent observed before it interpreted the request.
+    if (submitted) {
+      var observedText = formatObserved(getSnapshot(entry));
+      if (observedText !== '') {
+        var observed = document.createElement('div');
+        observed.className = 'workday-entry-observed';
+        observed.textContent = observedText;
+        div.appendChild(observed);
+      }
+    }
 
     var reasoning = document.createElement('div');
     reasoning.className = 'workday-entry-reasoning';

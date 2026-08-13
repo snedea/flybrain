@@ -198,7 +198,7 @@ function openDb(dbPath) {
     getRecentWorkdayActions: function(limit) {
       if (limit === undefined) limit = 50;
       var rows = db.prepare(
-        'SELECT id, timestamp, intent, tool, args, reasoning, summary, status, request_id, mode FROM workday_actions ORDER BY id DESC LIMIT ?'
+        'SELECT id, timestamp, intent, tool, args, reasoning, summary, status, request_id, mode, state_snapshot FROM workday_actions ORDER BY id DESC LIMIT ?'
       ).all(limit);
       return rows;
     },
