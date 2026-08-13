@@ -232,6 +232,11 @@ canvas {
     font-size: 0.85rem;
     font-weight: 500;
     letter-spacing: 0.03em;
+    cursor: pointer;
+}
+
+.toolbar-title:hover {
+    color: var(--text);
 }
 
 .toolbar-icon {

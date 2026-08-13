@@ -554,6 +554,15 @@ helpBtn.addEventListener('click', function () {
 	else helpOverlay.style.display = 'flex';
 });
 
+// The FlyBrain wordmark opens the Learn modal (the Learn button is hidden)
+var toolbarTitle = document.getElementById('toolbarTitle');
+if (toolbarTitle) {
+	toolbarTitle.addEventListener('click', function (e) {
+		e.stopPropagation();
+		helpBtn.click();
+	});
+}
+
 // Centered modal: backdrop click and Escape both close it
 helpOverlay.addEventListener('click', function (e) {
 	if (e.target === helpOverlay) closeHelpOverlay();
