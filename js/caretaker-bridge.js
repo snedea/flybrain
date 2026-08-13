@@ -71,13 +71,21 @@
     if (sidebar) sidebar.textContent = terminalText;
   }
 
-  function setClaudeActivity(action, params) {
-    setActivityText('Claude: ' + activityLabel(action, params));
+  // Idle state belongs to Buzz: it is the one reading the fly every second.
+  // Claude's name appears only while Claude is actually doing something.
+  var IDLE_TEXT = 'Buzz: observing';
+
+  function setActivity(text) {
+    setActivityText(text);
     if (activityTimer !== null) clearTimeout(activityTimer);
     activityTimer = setTimeout(function() {
-      setActivityText('Claude: watching');
+      setActivityText(IDLE_TEXT);
       activityTimer = null;
     }, ACTIVITY_HOLD_MS);
+  }
+
+  function setClaudeActivity(action, params) {
+    setActivity('Claude: ' + activityLabel(action, params));
   }
 
   function executeCommand(raw) {
@@ -175,7 +183,7 @@
       if (typeof CaretakerRenderer !== 'undefined') { CaretakerRenderer.setConnected(true); }
       var statusEl = document.getElementById('claudeStatus');
       if (statusEl) statusEl.style.display = '';
-      setActivityText('Claude: watching');
+      setActivityText(IDLE_TEXT);
       console.log('[caretaker] Connected to ' + WS_URL);
       stateTimer = setInterval(sendState, STATE_INTERVAL);
       sendState();
@@ -233,6 +241,7 @@
   init();
   window.caretakerBridge = { getState: getState, connect: connect,
     isConnected: function() { return connected; },
+    setActivity: setActivity,
     injectCommand: function(action, params) {
       executeCommand(JSON.stringify({ type: 'command', action: action, params: params || {} }));
     } };

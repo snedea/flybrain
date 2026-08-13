@@ -302,12 +302,26 @@
     }
   }
 
+  function narrate(entry) {
+    if (typeof caretakerBridge === 'undefined' || !caretakerBridge.setActivity) return;
+    if (entry.status === 'submitted') {
+      caretakerBridge.setActivity('Buzz: filing a request');
+    } else if (entry.status === 'denied') {
+      caretakerBridge.setActivity('Claude: denying a request');
+    } else if (entry.status === 'fulfilled' && (!entry.args || !entry.args.action)) {
+      // Approvals WITH a world command narrate through the command itself
+      // (Claude: delivering food); command-less approvals narrate here
+      caretakerBridge.setActivity('Claude: approving a request');
+    }
+  }
+
   function onAction(msg) {
     setMode(msg.mode);
     if (msg.entry) {
       prependEntry(msg.entry);
       tally(msg.entry);
       renderCounts();
+      narrate(msg.entry);
     }
   }
 
