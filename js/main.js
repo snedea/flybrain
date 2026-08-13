@@ -951,7 +951,25 @@ canvas.addEventListener('wheel', function (event) {
 }, { passive: false });
 
 function handleCanvasMousedown(event) {
-	if (OBSERVER_MODE) return;
+	if (OBSERVER_MODE) {
+		// Visitors cannot feed or run the enclosure, but they CAN disturb it.
+		// Taps feed the fly's existing wired pathways only: a tap on the fly
+		// is touch (startle -> flight burst -> settle, per the connectome),
+		// a tap nearby is an air puff whose strength falls off with distance.
+		var dw = screenToWorld(event.clientX, event.clientY);
+		var distToFly = Math.hypot(dw.x - fly.x, dw.y - fly.y);
+		ripples.push({ x: dw.x, y: dw.y, startTime: Date.now(), rgb: '248, 113, 113' });
+		if (distToFly <= 30) {
+			applyTouchTool(dw.x, dw.y);
+		} else if (distToFly <= 350) {
+			var disturbStrength = Math.max(0.15, 1 - distToFly / 350);
+			BRAIN.stimulate.wind = true;
+			BRAIN.stimulate.windStrength = disturbStrength;
+			BRAIN.stimulate.windDirection = Math.atan2(-(fly.y - dw.y), fly.x - dw.x);
+			windResetTime = Date.now() + 800 + disturbStrength * 800;
+		}
+		return;
+	}
 	var world = screenToWorld(event.clientX, event.clientY);
 	var cx = world.x;
 	var cy = world.y;
@@ -1554,7 +1572,7 @@ function drawRipples() {
 		var alpha = 1 - progress;
 		ctx.beginPath();
 		ctx.arc(r.x, r.y, radius, 0, Math.PI * 2);
-		ctx.strokeStyle = 'rgba(227, 115, 75, ' + alpha.toFixed(2) + ')';
+		ctx.strokeStyle = 'rgba(' + (r.rgb || '227, 115, 75') + ', ' + alpha.toFixed(2) + ')';
 		ctx.lineWidth = 2 * (1 - progress);
 		ctx.stroke();
 	}
