@@ -183,6 +183,7 @@ canvas {
 
 #githubButton {
     height: 20px;
+    filter: grayscale(1) brightness(0.35);
     opacity: 0.6;
     transition: opacity 0.2s ease;
     vertical-align: middle;
@@ -249,6 +250,7 @@ canvas {
 
 .toolbar-icon {
     cursor: pointer;
+    filter: grayscale(1) brightness(0.35);
     opacity: 0.6;
     transition: opacity 0.2s ease;
     vertical-align: middle;
@@ -2046,11 +2048,19 @@ canvas {
     font-variant-numeric: tabular-nums;
 }
 
-#wd-stat-meal_voucher { color: #c25705; }
-#wd-stat-pto_request { color: var(--accent); }
-#wd-stat-career_goal { color: var(--success); }
-#wd-stat-kudos { color: var(--warning); }
-#wd-stat-safety_concern { color: var(--error); }
+.workday-stat-num {
+    color: #33384a;
+}
+
+.workday-actions-title {
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    padding: 0.6rem 0.5rem 0;
+    text-align: center;
+}
 
 .workday-stat-label {
     font-size: 0.52rem;
