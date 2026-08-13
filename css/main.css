@@ -298,10 +298,6 @@ canvas {
     display: flex;
     align-items: center;
     gap: 0.35rem;
-    padding: 0.2rem 0.6rem;
-    border-radius: var(--radius);
-    border: 1px solid rgba(139, 92, 246, 0.4);
-    background: rgba(139, 92, 246, 0.08);
     font-family: system-ui, -apple-system, sans-serif;
     cursor: default;
 }
