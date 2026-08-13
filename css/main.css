@@ -1993,6 +1993,21 @@ canvas {
     word-break: break-all;
 }
 
+.wd-meta-time {
+    color: var(--accent);
+}
+
+.wd-meta-ref {
+    color: var(--success);
+}
+
+.wd-meta-tool {
+    color: #f68d2e;
+    font-weight: 700;
+    border-bottom: 1px dotted rgba(246, 141, 46, 0.5);
+    cursor: help;
+}
+
 .workday-empty {
     font-size: 0.75rem;
     color: var(--text-muted);

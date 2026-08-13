@@ -16,6 +16,25 @@
     el.className = 'workday-pill ' + (mode === 'live' ? 'workday-pill-live' : 'workday-pill-mock');
   }
 
+  // Hover explainer for the Workday tool behind each entry
+  var TOOL_EXPLAINERS = {
+    create_compensation_workers_requestOneTimePayment:
+      'Native Workday MCP tool wrapping the Compensation REST API: POST .../compensation/workers/{id}/requestOneTimePayment. Starts the Request One-Time Payment business process (the meal voucher). Called as JSON-RPC tools/call via the Workday Agent Gateway.',
+    create_absenceManagement_workers_requestTimeOff:
+      'Native Workday MCP tool wrapping the Absence Management REST API: POST .../absenceManagement/workers/{id}/requestTimeOff. Starts the Request Time Off business process (PTO). Called as JSON-RPC tools/call via the Workday Agent Gateway.',
+    create_performanceEnablement_workerGoalEvents:
+      'Native Workday MCP tool wrapping the Performance Enablement REST API: POST .../performanceEnablement/workerGoalEvents. Creates a development goal on the worker profile. Called as JSON-RPC tools/call via the Workday Agent Gateway.',
+    create_performanceEnablement_workers_anytimeFeedbackEvents:
+      'Native Workday MCP tool wrapping the Performance Enablement REST API: POST .../performanceEnablement/workers/{id}/anytimeFeedbackEvents. Delivers Anytime Feedback (kudos or a concern). Called as JSON-RPC tools/call via the Workday Agent Gateway.',
+    claude_resolution:
+      'Not a Workday API call. This is Claude\'s administrator step: it reviews the request Buzz filed, approves or denies it, and triggers any enclosure delivery (food drop, dimmed lights).'
+  };
+
+  function toolExplainer(tool) {
+    return TOOL_EXPLAINERS[tool] ||
+      'Native Workday MCP tool (JSON-RPC tools/call via the Workday Agent Gateway) wrapping a Workday REST endpoint.';
+  }
+
   function formatTime(ts) {
     try {
       var d = new Date(ts);
@@ -101,10 +120,29 @@
 
     var meta = document.createElement('div');
     meta.className = 'workday-entry-meta';
+
+    var timeSpan = document.createElement('span');
+    timeSpan.className = 'wd-meta-time';
+    timeSpan.textContent = formatTime(entry.timestamp);
+    meta.appendChild(timeSpan);
+
     var requestId = entry.requestId || entry.request_id;
-    meta.textContent = formatTime(entry.timestamp) +
-      (requestId ? ' | ' + requestId : '') +
-      (entry.tool ? ' | ' + entry.tool : '');
+    if (requestId) {
+      meta.appendChild(document.createTextNode(' | '));
+      var refSpan = document.createElement('span');
+      refSpan.className = 'wd-meta-ref';
+      refSpan.textContent = requestId;
+      meta.appendChild(refSpan);
+    }
+
+    if (entry.tool) {
+      meta.appendChild(document.createTextNode(' | '));
+      var toolSpan = document.createElement('span');
+      toolSpan.className = 'wd-meta-tool';
+      toolSpan.textContent = entry.tool;
+      toolSpan.title = toolExplainer(entry.tool);
+      meta.appendChild(toolSpan);
+    }
     div.appendChild(meta);
 
     return div;
