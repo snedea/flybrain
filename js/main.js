@@ -2391,11 +2391,11 @@ function draw() {
 	// Update canvas background based on light level
 	var ll = BRAIN.stimulate.lightLevel;
 	if (ll >= 1) {
-		canvas.style.backgroundColor = '#222';
+		canvas.style.backgroundColor = '#fafaf7';
 	} else if (ll >= 0.5) {
-		canvas.style.backgroundColor = '#161616';
+		canvas.style.backgroundColor = '#c9c9c2';
 	} else {
-		canvas.style.backgroundColor = '#080808';
+		canvas.style.backgroundColor = '#3a3d52';
 	}
 
 	ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);

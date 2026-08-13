@@ -1,23 +1,24 @@
 :root {
-    /* Kainos dark brand system (tokens from workday-agent-factory studio) */
+    /* Kainos light brand system (tokens from workday-agent-factory studio) */
     --k-blue: #1b2db5;
     --k-navy: #252d4f;
     --k-green: #61a83f;
     --k-forest: #004631;
     --k-lime: #cfd600;
-    --bg: #0d0f20;
-    --surface: #171a30;
-    --surface-hover: #1f2340;
-    --surface-alpha: rgba(13, 15, 32, 0.94);
-    --border: #2c3057;
-    --text: #ececf2;
-    --text-muted: #a3a8c4;
-    --accent: #7d8cf0;
-    --accent-hover: #96a2f4;
-    --accent-subtle: rgba(125, 140, 240, 0.12);
-    --success: #8fd06a;
-    --warning: #e0b050;
-    --error: #f08a82;
+    --k-tint: #edf3ff;
+    --bg: #f0f0ed;
+    --surface: #ffffff;
+    --surface-hover: #f6f6f2;
+    --surface-alpha: rgba(255, 255, 255, 0.96);
+    --border: #dcdcd6;
+    --text: #252d4f;
+    --text-muted: #5a5f73;
+    --accent: #1b2db5;
+    --accent-hover: #3947d1;
+    --accent-subtle: rgba(27, 45, 181, 0.08);
+    --success: #2e7d32;
+    --warning: #9a6a00;
+    --error: #b3261e;
     --radius: 10px;
     --neuron-sensory: #3b82f6;
     --neuron-central: #8b5cf6;
@@ -82,7 +83,7 @@ body {
 
 canvas {
     display: block;
-    background-color: #10132a;
+    background-color: #fafaf7;
     transition: background-color 0.5s ease;
     touch-action: none;
 }
@@ -160,11 +161,11 @@ canvas {
 }
 
 .cg-node:hover {
-    background: rgba(255,255,255,0.05);
+    background: rgba(37, 45, 79, 0.05);
 }
 
 .cg-node.cg-active {
-    background: rgba(255,255,255,0.03);
+    background: rgba(37, 45, 79, 0.04);
 }
 
 .cg-name {
@@ -211,7 +212,7 @@ canvas {
     background: var(--surface-alpha);
     /* Kainos signature: lime rule under the top bar */
     border-bottom: 3px solid var(--k-lime);
-    box-shadow: 0 1px 12px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 1px 12px rgba(37, 45, 79, 0.12);
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -263,9 +264,9 @@ canvas {
 }
 
 .tool-btn {
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    color: rgba(255, 255, 255, 0.7);
+    background: var(--surface-hover);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
     padding: 0.25rem 0.75rem;
     border-radius: var(--radius);
     cursor: pointer;
@@ -276,33 +277,33 @@ canvas {
 }
 
 .tool-btn:hover {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(139, 156, 246, 0.3);
-    color: #fff;
+    background: var(--k-tint);
+    border-color: var(--accent);
+    color: var(--text);
 }
 
 .tool-btn:disabled {
     opacity: 0.25;
     cursor: not-allowed;
-    border-color: rgba(255, 255, 255, 0.04);
+    border-color: var(--border);
 }
 
 .tool-btn.active {
-    border-color: rgba(139, 92, 246, 0.5);
-    background: rgba(139, 92, 246, 0.12);
-    color: #b4bfff;
+    border-color: var(--accent);
+    background: var(--k-tint);
+    color: var(--accent);
 }
 
 .tool-btn.claude-highlight:not(.active) {
-    border-color: rgba(139, 92, 246, 0.5);
-    background: rgba(139, 92, 246, 0.12);
-    color: #b4bfff;
-    box-shadow: 0 0 12px rgba(139, 92, 246, 0.3);
+    border-color: var(--accent);
+    background: var(--k-tint);
+    color: var(--accent);
+    box-shadow: 0 0 12px rgba(27, 45, 181, 0.25);
     transition: all 0.2s ease;
 }
 
 .tool-btn.active.claude-highlight {
-    box-shadow: 0 0 12px rgba(139, 92, 246, 0.3);
+    box-shadow: 0 0 12px rgba(27, 45, 181, 0.25);
     transition: box-shadow 0.2s ease;
 }
 
@@ -324,8 +325,45 @@ canvas {
     }
 }
 
+/* Ghost watermark in the fly's space, above the connectome strip */
+.coe-watermark {
+    position: fixed;
+    left: calc(320px + (100vw - 320px) / 2);
+    bottom: calc(180px + 2.2rem);
+    transform: translateX(-50%);
+    text-align: center;
+    z-index: 5;
+    pointer-events: none;
+    color: var(--k-navy);
+    opacity: 0.07;
+    font-family: system-ui, -apple-system, sans-serif;
+}
+
+.coe-watermark .coe-k {
+    font-size: 3rem;
+    font-weight: 800;
+    letter-spacing: 0.3em;
+    margin-right: -0.3em;
+    line-height: 1;
+}
+
+.coe-watermark .coe-sub {
+    font-size: 0.9rem;
+    font-weight: 700;
+    letter-spacing: 0.5em;
+    margin-right: -0.5em;
+    margin-top: 0.4rem;
+}
+
+@media (max-width: 768px) {
+    .coe-watermark {
+        left: 50vw;
+        bottom: calc(140px + 2rem);
+    }
+}
+
 .claude-spark {
-    color: #d97757;
+    color: #c65d3b;
     font-size: 0.95rem;
     line-height: 1;
     width: 1em;
@@ -337,7 +375,7 @@ canvas {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 0.75rem;
     font-weight: 400;
-    color: #d97757;
+    color: #c65d3b;
 }
 
 /* --- Bottom Panel --- */
@@ -350,7 +388,7 @@ canvas {
     padding-bottom: env(safe-area-inset-bottom, 0px);
     background: var(--surface-alpha);
     border-top: 1px solid var(--border);
-    box-shadow: 0 -1px 16px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 -1px 16px rgba(37, 45, 79, 0.12);
     display: flex;
     flex-direction: row;
     z-index: 20;
@@ -413,7 +451,7 @@ canvas {
 .drive-bar-bg {
     flex: 1;
     height: 6px;
-    background: rgba(255, 255, 255, 0.04);
+    background: rgba(37, 45, 79, 0.12);
     border-radius: 4px;
     overflow: hidden;
 }
@@ -463,7 +501,7 @@ canvas {
        scrollable; align-items:center clips overflow at the edges */
     padding: 1.5rem;
     overflow-y: auto;
-    background: rgba(4, 6, 14, 0.6);
+    background: rgba(37, 45, 79, 0.45);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     z-index: 90;
@@ -475,9 +513,9 @@ canvas {
     margin: auto;
     width: min(620px, 100%);
     max-height: none;
-    background: rgba(10, 12, 20, 0.97);
+    background: #ffffff;
     border-radius: 16px;
-    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7), 0 0 1px rgba(255, 255, 255, 0.1);
+    box-shadow: 0 24px 80px rgba(37, 45, 79, 0.25);
     animation: help-modal-in 0.18s ease-out;
     scrollbar-width: thin;
     scrollbar-color: rgba(136, 146, 164, 0.3) transparent;
@@ -516,8 +554,8 @@ canvas {
     gap: 0.5rem;
     margin: 0.25rem 1.25rem 0.75rem;
     padding: 0.7rem 0.75rem;
-    background: rgba(139, 156, 246, 0.06);
-    border: 1px solid rgba(139, 156, 246, 0.15);
+    background: var(--k-tint);
+    border: 1px solid #ccd6f6;
     border-radius: 12px;
 }
 
@@ -570,8 +608,8 @@ canvas {
 
 .help-close-btn {
     background: none;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    color: rgba(255, 255, 255, 0.5);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
     font-size: 0.85rem;
     cursor: pointer;
     padding: 0.2rem 0.5rem;
@@ -581,9 +619,9 @@ canvas {
 }
 
 .help-close-btn:hover {
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--k-tint);
     color: #fff;
-    border-color: rgba(255, 255, 255, 0.2);
+    border-color: var(--accent);
 }
 
 .help-about {
@@ -592,7 +630,7 @@ canvas {
 
 .help-about p {
     font-size: 0.82rem;
-    color: rgba(255, 255, 255, 0.75);
+    color: var(--text);
     line-height: 1.65;
     margin: 0 0 0.75rem 0;
 }
@@ -607,7 +645,7 @@ canvas {
     display: block;
     font-size: 0.95rem;
     margin: 0.4rem 0 0.2rem;
-    background: linear-gradient(90deg, #8b5cf6, #3b82f6);
+    background: linear-gradient(90deg, #1b2db5, #00983F);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -615,7 +653,7 @@ canvas {
 
 .help-about em {
     font-style: italic;
-    color: rgba(255, 255, 255, 0.85);
+    color: var(--text);
 }
 
 .help-about a {
@@ -625,24 +663,24 @@ canvas {
 }
 
 .help-about a:hover {
-    color: #b4bfff;
+    color: var(--accent);
 }
 
 .help-credits {
     font-size: 0.72rem;
-    color: rgba(255, 255, 255, 0.4);
+    color: var(--text-muted);
     margin-top: 0.5rem;
     padding-top: 0.65rem;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    border-top: 1px solid var(--border);
     line-height: 1.5;
 }
 
 .help-credits a {
-    color: rgba(255, 255, 255, 0.55);
+    color: var(--text-muted);
 }
 
 .help-credits a:hover {
-    color: rgba(255, 255, 255, 0.8);
+    color: var(--text);
 }
 
 .help-overlay-divider {
@@ -657,13 +695,13 @@ canvas {
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    color: rgba(255, 255, 255, 0.35);
+    color: var(--text-muted);
     padding: 0.8rem 1.25rem 0.4rem;
 }
 
 .help-item {
     font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.55);
+    color: var(--text-muted);
     margin: 0;
     padding: 0.4rem 1.25rem;
     line-height: 1.5;
@@ -677,12 +715,12 @@ canvas {
 
 .help-item:hover {
     background: rgba(255, 255, 255, 0.03);
-    color: rgba(255, 255, 255, 0.75);
+    color: var(--text);
     border-left-color: rgba(139, 92, 246, 0.4);
 }
 
 .help-item strong {
-    color: rgba(255, 255, 255, 0.85);
+    color: var(--text);
     font-weight: 600;
 }
 
@@ -719,9 +757,9 @@ canvas {
 .zoom-btn {
     width: 36px;
     height: 36px;
-    background: rgba(11, 13, 22, 0.85);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    color: rgba(255, 255, 255, 0.6);
+    background: var(--surface-alpha);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
     font-size: 1.2rem;
     font-weight: 600;
     border-radius: var(--radius);
@@ -753,7 +791,7 @@ canvas {
     display: none;
     position: fixed;
     background: rgba(10, 12, 20, 0.95);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--border);
     color: var(--text);
     font-size: 0.7rem;
     font-family: system-ui, -apple-system, sans-serif;
@@ -766,8 +804,8 @@ canvas {
 }
 
 .connectome-toggle-btn {
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--surface-hover);
+    border: 1px solid var(--border);
     color: var(--text-muted);
     padding: 0 0.4rem;
     border-radius: 6px;
@@ -779,8 +817,8 @@ canvas {
 }
 
 .connectome-toggle-btn:hover {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(139, 156, 246, 0.3);
+    background: var(--k-tint);
+    border-color: var(--accent);
     color: var(--text);
 }
 
@@ -1169,7 +1207,7 @@ canvas {
     font-family: system-ui, -apple-system, sans-serif;
     display: flex;
     flex-direction: column;
-    box-shadow: 2px 0 10px rgba(0,0,0,0.3);
+    box-shadow: 2px 0 10px rgba(37, 45, 79, 0.12);
     /* Desktop: permanent panel, never hidden. Mobile overrides below. */
     transform: none;
     transition: transform 0.3s ease;
@@ -1346,7 +1384,7 @@ canvas {
 }
 
 .chat-msg-user {
-    background: rgba(139, 156, 246, 0.22);
+    background: var(--k-tint);
     color: var(--text);
     text-align: right;
 }
@@ -1928,7 +1966,7 @@ canvas {
 }
 
 .workday-pill-fail {
-    color: #f87171;
+    color: var(--error);
 }
 
 .workday-pill-fulfilled {
@@ -2001,11 +2039,11 @@ canvas {
     font-variant-numeric: tabular-nums;
 }
 
-#wd-stat-meal_voucher { color: #f68d2e; }
+#wd-stat-meal_voucher { color: #c25705; }
 #wd-stat-pto_request { color: var(--accent); }
 #wd-stat-career_goal { color: var(--success); }
 #wd-stat-kudos { color: var(--warning); }
-#wd-stat-safety_concern { color: #f87171; }
+#wd-stat-safety_concern { color: var(--error); }
 
 .workday-stat-label {
     font-size: 0.52rem;
@@ -2067,18 +2105,18 @@ canvas {
 }
 
 .wd-meta-tool {
-    color: #f68d2e;
+    color: #c25705;
     cursor: pointer;
 }
 
 .wd-tool-pop {
     position: fixed;
     z-index: 60;
-    background: #171b2b;
+    background: #ffffff;
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 0.6rem 0.7rem;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+    box-shadow: 0 12px 40px rgba(37, 45, 79, 0.2);
     font-family: system-ui, -apple-system, sans-serif;
     overflow-y: auto;
     box-sizing: border-box;
@@ -2089,7 +2127,7 @@ canvas {
 .wd-tool-pop-title {
     font-family: monospace;
     font-size: 0.68rem;
-    color: #f68d2e;
+    color: #c25705;
     padding-bottom: 0.4rem;
     margin-bottom: 0.4rem;
     border-bottom: 1px solid var(--border);
@@ -2105,7 +2143,7 @@ canvas {
 
 .wd-tool-pop-block {
     margin-top: 0.5rem;
-    background: rgba(0, 0, 0, 0.35);
+    background: #f6f6f2;
     border: 1px solid var(--border);
     border-radius: 6px;
     padding: 0.4rem 0.5rem;
@@ -2124,7 +2162,7 @@ canvas {
     margin: 0;
     font-size: 0.62rem;
     line-height: 1.5;
-    color: #9fd6a8;
+    color: #004631;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
 }
@@ -2366,7 +2404,7 @@ canvas {
         border-radius: 0;
         border-top: none;
         border-right: 1px solid var(--border);
-        box-shadow: 2px 0 10px rgba(0,0,0,0.3);
+        box-shadow: 2px 0 10px rgba(37, 45, 79, 0.12);
         transform: translateX(-100%);
         transition: transform 0.3s ease;
     }
