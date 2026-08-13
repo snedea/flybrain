@@ -1305,6 +1305,9 @@ canvas {
     width: auto;
     color: var(--text);
     opacity: 0.85;
+    /* Optical alignment with the FlyBrain wordmark baseline; the svg
+       viewBox carries descender space that sits the glyphs low */
+    margin-top: -2px;
 }
 
 .sidebar-tab-content {
