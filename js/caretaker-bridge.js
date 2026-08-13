@@ -171,6 +171,7 @@
     }
     ws.onopen = function() {
       connected = true;
+      if (typeof WorkdayLocal !== 'undefined') WorkdayLocal.stop();
       if (typeof CaretakerRenderer !== 'undefined') { CaretakerRenderer.setConnected(true); }
       var statusEl = document.getElementById('claudeStatus');
       if (statusEl) statusEl.style.display = '';
@@ -207,6 +208,13 @@
       var statusEl = document.getElementById('claudeStatus');
       if (statusEl) statusEl.style.display = 'none';
       if (stateTimer !== null) { clearInterval(stateTimer); stateTimer = null; }
+      if (IS_PUBLIC) {
+        // No public caretaker reachable: run Buzz and the administrator
+        // right here in the browser instead of hammering a dead tunnel
+        console.log('[caretaker] No server; starting in-browser Workday agent');
+        if (typeof WorkdayLocal !== 'undefined') WorkdayLocal.start();
+        return;
+      }
       console.log('[caretaker] Disconnected, reconnecting in ' + (RECONNECT_DELAY / 1000) + 's');
       reconnectTimer = setTimeout(connect, RECONNECT_DELAY);
     };
@@ -224,5 +232,8 @@
 
   init();
   window.caretakerBridge = { getState: getState, connect: connect,
-    isConnected: function() { return connected; } };
+    isConnected: function() { return connected; },
+    injectCommand: function(action, params) {
+      executeCommand(JSON.stringify({ type: 'command', action: action, params: params || {} }));
+    } };
 })();
