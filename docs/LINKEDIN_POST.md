@@ -13,7 +13,7 @@ flybrain.app. Yeah, computers have come a long way.
 The fly cannot type, so I gave it an agent named Buzz. Buzz reads the
 fly's neural state and files Workday requests on its behalf: hunger
 becomes a meal voucher, fatigue becomes a PTO request, a fright becomes
-a safety concern. Claude reviews each one as the administrator, and
+a safety concern. Claude reviews each one as the fly's HR Partner, and
 approvals have real consequences: an approved voucher drops food right
 in front of the fly. The public demo simulates the Workday calls which,
 thanks to the Workday tooling, could easily work on a WD tenant.

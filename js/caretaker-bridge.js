@@ -209,7 +209,7 @@
       if (statusEl) statusEl.style.display = 'none';
       if (stateTimer !== null) { clearInterval(stateTimer); stateTimer = null; }
       if (IS_PUBLIC) {
-        // No public caretaker reachable: run Buzz and the administrator
+        // No public caretaker reachable: run Buzz and the HR Partner
         // right here in the browser instead of hammering a dead tunnel
         console.log('[caretaker] No server; starting in-browser Workday agent');
         if (typeof WorkdayLocal !== 'undefined') WorkdayLocal.start();

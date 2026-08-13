@@ -120,7 +120,7 @@ var INTENTS = [
   }
 ];
 
-// Claude is the Workday administrator: every request the fly's agent files
+// Claude is the fly's HR Partner in Workday: every request the fly's agent files
 // gets reviewed a few seconds later and approved (with a real in-world
 // effect where one makes sense) or, with some probability, denied.
 // Pure builder, exported for tests.
@@ -130,7 +130,7 @@ function buildResolution(intentId, requestId, state, approved) {
     if (!approved) {
       return {
         summary: 'Meal voucher denied',
-        reasoning: 'Claude (administrator): denied' + ref + '. Second voucher this shift and the enclosure has a food budget. The agent may re-file if the situation persists.',
+        reasoning: 'Claude (HR Partner): denied' + ref + '. Second voucher this shift and the enclosure has a food budget. The agent may re-file if the situation persists.',
         command: null
       };
     }
@@ -147,7 +147,7 @@ function buildResolution(intentId, requestId, state, approved) {
     }
     return {
       summary: 'Meal voucher approved -- food delivered',
-      reasoning: 'Claude (administrator): approved' + ref + ' and dropped food right in front of the fly. Bon appetit.',
+      reasoning: 'Claude (HR Partner): approved' + ref + ' and dropped food right in front of the fly. Bon appetit.',
       command: command
     };
   }
@@ -155,13 +155,13 @@ function buildResolution(intentId, requestId, state, approved) {
     if (!approved) {
       return {
         summary: 'PTO denied',
-        reasoning: 'Claude (administrator): denied' + ref + '. Blackout period -- the demo is live and attendance is mandatory. Rest request noted for the record.',
+        reasoning: 'Claude (HR Partner): denied' + ref + '. Blackout period -- the demo is live and attendance is mandatory. Rest request noted for the record.',
         command: null
       };
     }
     return {
       summary: 'PTO approved -- lights dimmed for rest',
-      reasoning: 'Claude (administrator): approved' + ref + ' effective immediately. Dimming the enclosure lights so the fly can actually rest.',
+      reasoning: 'Claude (HR Partner): approved' + ref + ' effective immediately. Dimming the enclosure lights so the fly can actually rest.',
       command: { action: 'set_light', params: { level: 'dim' } }
     };
   }
@@ -169,13 +169,13 @@ function buildResolution(intentId, requestId, state, approved) {
     if (!approved) {
       return {
         summary: 'Career goal sent back for revision',
-        reasoning: 'Claude (administrator): returned' + ref + '. The goal lacks measurable outcomes. What does done look like?',
+        reasoning: 'Claude (HR Partner): returned' + ref + '. The goal lacks measurable outcomes. What does done look like?',
         command: null
       };
     }
     return {
       summary: 'Career goal approved',
-      reasoning: 'Claude (administrator): approved' + ref + ' and added to the fly\'s growth plan. Ambition noted.',
+      reasoning: 'Claude (HR Partner): approved' + ref + ' and added to the fly\'s growth plan. Ambition noted.',
       command: null
     };
   }
@@ -183,13 +183,13 @@ function buildResolution(intentId, requestId, state, approved) {
     if (!approved) {
       return {
         summary: 'Kudos returned for revision',
-        reasoning: 'Claude (administrator): returned' + ref + '. Feedback must cite a specific behavior. "Excellent pheromones" is not actionable.',
+        reasoning: 'Claude (HR Partner): returned' + ref + '. Feedback must cite a specific behavior. "Excellent pheromones" is not actionable.',
         command: null
       };
     }
     return {
       summary: 'Kudos delivered to the coworker',
-      reasoning: 'Claude (administrator): approved' + ref + ' and routed to the recipient. The enclosure is a kinder place for it.',
+      reasoning: 'Claude (HR Partner): approved' + ref + ' and routed to the recipient. The enclosure is a kinder place for it.',
       command: null
     };
   }
@@ -197,13 +197,13 @@ function buildResolution(intentId, requestId, state, approved) {
     if (!approved) {
       return {
         summary: 'Safety concern dismissed',
-        reasoning: 'Claude (administrator): dismissed' + ref + '. The hazard was the user, who is load-bearing and cannot be removed from the enclosure.',
+        reasoning: 'Claude (HR Partner): dismissed' + ref + '. The hazard was the user, who is load-bearing and cannot be removed from the enclosure.',
         command: null
       };
     }
     return {
       summary: 'Hazard review complete -- enclosure declared safe',
-      reasoning: 'Claude (administrator): investigated' + ref + '. The large fast-moving object was the user. Monitoring continues.',
+      reasoning: 'Claude (HR Partner): investigated' + ref + '. The large fast-moving object was the user. Monitoring continues.',
       command: null
     };
   }

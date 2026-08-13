@@ -56,7 +56,7 @@
     },
     claude_resolution: {
       endpoint: null,
-      desc: 'Not a Workday API call. This is Claude\'s administrator step: it reviews the request Buzz filed, approves or denies it, and triggers any enclosure delivery (food drop, dimmed lights).'
+      desc: 'Not a Workday API call. This is Claude\'s HR Partner review step: it reviews the request Buzz filed, approves or denies it, and triggers any enclosure delivery (food drop, dimmed lights).'
     }
   };
 
@@ -216,7 +216,7 @@
 
     var actor = document.createElement('div');
     actor.className = 'workday-entry-actor';
-    actor.textContent = submitted ? 'BUZZ, THE FLY\'S AGENT' : 'CLAUDE, ADMINISTRATOR';
+    actor.textContent = submitted ? 'BUZZ, THE FLY\'S AGENT' : 'CLAUDE, HR PARTNER';
     div.appendChild(actor);
 
     var head = document.createElement('div');

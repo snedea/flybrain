@@ -10,13 +10,13 @@ fly's behalf through native Workday MCP tools. Hungry fly, meal voucher.
 Tired fly, PTO request. It is exactly as serious as it sounds.
 
 Then the loop closes: a few seconds after each request, Claude plays the
-Workday administrator and reviews it -- approving (default 85%) with a real
+fly's HR Partner in Workday and reviews it -- approving (default 85%) with a real
 in-world delivery where one makes sense (an approved meal voucher drops food
 in front of the fly; approved PTO dims the enclosure lights), or denying with
 a reason (a denied meal voucher means the fly stays hungry until its agent
 can re-file after the cooldown). Every observed-interpreted-filed request and
 its resolution shows up in the sidebar's **Inbox** tab, labeled by actor:
-FLY'S AGENT for filings, CLAUDE, ADMINISTRATOR for resolutions.
+FLY'S AGENT for filings, CLAUDE, HR PARTNER for resolutions.
 
 ## How it works
 
@@ -62,7 +62,7 @@ browser (flybrain.app)                 caretaker server (node)          Workday
 
 At most one action fires per state tick, with a 60 second global gap between
 any two actions. Priority is table order (hunger wins ties). Each submitted
-action is then resolved by Claude (the administrator) after
+action is then resolved by Claude (the HR Partner) after
 `WORKDAY_FULFILL_MS`: approved and fulfilled per the table, or denied with
 probability `WORKDAY_DENY_CHANCE` (each intent has a denial reason; denials
 have no world effect). Either way a second row (`fulfilled` or `denied`) is

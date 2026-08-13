@@ -19,7 +19,7 @@ Workday MCP tools: hungry with no food means a meal voucher request,
 exhausted means a PTO request for tomorrow, high curiosity becomes a career
 goal, contented feeding sends kudos to the enclosure support team, and a fear
 spike files a workplace safety concern. A few seconds after each request, Claude plays the
-administrator and reviews it: usually approved with a real effect where one
+fly's HR Partner and reviews it: usually approved with a real effect where one
 fits (an approved meal voucher drops food in front of the fly; approved PTO
 dims the lights), occasionally denied with a reason.
 
