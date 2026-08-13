@@ -108,6 +108,43 @@ async function fetchStats(env, days) {
   return out;
 }
 
+// Country flag emoji from an ISO code or an English country name.
+// The reverse name->code map is built once from Intl.DisplayNames.
+let nameToCode = null;
+
+function flagFor(country) {
+  if (!country) return '';
+  let code = null;
+  if (/^[A-Z]{2}$/.test(country)) {
+    code = country;
+  } else {
+    if (nameToCode === null) {
+      nameToCode = {};
+      const dn = new Intl.DisplayNames(['en'], { type: 'region' });
+      const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+      for (const a of A) for (const b of A) {
+        const c = a + b;
+        try {
+          const n = dn.of(c);
+          if (n && n !== c) nameToCode[n] = c;
+        } catch (e) {}
+      }
+    }
+    code = nameToCode[country] || null;
+  }
+  if (!code) return '';
+  return String.fromCodePoint(...[...code].map(ch => 0x1F1A5 + ch.charCodeAt(0))) + ' ';
+}
+
+function prettyCountry(country) {
+  if (!country) return 'Unknown';
+  if (!/^[A-Z]{2}$/.test(country)) return country;
+  try {
+    const n = new Intl.DisplayNames(['en'], { type: 'region' }).of(country);
+    return n || country;
+  } catch (e) { return country; }
+}
+
 function esc(s) {
   return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
@@ -145,9 +182,9 @@ function render(stats) {
   const stat = (label, value) =>
     `<div class="stat"><div class="num">${value == null ? '&ndash;' : esc(value.toLocaleString ? value.toLocaleString('en-US') : value)}</div><div class="lab">${label}</div></div>`;
 
-  const list = (title, rows, unit) => `
+  const list = (title, rows, unit, withFlags) => `
     <div class="card"><h2>${title}</h2>${rows.length === 0 ? '<p class="empty">No data yet in this window.</p>'
-      : '<table>' + rows.map(([k, v]) => `<tr><td>${esc(k || 'Direct / unknown')}</td><td class="v">${v.toLocaleString('en-US')} ${unit}</td></tr>`).join('') + '</table>'}</div>`;
+      : '<table>' + rows.map(([k, v]) => `<tr><td>${withFlags ? flagFor(k) : ''}${esc(withFlags ? prettyCountry(k) : (k || 'Direct / unknown'))}</td><td class="v">${v.toLocaleString('en-US')} ${unit}</td></tr>`).join('') + '</table>'}</div>`;
 
   const rangeLink = d => `<a href="?days=${d}" class="${stats.days === d ? 'on' : ''}">${d === 1 ? '24h' : d + 'd'}</a>`;
 
@@ -195,7 +232,7 @@ footer { text-align:center; color: var(--muted); font-size:.7rem; padding: 18px;
     ${stat('Load p75', p75 == null ? null : p75 + ' ms')}
   </div>
   <div class="cards">
-    ${list('Countries', countries, 'views')}
+    ${list('Countries', countries, 'views', true)}
     ${list('Referrers', referers, 'views')}
   </div>
   ${stats.errors.length ? '<div class="err">Partial data: ' + esc(stats.errors.join(' | ')) + '</div>' : ''}
