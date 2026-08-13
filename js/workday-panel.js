@@ -48,13 +48,26 @@
   // One shared popup showing what the tool is and the actual API exchange
   var toolPop = null;
 
+  var hideTimer = null;
+
+  function cancelHide() {
+    if (hideTimer !== null) { clearTimeout(hideTimer); hideTimer = null; }
+  }
+
+  function scheduleHide() {
+    cancelHide();
+    hideTimer = setTimeout(hideToolPop, 250);
+  }
+
   function getToolPop() {
     if (toolPop) return toolPop;
     toolPop = document.createElement('div');
     toolPop.className = 'wd-tool-pop';
     toolPop.style.display = 'none';
-    var section = document.getElementById('workday-section') || document.body;
-    section.appendChild(toolPop);
+    // Body-level flyout: escapes the narrow panel into the canvas area
+    document.body.appendChild(toolPop);
+    toolPop.addEventListener('mouseenter', cancelHide);
+    toolPop.addEventListener('mouseleave', scheduleHide);
     return toolPop;
   }
 
@@ -107,18 +120,27 @@
     var requestId = entry.requestId || entry.request_id;
     pop.appendChild(popBlock('Result', JSON.stringify({ ok: entry.status !== 'failed', status: entry.status, requestId: requestId || null }, null, 2)));
 
-    // Position under the anchor, inside the panel
-    var section = document.getElementById('workday-section');
+    // Flyout to the right of the panel, aligned with the hovered entry.
+    // On narrow screens (bottom-sheet layout) center over the enclosure.
     pop.style.display = 'block';
-    if (section) {
-      var a = anchor.getBoundingClientRect();
-      var s = section.getBoundingClientRect();
-      var top = a.bottom - s.top + 6;
-      var maxTop = section.clientHeight - pop.offsetHeight - 8;
-      pop.style.top = Math.max(8, Math.min(top, maxTop)) + 'px';
-      pop.style.left = '12px';
-      pop.style.right = '12px';
+    var a = anchor.getBoundingClientRect();
+    var topBound = 52;
+    var bottomBound = window.innerHeight - 8;
+    var panel = document.getElementById('left-panel');
+    if (panel && panel.offsetHeight) bottomBound = window.innerHeight - panel.offsetHeight - 8;
+
+    if (window.innerWidth <= 768) {
+      pop.style.left = '5vw';
+      pop.style.width = '90vw';
+    } else {
+      var sidebar = document.getElementById('caretaker-sidebar');
+      var left = sidebar ? sidebar.getBoundingClientRect().right + 10 : 340;
+      pop.style.left = left + 'px';
+      pop.style.width = Math.min(520, window.innerWidth - left - 16) + 'px';
     }
+    pop.style.maxHeight = (bottomBound - topBound) + 'px';
+    var top = Math.max(topBound, Math.min(a.top, bottomBound - pop.offsetHeight));
+    pop.style.top = top + 'px';
   }
 
   function hideToolPop() {
@@ -126,10 +148,11 @@
   }
 
   function attachToolPopup(anchor, entry) {
-    anchor.addEventListener('mouseenter', function() { showToolPop(anchor, entry); });
-    anchor.addEventListener('mouseleave', hideToolPop);
+    anchor.addEventListener('mouseenter', function() { cancelHide(); showToolPop(anchor, entry); });
+    anchor.addEventListener('mouseleave', scheduleHide);
     anchor.addEventListener('click', function(e) {
       e.stopPropagation();
+      cancelHide();
       if (toolPop && toolPop.style.display === 'block') hideToolPop();
       else showToolPop(anchor, entry);
     });

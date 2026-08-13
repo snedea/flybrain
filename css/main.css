@@ -2014,15 +2014,18 @@ canvas {
 }
 
 .wd-tool-pop {
-    position: absolute;
-    z-index: 40;
+    position: fixed;
+    z-index: 60;
     background: #171b2b;
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 0.6rem 0.7rem;
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
     font-family: system-ui, -apple-system, sans-serif;
-    pointer-events: none;
+    overflow-y: auto;
+    box-sizing: border-box;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(136, 146, 164, 0.3) transparent;
 }
 
 .wd-tool-pop-title {
