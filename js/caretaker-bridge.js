@@ -53,6 +53,7 @@
   }
 
   // Claude thinking spark: cycles through asterisk phases like the CLI
+  // Unicode escapes: immune to any server charset misconfiguration
   var SPARK_FRAMES = ['·', '✢', '✳', '✶', '✻', '✽', '✻', '✶', '✳', '✢'];
   var sparkIndex = 0;
   setInterval(function() {
@@ -96,8 +97,13 @@
           console.warn('[caretaker] place_food: invalid x/y', params.x, params.y);
           break;
         }
-        var fx = Math.max(0, Math.min(window.innerWidth, params.x));
-        var fy = Math.max(44, Math.min(window.innerHeight, params.y));
+        // Clamp into the visible enclosure (excludes sidebar and panels)
+        // so approved meals never land where the fly cannot go
+        var lb = typeof getLayoutBounds === 'function'
+          ? getLayoutBounds()
+          : { left: 0, right: window.innerWidth, top: 44, bottom: window.innerHeight };
+        var fx = Math.max(lb.left + 20, Math.min(lb.right - 20, params.x));
+        var fy = Math.max(lb.top + 20, Math.min(lb.bottom - 20, params.y));
         food.push({ x: fx, y: fy, radius: 10, feedStart: 0, feedDuration: 0, eaten: 0 });
         break;
       case 'set_light':

@@ -87,6 +87,7 @@ function isMobile() {
 function getLayoutBounds() {
 	var toolbar = document.getElementById('toolbar');
 	var panel = document.getElementById('left-panel');
+	var sidebar = document.getElementById('caretaker-sidebar');
 	var topH = toolbar ? toolbar.offsetHeight : 44;
 	var bottomH = 0;
 	if (panel && !isMobile()) {
@@ -94,10 +95,16 @@ function getLayoutBounds() {
 	} else if (panel && panel.classList.contains('drawer-open')) {
 		bottomH = panel.offsetHeight;
 	}
+	// The permanent desktop sidebar is part of the enclosure wall; the fly
+	// must not wander underneath it. Mobile uses a bottom sheet instead.
+	var leftW = 0;
+	if (sidebar && !isMobile()) {
+		leftW = sidebar.offsetWidth;
+	}
 	return {
 		top: topH,
 		bottom: window.innerHeight - bottomH,
-		left: 0,
+		left: leftW,
 		right: window.innerWidth
 	};
 }
