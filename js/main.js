@@ -1212,10 +1212,11 @@ function computeMovementForBehavior() {
 		var dx = window.innerWidth / 2 - fly.x;
 		var dy = -(window.innerHeight / 2 - fly.y);
 		if (Math.hypot(dx, dy) < 40) {
-			// Dead-zone at the light target: atan2 is unstable here and the
-			// fly would oscillate/orbit forever. Arrived means stop.
-			targetDir = facingDir;
-			targetSpeed = 0;
+			// At the light: atan2 is unstable here (orbit forever) and a
+			// hard stop parks the fly indefinitely since phototaxis only
+			// exits on drive changes. Real flies mill around a light.
+			targetDir = facingDir + (Math.random() - 0.5) * 0.4;
+			targetSpeed = 0.15;
 		} else {
 			targetDir = Math.atan2(dy, dx);
 			targetSpeed = (Math.abs(BRAIN.accumleft) + Math.abs(BRAIN.accumright)) / (scalingFactor * 5);
