@@ -106,7 +106,7 @@ setTimeout(function() {
         return fail('expected meal_voucher, got ' + JSON.stringify(msg.entry && msg.entry.intent));
       }
       if (msg.entry.status === 'submitted') {
-        if (!/^MOCK-/.test(msg.entry.requestId)) return fail('bad request id: ' + msg.entry.requestId);
+        if (!/^REQ-/.test(msg.entry.requestId)) return fail('bad request id: ' + msg.entry.requestId);
         sawRequest = true;
       }
       if (msg.entry.status === 'fulfilled') sawFulfillment = true;

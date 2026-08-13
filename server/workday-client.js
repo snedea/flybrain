@@ -14,7 +14,8 @@ function createClient(opts) {
 
   function callToolMock(name, args) {
     mockCounter++;
-    var requestId = 'MOCK-' + String(1000 + mockCounter) + '-' +
+    // Reads like a real Workday request reference; 'mock' stays internal
+    var requestId = 'REQ-' + String(1000 + mockCounter) + '-' +
       Math.floor(Math.random() * 46656).toString(36).toUpperCase();
     return Promise.resolve({ ok: true, requestId: requestId, detail: 'mock', raw: null });
   }

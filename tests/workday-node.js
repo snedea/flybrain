@@ -205,12 +205,12 @@ test('buildResolution: unknown intent returns null', function() {
   assert.strictEqual(agentModule.buildResolution('nonsense', 'X', makeState(), true), null);
 });
 
-test('mock client returns ok with a MOCK request id', function() {
+test('mock client returns ok with a REQ request id', function() {
   var client = clientModule.createClient({ mode: 'mock' });
   assert.strictEqual(client.getMode(), 'mock');
   return client.callTool('create_absenceManagement_workers_requestTimeOff', {}).then(function(result) {
     assert.strictEqual(result.ok, true);
-    assert.ok(/^MOCK-/.test(result.requestId), 'request id: ' + result.requestId);
+    assert.ok(/^REQ-/.test(result.requestId), 'request id: ' + result.requestId);
   });
 });
 
