@@ -19,20 +19,20 @@
   // Hover explainer for the Workday tool behind each entry
   var TOOL_EXPLAINERS = {
     create_compensation_workers_requestOneTimePayment:
-      'Native Workday MCP tool wrapping the Compensation REST API: POST .../compensation/workers/{id}/requestOneTimePayment. Starts the Request One-Time Payment business process (the meal voucher). Called as JSON-RPC tools/call via the Workday Agent Gateway.',
+      'Compensation REST API: POST .../compensation/workers/{id}/requestOneTimePayment. Starts the Request One-Time Payment business process (the meal voucher). Called through the Workday Agent Gateway.',
     create_absenceManagement_workers_requestTimeOff:
-      'Native Workday MCP tool wrapping the Absence Management REST API: POST .../absenceManagement/workers/{id}/requestTimeOff. Starts the Request Time Off business process (PTO). Called as JSON-RPC tools/call via the Workday Agent Gateway.',
+      'Absence Management REST API: POST .../absenceManagement/workers/{id}/requestTimeOff. Starts the Request Time Off business process (PTO). Called through the Workday Agent Gateway.',
     create_performanceEnablement_workerGoalEvents:
-      'Native Workday MCP tool wrapping the Performance Enablement REST API: POST .../performanceEnablement/workerGoalEvents. Creates a development goal on the worker profile. Called as JSON-RPC tools/call via the Workday Agent Gateway.',
+      'Performance Enablement REST API: POST .../performanceEnablement/workerGoalEvents. Creates a development goal on the worker profile. Called through the Workday Agent Gateway.',
     create_performanceEnablement_workers_anytimeFeedbackEvents:
-      'Native Workday MCP tool wrapping the Performance Enablement REST API: POST .../performanceEnablement/workers/{id}/anytimeFeedbackEvents. Delivers Anytime Feedback (kudos or a concern). Called as JSON-RPC tools/call via the Workday Agent Gateway.',
+      'Performance Enablement REST API: POST .../performanceEnablement/workers/{id}/anytimeFeedbackEvents. Delivers Anytime Feedback (kudos or a concern). Called through the Workday Agent Gateway.',
     claude_resolution:
       'Not a Workday API call. This is Claude\'s administrator step: it reviews the request Buzz filed, approves or denies it, and triggers any enclosure delivery (food drop, dimmed lights).'
   };
 
   function toolExplainer(tool) {
     return TOOL_EXPLAINERS[tool] ||
-      'Native Workday MCP tool (JSON-RPC tools/call via the Workday Agent Gateway) wrapping a Workday REST endpoint.';
+      'Workday REST endpoint, called through the Workday Agent Gateway.';
   }
 
   // One shared popup showing what the tool is and the actual API exchange
