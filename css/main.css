@@ -1978,6 +1978,12 @@ canvas {
     font-variant-numeric: tabular-nums;
 }
 
+#wd-stat-meal_voucher { color: #f68d2e; }
+#wd-stat-pto_request { color: var(--accent); }
+#wd-stat-career_goal { color: var(--success); }
+#wd-stat-kudos { color: var(--warning); }
+#wd-stat-safety_concern { color: #f87171; }
+
 .workday-stat-label {
     font-size: 0.52rem;
     font-weight: 700;
