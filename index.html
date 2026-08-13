@@ -3,7 +3,7 @@
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>FlyBrain</title>
-    <link rel="stylesheet" type="text/css" href="./css/main.css?v=37">
+    <link rel="stylesheet" type="text/css" href="./css/main.css?v=42">
 </head>
 
 <body>
@@ -48,7 +48,7 @@
             </div>
             <span class="help-chain-arrow">&rarr;</span>
             <div class="help-chain-node">
-                <span class="help-chain-eyebrow">Its agent</span>
+                <span class="help-chain-eyebrow">Buzz, its agent</span>
                 <span class="help-chain-desc">observes and files</span>
             </div>
             <span class="help-chain-arrow">&rarr;</span>
@@ -59,26 +59,23 @@
         </div>
         <div class="help-about">
             <p>In 2024, a team of researchers mapped every single neuron in a fruit fly's brain -- all 139,255 of them, and the millions of connections between them. It was the first complete wiring diagram of an adult brain this complex. The work was led by Princeton and published in <em>Nature</em> (<a href="https://doi.org/10.1038/s41586-024-07558-y" target="_blank" rel="noopener noreferrer">Dorkenwald et al. 2024</a>).</p>
-            <p><strong>This is that brain, running live in your browser.</strong></p>
+            <p class="help-headline"><strong>This is that brain, running live in your browser.</strong></p>
             <p>The fly you see is not following a script. Its behavior -- walking, eating, grooming, startling, flying -- emerges from real neural signals propagating through those mapped connections. Watch closely: every turn, startle, and grooming pass is 139,000 neurons voting.</p>
             <p>A fruit fly brain fits on a pinhead but contains circuits for memory, navigation, fear, hunger, and decision-making. If we can simulate this brain in a web browser today, imagine what becomes possible as we map larger brains. The human brain has 86 billion neurons. We are probably going to see it mapped in our lifetime.</p>
         </div>
         <div class="help-overlay-divider"></div>
         <div class="help-overlay-section-title">And now it has a job</div>
         <div class="help-about">
-            <p>This fly autonomously uses <strong>Workday</strong>. It cannot type and it cannot talk -- its only language is behavior. So an <strong>agent</strong> reads the fly's neural state, interprets behavior as communication, and files real Workday requests on its behalf: hunger becomes a meal voucher request, fatigue becomes a PTO request, curiosity becomes a career goal, a fright becomes a workplace safety concern.</p>
-            <p><strong>Claude</strong> plays two roles. As the caretaker, it watches over the enclosure and tends to the fly. As the Workday administrator, it reviews each request the agent files and approves it -- or occasionally denies it. Approvals have real consequences: an approved meal voucher drops food in front of the fly; approved PTO dims the lights so it can rest.</p>
-            <p>Follow the whole conversation in the <strong>Inbox</strong> panel on the left: what the agent observed, how it interpreted the behavior, what it filed, and how Claude ruled.</p>
+            <p>This fly autonomously uses Workday. It cannot type and it cannot talk. Its only language is behavior, so an agent named <strong>Buzz</strong> reads its neural state and interprets what it sees: hunger becomes a meal voucher request, fatigue becomes a PTO request, curiosity becomes a career goal, and a fright becomes a workplace safety concern.</p>
+            <p>Claude plays two roles. As the caretaker it tends to the enclosure, and as the Workday administrator it reviews everything Buzz files. Most requests are approved, some are denied, and approvals have real consequences: an approved meal voucher drops food in front of the fly, and approved PTO dims the lights so it can rest.</p>
+            <p>The <strong>Inbox</strong> panel on the left shows the whole conversation: what Buzz observed, what it filed, and how Claude ruled.</p>
         </div>
         <div class="help-overlay-divider"></div>
         <div class="help-overlay-section-title">What you're watching</div>
         <div class="help-item"><strong>The fly</strong> -- 139,255 real neurons deciding everything. Nobody scripts it; Claude takes care of it.</div>
-        <div class="help-item"><strong>Inbox</strong> -- the fly's Workday paper trail: requests filed by its agent, resolutions from Claude.</div>
-        <div class="help-item"><strong>Drive meters</strong> -- bottom right: hunger, fear, fatigue, curiosity. These are the signals the agent reads.</div>
-        <div class="help-item"><strong>Connectome strip</strong> -- bottom: all 139K neurons firing live, grouped Sensory / Central / Drives / Motor.</div>
-        <div class="help-item"><strong>Brain Guide</strong> -- explore the anatomy behind it all. Zoom with the scroll wheel, or pinch on a touch screen.</div>
-        <div class="help-overlay-divider"></div>
-        <button class="tool-btn help-modal-cta" id="brainGuideBtn">Open the Brain Guide</button>
+        <div class="help-item"><strong>Inbox</strong> -- requests Buzz files for the fly, reviewed and resolved by Claude. The tab with the Workday logo, left panel.</div>
+        <div class="help-item"><strong>Drive meters</strong> -- bottom right: hunger, fear, fatigue, curiosity. These are the signals Buzz reads.</div>
+        <div class="help-item"><strong>Connectome strip</strong> -- bottom: all 139K neurons firing live, grouped Sensory / Central / Drives / Motor. Zoom the enclosure with the scroll wheel, or pinch on a touch screen.</div>
       </div>
     </div>
     <div id="left-panel">
@@ -124,15 +121,13 @@
     </div>
     <div id="caretaker-sidebar" class="caretaker-sidebar">
         <div class="caretaker-sidebar-handle" id="sheet-handle"></div>
-        <div class="caretaker-sidebar-header">
-            <img src="./svg/workday.svg" height="22" class="noselect workday-logo" alt="Inbox">
-            <span class="claude-activity" id="claudeActivitySidebar">Claude: watching</span>
-            <button class="caretaker-sidebar-close" id="caretaker-sidebar-close">&times;</button>
-        </div>
         <div class="sidebar-tabs" id="sidebar-tabs">
-            <button class="sidebar-tab active" data-tab="workday">Inbox</button>
+            <button class="sidebar-tab active sidebar-tab-logo" data-tab="workday" aria-label="Inbox">
+                <img src="./svg/workday.svg" height="26" class="noselect workday-logo" alt="Inbox">
+            </button>
             <button class="sidebar-tab" data-tab="chat">Chat</button>
             <button class="sidebar-tab" data-tab="analytics">Analytics</button>
+            <button class="caretaker-sidebar-close" id="caretaker-sidebar-close">&times;</button>
         </div>
         <!-- Legacy activity feed kept in the DOM (hidden, no tab) so
              CaretakerSidebar init and its WS handlers keep working -->
@@ -155,9 +150,6 @@
         </div>
         <div class="sidebar-tab-content active" data-tab-content="workday">
             <div class="workday-section" id="workday-section">
-                <div class="workday-header">
-                    <span class="workday-blurb">Requests filed by the fly's agent, reviewed and resolved by Claude.</span>
-                </div>
                 <div class="workday-feed" id="workday-feed">
                     <div class="workday-empty">Waiting for the fly to need something...</div>
                 </div>
@@ -193,8 +185,8 @@
     <script type="text/javascript" src="./js/caretaker-renderer.js?v=24"></script>
     <script type="text/javascript" src="./js/caretaker-sidebar.js?v=26"></script>
     <script type="text/javascript" src="./js/caretaker-analytics.js?v=24"></script>
-    <script type="text/javascript" src="./js/workday-panel.js?v=4"></script>
-    <script type="text/javascript" src="./js/caretaker-bridge.js?v=27"></script>
+    <script type="text/javascript" src="./js/workday-panel.js?v=5"></script>
+    <script type="text/javascript" src="./js/caretaker-bridge.js?v=28"></script>
 </body>
 
 </html>

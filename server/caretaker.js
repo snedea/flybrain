@@ -22,6 +22,20 @@ var preFearLevel = 0;
 var browserSocket = null;
 var VALID_ACTIONS = ['place_food', 'set_light', 'set_temp', 'touch', 'blow_wind', 'clear_food'];
 
+// Public mode: multi-session, one deterministic Workday agent per visitor,
+// no claude CLI, no shared DB writes, chat disabled. Private mode (default)
+// is the original single-fly behavior.
+var PUBLIC_MODE = process.env.CARETAKER_PUBLIC === '1';
+var MAX_PUBLIC_SESSIONS = parseInt(process.env.CARETAKER_MAX_SESSIONS, 10) || 200;
+var publicSessionCount = 0;
+
+var workdayAgentConfig = {
+  workerId: process.env.WORKDAY_WORKER_ID,
+  coworkerId: process.env.WORKDAY_COWORKER_ID,
+  fulfillDelayMs: process.env.WORKDAY_FULFILL_MS ? parseInt(process.env.WORKDAY_FULFILL_MS, 10) : undefined,
+  denyChance: process.env.WORKDAY_DENY_CHANCE !== undefined ? parseFloat(process.env.WORKDAY_DENY_CHANCE) : undefined
+};
+
 var workdayClient = workdayClientModule.createClient({
   mode: process.env.WORKDAY_MODE,
   url: process.env.WORKDAY_MCP_URL,
@@ -35,13 +49,35 @@ var workdayAgent = workdayAgentModule.createAgent({
   sendCommand: function(action, params, reasoning) {
     return dispatchCommand({ action: action, params: params, reasoning: reasoning });
   },
-  config: {
-    workerId: process.env.WORKDAY_WORKER_ID,
-    coworkerId: process.env.WORKDAY_COWORKER_ID,
-    fulfillDelayMs: process.env.WORKDAY_FULFILL_MS ? parseInt(process.env.WORKDAY_FULFILL_MS, 10) : undefined,
-    denyChance: process.env.WORKDAY_DENY_CHANCE !== undefined ? parseFloat(process.env.WORKDAY_DENY_CHANCE) : undefined
-  }
+  config: workdayAgentConfig
 });
+
+function createPublicSession(ws) {
+  var session = { ws: ws, history: [] };
+  function sendToSession(obj) {
+    if (ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify(obj)); } catch (e) {}
+    }
+  }
+  session.agent = workdayAgentModule.createAgent({
+    client: workdayClient,
+    db: {
+      insertWorkdayAction: function(entry) {
+        session.history.unshift(entry);
+        if (session.history.length > 100) session.history.pop();
+      }
+    },
+    broadcast: sendToSession,
+    writeStdout: function() {},
+    sendCommand: function(action, params, reasoning) {
+      sendToSession({ type: 'command', action: action, params: params });
+      return true;
+    },
+    config: workdayAgentConfig
+  });
+  session.send = sendToSession;
+  return session;
+}
 
 function writeStdout(obj) {
   process.stdout.write(JSON.stringify(obj) + '\n');
@@ -94,7 +130,8 @@ function handleStateMessage(data) {
     process.stderr.write('[caretaker] Bad JSON from browser: ' + e.message + '\n');
     return;
   }
-  if (msg.type !== 'state') return;
+  if (msg === null || typeof msg !== 'object') return;
+  if (msg.type !== 'state' || !msg.data || typeof msg.data !== 'object') return;
   lastState = msg.data;
   var now = Date.now();
   if (now - lastObservationTime >= OBSERVATION_INTERVAL_MS) {
@@ -217,6 +254,28 @@ var server = http.createServer(function(req, res) {
   if (req.method === 'OPTIONS') {
     res.writeHead(204);
     res.end();
+    return;
+  }
+  if (req.method === 'GET' && req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, public: PUBLIC_MODE, sessions: publicSessionCount }));
+    return;
+  }
+  if (PUBLIC_MODE) {
+    // Visitors get the WS experience only; single-fly HTTP endpoints and
+    // the claude-CLI chat stay private to the local install.
+    if (req.method === 'GET' && req.url === '/workday/status') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ mode: workdayClient.getMode(), public: true, sessions: publicSessionCount }));
+      return;
+    }
+    if (req.method === 'POST' && req.url === '/chat') {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Chat runs on the local install only' }));
+      return;
+    }
+    res.writeHead(404);
+    res.end('Not found');
     return;
   }
   if (req.method === 'GET' && req.url === '/state') {
@@ -365,6 +424,31 @@ var server = http.createServer(function(req, res) {
 var wss = new WebSocket.Server({ server: server });
 
 wss.on('connection', function(ws) {
+  if (PUBLIC_MODE) {
+    if (publicSessionCount >= MAX_PUBLIC_SESSIONS) {
+      try { ws.close(1013, 'busy'); } catch (e) {}
+      return;
+    }
+    publicSessionCount++;
+    var session = createPublicSession(ws);
+    process.stderr.write('[caretaker] Public session opened (' + publicSessionCount + ' active)\n');
+    session.send({ type: 'workday_history', mode: workdayClient.getMode(), entries: session.history });
+    ws.on('message', function(data) {
+      var msg;
+      try { msg = JSON.parse(data.toString()); } catch (e) { return; }
+      // JSON.parse('null') and non-object payloads parse without throwing;
+      // reading .type off them crashes the whole process for every session
+      if (msg === null || typeof msg !== 'object') return;
+      if (msg.type !== 'state' || !msg.data || typeof msg.data !== 'object') return;
+      session.agent.onState(msg.data);
+    });
+    ws.on('close', function() {
+      publicSessionCount--;
+      process.stderr.write('[caretaker] Public session closed (' + publicSessionCount + ' active)\n');
+    });
+    ws.on('error', function() {});
+    return;
+  }
   browserSocket = ws;
   process.stderr.write('[caretaker] Browser connected\n');
   var history = caretakerDb.getRecentActivity(50);
@@ -394,9 +478,14 @@ wss.on('connection', function(ws) {
   });
 });
 
-var rl = readline.createInterface({ input: process.stdin, terminal: false });
-rl.on('line', handleStdinCommand);
-rl.on('close', function() { process.exit(0); });
+// stdin command channel is a private-mode contract with agent/run.sh; in a
+// container stdin is closed at start and the exit-on-close would kill the
+// public server immediately.
+if (!PUBLIC_MODE) {
+  var rl = readline.createInterface({ input: process.stdin, terminal: false });
+  rl.on('line', handleStdinCommand);
+  rl.on('close', function() { process.exit(0); });
+}
 
 server.listen(PORT, function() {
   process.stderr.write('[caretaker] WebSocket server on port ' + PORT + '\n');

@@ -1,5 +1,15 @@
 (function() {
-  var WS_URL = 'ws://' + (location.hostname || 'localhost') + ':7600';
+  // On the public https site the caretaker is reached through the
+  // Cloudflare tunnel; locally it is the dev server on :7600.
+  var PUBLIC_CARETAKER_HOST = 'caretaker.flybrain.app';
+  var IS_PUBLIC = location.protocol === 'https:';
+  var WS_URL = IS_PUBLIC
+    ? 'wss://' + PUBLIC_CARETAKER_HOST
+    : 'ws://' + (location.hostname || 'localhost') + ':7600';
+  if (IS_PUBLIC && document.body) {
+    // Chat and Analytics need the private local server; hide them publicly
+    document.body.classList.add('public-mode');
+  }
   var STATE_INTERVAL = 1000;
   var RECONNECT_DELAY = 3000;
   var ws = null, stateTimer = null, reconnectTimer = null, connected = false;

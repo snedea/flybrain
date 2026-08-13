@@ -1,0 +1,14 @@
+node_modules
+data
+ios
+js
+css
+svg
+metadata
+tests
+tools
+scripts
+.buildloop
+.git
+*.log
+docs

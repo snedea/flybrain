@@ -1,0 +1,33 @@
+services:
+  caretaker:
+    build: .
+    restart: unless-stopped
+    environment:
+      - CARETAKER_PUBLIC=1
+      - WORKDAY_MODE=${WORKDAY_MODE:-mock}
+      - WORKDAY_FULFILL_MS=${WORKDAY_FULFILL_MS:-6000}
+      - WORKDAY_DENY_CHANCE=${WORKDAY_DENY_CHANCE:-0.15}
+      - CARETAKER_MAX_SESSIONS=${CARETAKER_MAX_SESSIONS:-200}
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/7600'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - flybrain
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    depends_on:
+      caretaker:
+        condition: service_healthy
+    networks:
+      - flybrain
+
+networks:
+  flybrain:
+    name: flybrain

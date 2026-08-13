@@ -583,10 +583,14 @@ canvas {
 }
 
 .help-about p strong {
+    font-weight: 700;
+    color: #fff;
+}
+
+/* Standalone headline line keeps the gradient treatment */
+.help-about p.help-headline strong {
     display: block;
     font-size: 0.95rem;
-    color: #fff;
-    font-weight: 700;
     margin: 0.4rem 0 0.2rem;
     background: linear-gradient(90deg, #8b5cf6, #3b82f6);
     -webkit-background-clip: text;
@@ -1220,11 +1224,11 @@ canvas {
     border: none;
     border-bottom: 2px solid transparent;
     color: var(--text-muted);
-    font-size: 0.76rem;
+    font-size: 0.95rem;
     font-family: system-ui, -apple-system, sans-serif;
     white-space: nowrap;
     min-width: 0;
-    padding: 0.75rem 0.15rem;
+    padding: 0.85rem 0.25rem;
     cursor: pointer;
     transition: color 0.15s, border-color 0.15s;
     text-align: center;
@@ -1315,13 +1319,14 @@ canvas {
 }
 
 .chat-msg-user {
-    background: var(--accent-subtle);
+    background: rgba(139, 156, 246, 0.22);
     color: var(--text);
     text-align: right;
 }
 
+/* Claude speaks in Claude terracotta */
 .chat-msg-assistant {
-    background: rgba(42, 58, 92, 0.4);
+    background: rgba(217, 119, 87, 0.16);
     color: var(--text);
 }
 
@@ -1365,7 +1370,7 @@ canvas {
 }
 
 .chat-send-btn {
-    background: var(--accent);
+    background: #d97757;
     color: #fff;
     border: none;
     border-radius: var(--radius);
@@ -1377,7 +1382,7 @@ canvas {
 }
 
 .chat-send-btn:hover {
-    background: var(--accent-hover);
+    background: #e08b6d;
 }
 
 .chat-send-btn:disabled {
@@ -1911,12 +1916,24 @@ canvas {
     color: var(--accent);
 }
 
-.claude-activity {
-    font-size: 0.68rem;
-    color: var(--text-muted);
-    margin-left: auto;
-    padding-right: 0.5rem;
-    white-space: nowrap;
+.sidebar-tab-logo {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Public site: Chat and Analytics require the private local server */
+.public-mode .sidebar-tab[data-tab="chat"],
+.public-mode .sidebar-tab[data-tab="analytics"],
+.public-mode [data-tab-content="chat"],
+.public-mode [data-tab-content="analytics"] {
+    display: none !important;
+}
+
+.sidebar-tabs .caretaker-sidebar-close {
+    flex: 0 0 auto;
+    align-self: center;
+    padding: 0 0.6rem;
 }
 
 .workday-entry-actor {
@@ -2045,7 +2062,7 @@ canvas {
 
     /* --- Bottom panel: always visible, compact on mobile --- */
     #left-panel {
-        height: 120px;
+        height: 140px;
         flex-direction: row;
         padding-top: 0.3rem;
         z-index: 21;
@@ -2054,9 +2071,19 @@ canvas {
         transition: none;
     }
 
+    /* The telemetry subtitle eats the neuron field's height on phones;
+       hide it so the connectome strip is actually visible */
+    .connectome-subtitle {
+        display: none;
+    }
+
     #left-panel.drawer-open {
         height: 50vh;
         flex-direction: column;
+    }
+
+    #left-panel.drawer-open .connectome-subtitle {
+        display: block;
     }
 
     /* Drawer handle indicator */
