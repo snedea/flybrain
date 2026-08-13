@@ -1,17 +1,23 @@
 :root {
-    --bg: #0a0c14;
-    --surface: #111420;
-    --surface-hover: #181c2a;
-    --surface-alpha: rgba(11, 13, 22, 0.94);
-    --border: rgba(255, 255, 255, 0.08);
-    --text: #e4e4e8;
-    --text-muted: rgba(255, 255, 255, 0.45);
-    --accent: #8b9cf6;
-    --accent-hover: #a8b4ff;
-    --accent-subtle: rgba(139, 156, 246, 0.12);
-    --success: #4ade80;
-    --warning: #fbbf24;
-    --error: #f87171;
+    /* Kainos dark brand system (tokens from workday-agent-factory studio) */
+    --k-blue: #1b2db5;
+    --k-navy: #252d4f;
+    --k-green: #61a83f;
+    --k-forest: #004631;
+    --k-lime: #cfd600;
+    --bg: #0d0f20;
+    --surface: #171a30;
+    --surface-hover: #1f2340;
+    --surface-alpha: rgba(13, 15, 32, 0.94);
+    --border: #2c3057;
+    --text: #ececf2;
+    --text-muted: #a3a8c4;
+    --accent: #7d8cf0;
+    --accent-hover: #96a2f4;
+    --accent-subtle: rgba(125, 140, 240, 0.12);
+    --success: #8fd06a;
+    --warning: #e0b050;
+    --error: #f08a82;
     --radius: 10px;
     --neuron-sensory: #3b82f6;
     --neuron-central: #8b5cf6;
@@ -76,7 +82,7 @@ body {
 
 canvas {
     display: block;
-    background-color: #0d0f18;
+    background-color: #10132a;
     transition: background-color 0.5s ease;
     touch-action: none;
 }
@@ -203,7 +209,8 @@ canvas {
     height: 44px;
     padding-top: env(safe-area-inset-top, 0px);
     background: var(--surface-alpha);
-    border-bottom: 1px solid var(--border);
+    /* Kainos signature: lime rule under the top bar */
+    border-bottom: 3px solid var(--k-lime);
     box-shadow: 0 1px 12px rgba(0, 0, 0, 0.4);
     display: flex;
     align-items: center;
@@ -493,7 +500,8 @@ canvas {
     inset: 0;
     border-radius: 16px;
     padding: 1px;
-    background: linear-gradient(170deg, rgba(139, 92, 246, 0.4) 0%, rgba(59, 130, 246, 0.15) 40%, transparent 70%);
+    /* Kainos lime-to-green hairline */
+    background: linear-gradient(170deg, rgba(207, 214, 0, 0.45) 0%, rgba(0, 152, 63, 0.2) 40%, transparent 70%);
     -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
     -webkit-mask-composite: xor;
     mask-composite: exclude;
@@ -1245,8 +1253,21 @@ canvas {
 }
 
 .sidebar-tab.active {
-    color: var(--accent);
-    border-bottom-color: var(--accent);
+    color: var(--text);
+    border-bottom-color: var(--k-lime);
+}
+
+.kainos-mark {
+    display: flex;
+    align-items: center;
+}
+
+.kainos-mark svg {
+    display: block;
+    height: 15px;
+    width: auto;
+    color: var(--text);
+    opacity: 0.85;
 }
 
 .sidebar-tab-content {
