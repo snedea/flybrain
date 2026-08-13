@@ -1,22 +1,22 @@
 # LinkedIn post: flybrain.app
 
-Status: short draft v2 for Silviu's edit pass, posting 2026-08-13.
+Status: v3, Silviu's own edit, final for posting 2026-08-13.
 
 ---
 
 So yesterday I gave a fly a job.
 
 In 2024, researchers mapped every neuron in a fruit fly's brain, all
-139,255 of them. That brain now runs live at flybrain.app. Nobody
-scripts it.
+139,255 of them. That brain now runs live in your browser at
+flybrain.app. Yeah, computers have come a long way.
 
 The fly cannot type, so I gave it an agent named Buzz. Buzz reads the
 fly's neural state and files Workday requests on its behalf: hunger
 becomes a meal voucher, fatigue becomes a PTO request, a fright becomes
 a safety concern. Claude reviews each one as the administrator, and
 approvals have real consequences: an approved voucher drops food right
-in front of the fly. The public demo simulates the Workday calls, but
-the same code files real paperwork against a real tenant.
+in front of the fly. The public demo simulates the Workday calls which,
+thanks to the Workday tooling, could easily work on a WD tenant.
 
 Here is why I built it on Workday. Most of what employees need never
 gets typed into a form. It shows up as signals in the systems around
@@ -30,11 +30,11 @@ Watch the fly work: flybrain.app
 
 ---
 
-## Notes for the edit pass
+## Edit notes (veto anything)
 
-- About 190 words, roughly a third of v1.
-- The Workday value paragraph is the new core: signals over forms, with
-  the approval step as the governance story. Sharpen or soften to taste.
-- "someone, human or Claude, saying yes or no" is a beat I added; easy
-  cut if it winks too much.
-- Honesty line kept but compressed to one sentence.
+- "Yea" corrected to "Yeah," (the interjection; "yea" is the archaic
+  vote-yes). Comma added after it.
+- Collapsed a double space in "runs live in your browser".
+- Everything else is untouched -- your additions read like you and
+  they land ("could easily work on a WD tenant" carries the claim at
+  exactly the right confidence).
