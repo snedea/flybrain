@@ -21,7 +21,9 @@ thanks to the Workday tooling, could easily work on a WD tenant.
 
 Here is why I built it on Workday. Most of what employees need never
 gets typed into a form. It shows up as signals in the systems around
-them. If an agent can turn a fly's behavior into clean Workday
+them: time entries that stop showing up, project dates that quietly
+slip, invoice approvals sitting for two weeks, and PTO balances nobody
+is touching. If an agent can turn a fly's behavior into clean Workday
 transactions with an approval step in the loop, then the same pattern
 can read the signals your people are already giving off. I think the
 fly is just proof that the rails work: the APIs, the Agent Gateway, and
