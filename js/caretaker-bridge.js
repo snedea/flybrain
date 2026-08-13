@@ -52,6 +52,16 @@
     return 'tending the enclosure';
   }
 
+  // Claude thinking spark: cycles through asterisk phases like the CLI
+  var SPARK_FRAMES = ['·', '✢', '✳', '✶', '✻', '✽', '✻', '✶', '✳', '✢'];
+  var sparkIndex = 0;
+  setInterval(function() {
+    var spark = document.getElementById('claudeSpark');
+    if (!spark) return;
+    sparkIndex = (sparkIndex + 1) % SPARK_FRAMES.length;
+    spark.textContent = SPARK_FRAMES[sparkIndex];
+  }, 300);
+
   function setActivityText(text) {
     var toolbar = document.getElementById('claudeStatusText');
     if (toolbar) toolbar.textContent = text;

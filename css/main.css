@@ -297,17 +297,17 @@ canvas {
 .claude-status {
     display: flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: 0.4rem;
     font-family: system-ui, -apple-system, sans-serif;
-    cursor: default;
 }
 
-.claude-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: #8b5cf6;
-    animation: claude-pulse 2s ease-in-out infinite;
+.claude-spark {
+    color: #d97757;
+    font-size: 0.95rem;
+    line-height: 1;
+    width: 1em;
+    text-align: center;
+    cursor: default;
 }
 
 .claude-status-text {
@@ -315,11 +315,6 @@ canvas {
     font-weight: 600;
     color: #b4bfff;
     letter-spacing: 0.05em;
-}
-
-@keyframes claude-pulse {
-    0%, 100% { opacity: 1; box-shadow: 0 0 4px #8b5cf6; }
-    50% { opacity: 0.5; box-shadow: none; }
 }
 
 /* --- Bottom Panel --- */
