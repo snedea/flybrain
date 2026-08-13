@@ -788,7 +788,7 @@ canvas {
 .neuron-tooltip {
     display: none;
     position: fixed;
-    background: rgba(10, 12, 20, 0.95);
+    background: var(--surface-alpha);
     border: 1px solid var(--border);
     color: var(--text);
     font-size: 0.7rem;
@@ -798,7 +798,7 @@ canvas {
     pointer-events: none;
     z-index: 40;
     white-space: nowrap;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+    box-shadow: 0 8px 24px rgba(37, 45, 79, 0.2);
 }
 
 .connectome-toggle-btn {
@@ -1910,7 +1910,7 @@ canvas {
     display: none;
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: rgba(37, 45, 79, 0.4);
     z-index: 19;
 }
 
