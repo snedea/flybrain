@@ -2029,33 +2029,43 @@ canvas {
     font-family: monospace;
     font-size: 0.68rem;
     color: #f68d2e;
-    margin-bottom: 0.3rem;
-    word-break: break-all;
+    padding-bottom: 0.4rem;
+    margin-bottom: 0.4rem;
+    border-bottom: 1px solid var(--border);
+    overflow-wrap: anywhere;
 }
 
 .wd-tool-pop-desc {
     font-size: 0.7rem;
     color: var(--text);
-    line-height: 1.4;
-    margin-bottom: 0.4rem;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.wd-tool-pop-block {
+    margin-top: 0.5rem;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.4rem 0.5rem;
 }
 
 .wd-tool-pop-label {
-    font-size: 0.58rem;
+    font-size: 0.56rem;
     font-weight: 700;
     letter-spacing: 0.07em;
     text-transform: uppercase;
     color: var(--text-muted);
-    margin: 0.35rem 0 0.15rem;
+    margin-bottom: 0.25rem;
 }
 
 .wd-tool-pop pre {
     margin: 0;
     font-size: 0.62rem;
-    line-height: 1.45;
+    line-height: 1.5;
     color: #9fd6a8;
     white-space: pre-wrap;
-    word-break: break-word;
+    overflow-wrap: anywhere;
 }
 
 .workday-empty {

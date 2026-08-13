@@ -18,21 +18,31 @@
 
   // Hover explainer for the Workday tool behind each entry
   var TOOL_EXPLAINERS = {
-    create_compensation_workers_requestOneTimePayment:
-      'Compensation REST API: POST .../compensation/workers/{id}/requestOneTimePayment. Starts the Request One-Time Payment business process (the meal voucher). Called through the Workday Agent Gateway.',
-    create_absenceManagement_workers_requestTimeOff:
-      'Absence Management REST API: POST .../absenceManagement/workers/{id}/requestTimeOff. Starts the Request Time Off business process (PTO). Called through the Workday Agent Gateway.',
-    create_performanceEnablement_workerGoalEvents:
-      'Performance Enablement REST API: POST .../performanceEnablement/workerGoalEvents. Creates a development goal on the worker profile. Called through the Workday Agent Gateway.',
-    create_performanceEnablement_workers_anytimeFeedbackEvents:
-      'Performance Enablement REST API: POST .../performanceEnablement/workers/{id}/anytimeFeedbackEvents. Delivers Anytime Feedback (kudos or a concern). Called through the Workday Agent Gateway.',
-    claude_resolution:
-      'Not a Workday API call. This is Claude\'s administrator step: it reviews the request Buzz filed, approves or denies it, and triggers any enclosure delivery (food drop, dimmed lights).'
+    create_compensation_workers_requestOneTimePayment: {
+      endpoint: 'POST /compensation/workers/{id}/requestOneTimePayment',
+      desc: 'Compensation REST API. Starts the Request One-Time Payment business process (the meal voucher). Called through the Workday Agent Gateway.'
+    },
+    create_absenceManagement_workers_requestTimeOff: {
+      endpoint: 'POST /absenceManagement/workers/{id}/requestTimeOff',
+      desc: 'Absence Management REST API. Starts the Request Time Off business process (PTO). Called through the Workday Agent Gateway.'
+    },
+    create_performanceEnablement_workerGoalEvents: {
+      endpoint: 'POST /performanceEnablement/workerGoalEvents',
+      desc: 'Performance Enablement REST API. Creates a development goal on the worker profile. Called through the Workday Agent Gateway.'
+    },
+    create_performanceEnablement_workers_anytimeFeedbackEvents: {
+      endpoint: 'POST /performanceEnablement/workers/{id}/anytimeFeedbackEvents',
+      desc: 'Performance Enablement REST API. Delivers Anytime Feedback (kudos or a concern). Called through the Workday Agent Gateway.'
+    },
+    claude_resolution: {
+      endpoint: null,
+      desc: 'Not a Workday API call. This is Claude\'s administrator step: it reviews the request Buzz filed, approves or denies it, and triggers any enclosure delivery (food drop, dimmed lights).'
+    }
   };
 
   function toolExplainer(tool) {
     return TOOL_EXPLAINERS[tool] ||
-      'Workday REST endpoint, called through the Workday Agent Gateway.';
+      { endpoint: null, desc: 'Workday REST endpoint, called through the Workday Agent Gateway.' };
   }
 
   // One shared popup showing what the tool is and the actual API exchange
@@ -56,9 +66,24 @@
     return null;
   }
 
+  function popBlock(label, mono) {
+    var block = document.createElement('div');
+    block.className = 'wd-tool-pop-block';
+    var lab = document.createElement('div');
+    lab.className = 'wd-tool-pop-label';
+    lab.textContent = label;
+    block.appendChild(lab);
+    var pre = document.createElement('pre');
+    pre.textContent = mono;
+    block.appendChild(pre);
+    return block;
+  }
+
   function showToolPop(anchor, entry) {
     var pop = getToolPop();
     while (pop.firstChild) pop.removeChild(pop.firstChild);
+
+    var explainer = toolExplainer(entry.tool);
 
     var title = document.createElement('div');
     title.className = 'wd-tool-pop-title';
@@ -67,28 +92,20 @@
 
     var desc = document.createElement('div');
     desc.className = 'wd-tool-pop-desc';
-    desc.textContent = toolExplainer(entry.tool);
+    desc.textContent = explainer.desc;
     pop.appendChild(desc);
+
+    if (explainer.endpoint) {
+      pop.appendChild(popBlock('Endpoint', explainer.endpoint));
+    }
 
     var args = entryArgs(entry);
     if (args && Object.keys(args).length > 0) {
-      var reqLabel = document.createElement('div');
-      reqLabel.className = 'wd-tool-pop-label';
-      reqLabel.textContent = 'Request body';
-      pop.appendChild(reqLabel);
-      var reqPre = document.createElement('pre');
-      reqPre.textContent = JSON.stringify(args, null, 2);
-      pop.appendChild(reqPre);
+      pop.appendChild(popBlock('Request body', JSON.stringify(args, null, 2)));
     }
 
     var requestId = entry.requestId || entry.request_id;
-    var resLabel = document.createElement('div');
-    resLabel.className = 'wd-tool-pop-label';
-    resLabel.textContent = 'Result';
-    pop.appendChild(resLabel);
-    var resPre = document.createElement('pre');
-    resPre.textContent = JSON.stringify({ ok: entry.status !== 'failed', status: entry.status, requestId: requestId || null }, null, 2);
-    pop.appendChild(resPre);
+    pop.appendChild(popBlock('Result', JSON.stringify({ ok: entry.status !== 'failed', status: entry.status, requestId: requestId || null }, null, 2)));
 
     // Position under the anchor, inside the panel
     var section = document.getElementById('workday-section');
