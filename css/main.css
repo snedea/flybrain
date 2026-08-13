@@ -1957,6 +1957,35 @@ canvas {
     display: none !important;
 }
 
+.workday-stats {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    padding: 0.55rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.workday-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.1rem;
+}
+
+.workday-stat-num {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+}
+
+.workday-stat-label {
+    font-size: 0.52rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
 .workday-feed {
     flex: 1;
     overflow-y: auto;

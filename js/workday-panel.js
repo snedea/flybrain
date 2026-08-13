@@ -5,6 +5,26 @@
   var mode = null;
 
   function feedEl() { return document.getElementById('workday-feed'); }
+
+  // Live counts per intent (submitted requests seen this session/history)
+  var counts = { meal_voucher: 0, pto_request: 0, career_goal: 0, kudos: 0, safety_concern: 0 };
+
+  function resetCounts() {
+    for (var k in counts) counts[k] = 0;
+  }
+
+  function tally(entry) {
+    if (entry && entry.status === 'submitted' && counts.hasOwnProperty(entry.intent)) {
+      counts[entry.intent]++;
+    }
+  }
+
+  function renderCounts() {
+    for (var k in counts) {
+      var el = document.getElementById('wd-stat-' + k);
+      if (el) el.textContent = String(counts[k]);
+    }
+  }
   function modeEl() { return document.getElementById('workday-mode'); }
 
   function setMode(newMode) {
@@ -284,7 +304,11 @@
 
   function onAction(msg) {
     setMode(msg.mode);
-    if (msg.entry) prependEntry(msg.entry);
+    if (msg.entry) {
+      prependEntry(msg.entry);
+      tally(msg.entry);
+      renderCounts();
+    }
   }
 
   function onHistory(msg) {
@@ -292,7 +316,10 @@
     var el = feedEl();
     if (!el) return;
     el.innerHTML = '';
+    resetCounts();
     var entries = msg.entries || [];
+    for (var t = 0; t < entries.length; t++) tally(entries[t]);
+    renderCounts();
     if (entries.length === 0) {
       var empty = document.createElement('div');
       empty.className = 'workday-empty';
