@@ -35,6 +35,89 @@
       'Native Workday MCP tool (JSON-RPC tools/call via the Workday Agent Gateway) wrapping a Workday REST endpoint.';
   }
 
+  // One shared popup showing what the tool is and the actual API exchange
+  var toolPop = null;
+
+  function getToolPop() {
+    if (toolPop) return toolPop;
+    toolPop = document.createElement('div');
+    toolPop.className = 'wd-tool-pop';
+    toolPop.style.display = 'none';
+    var section = document.getElementById('workday-section') || document.body;
+    section.appendChild(toolPop);
+    return toolPop;
+  }
+
+  function entryArgs(entry) {
+    if (entry.args && typeof entry.args === 'object') return entry.args;
+    if (typeof entry.args === 'string') {
+      try { return JSON.parse(entry.args); } catch (e) { return null; }
+    }
+    return null;
+  }
+
+  function showToolPop(anchor, entry) {
+    var pop = getToolPop();
+    while (pop.firstChild) pop.removeChild(pop.firstChild);
+
+    var title = document.createElement('div');
+    title.className = 'wd-tool-pop-title';
+    title.textContent = entry.tool;
+    pop.appendChild(title);
+
+    var desc = document.createElement('div');
+    desc.className = 'wd-tool-pop-desc';
+    desc.textContent = toolExplainer(entry.tool);
+    pop.appendChild(desc);
+
+    var args = entryArgs(entry);
+    if (args && Object.keys(args).length > 0) {
+      var reqLabel = document.createElement('div');
+      reqLabel.className = 'wd-tool-pop-label';
+      reqLabel.textContent = 'Request body';
+      pop.appendChild(reqLabel);
+      var reqPre = document.createElement('pre');
+      reqPre.textContent = JSON.stringify(args, null, 2);
+      pop.appendChild(reqPre);
+    }
+
+    var requestId = entry.requestId || entry.request_id;
+    var resLabel = document.createElement('div');
+    resLabel.className = 'wd-tool-pop-label';
+    resLabel.textContent = 'Result';
+    pop.appendChild(resLabel);
+    var resPre = document.createElement('pre');
+    resPre.textContent = JSON.stringify({ ok: entry.status !== 'failed', status: entry.status, requestId: requestId || null }, null, 2);
+    pop.appendChild(resPre);
+
+    // Position under the anchor, inside the panel
+    var section = document.getElementById('workday-section');
+    pop.style.display = 'block';
+    if (section) {
+      var a = anchor.getBoundingClientRect();
+      var s = section.getBoundingClientRect();
+      var top = a.bottom - s.top + 6;
+      var maxTop = section.clientHeight - pop.offsetHeight - 8;
+      pop.style.top = Math.max(8, Math.min(top, maxTop)) + 'px';
+      pop.style.left = '12px';
+      pop.style.right = '12px';
+    }
+  }
+
+  function hideToolPop() {
+    if (toolPop) toolPop.style.display = 'none';
+  }
+
+  function attachToolPopup(anchor, entry) {
+    anchor.addEventListener('mouseenter', function() { showToolPop(anchor, entry); });
+    anchor.addEventListener('mouseleave', hideToolPop);
+    anchor.addEventListener('click', function(e) {
+      e.stopPropagation();
+      if (toolPop && toolPop.style.display === 'block') hideToolPop();
+      else showToolPop(anchor, entry);
+    });
+  }
+
   function formatTime(ts) {
     try {
       var d = new Date(ts);
@@ -140,7 +223,7 @@
       var toolSpan = document.createElement('span');
       toolSpan.className = 'wd-meta-tool';
       toolSpan.textContent = entry.tool;
-      toolSpan.title = toolExplainer(entry.tool);
+      attachToolPopup(toolSpan, entry);
       meta.appendChild(toolSpan);
     }
     div.appendChild(meta);
