@@ -46,8 +46,8 @@
             </div>
             <span class="help-chain-arrow">&rarr;</span>
             <div class="help-chain-node">
-                <span class="help-chain-eyebrow">Buzz, its agent</span>
-                <span class="help-chain-desc">observes and files</span>
+                <span class="help-chain-eyebrow">Buzz, ambient agent</span>
+                <span class="help-chain-desc">hears signals and files</span>
             </div>
             <span class="help-chain-arrow">&rarr;</span>
             <div class="help-chain-node">
@@ -65,7 +65,8 @@
         <div class="help-overlay-section-title">And now it has a job</div>
         <div class="help-about">
             <p>This fly autonomously uses Workday. It cannot type and it cannot talk. Its only language is behavior, so an agent named <strong>Buzz</strong> reads its neural state and interprets what it sees: hunger becomes a meal voucher request, fatigue becomes a PTO request, curiosity becomes a career goal, and a fright becomes a workplace safety concern.</p>
-            <p>Claude plays two roles. As the caretaker it tends to the enclosure, and as the fly's HR Partner in Workday it reviews everything Buzz files. Most requests are approved, some are denied, and approvals have real consequences: an approved meal voucher drops food in front of the fly, and approved PTO dims the lights so it can rest.</p>
+            <p>Buzz is an <strong>ambient agent</strong>. There is no chat window and nobody prompts it. It listens to an event stream, the fly's neural state arriving once per second, and it stays quiet until a signal crosses a threshold. Then it acts. And it never grants its own requests: everything Buzz files goes to a reviewer before anything happens. That review step is what makes agents like this safe to run unattended, whether the worker is a fly or a person.</p>
+            <p>Claude plays two roles. As the caretaker it tends to the enclosure, and as the fly's HR Partner in Workday it is that reviewer for everything Buzz files. Most requests are approved, some are denied, and approvals have real consequences: an approved meal voucher drops food in front of the fly, and approved PTO dims the lights so it can rest.</p>
             <p>The <strong>Inbox</strong> panel on the left shows the whole conversation: what Buzz observed, what it filed, and how Claude ruled.</p>
         </div>
         <div class="help-overlay-divider"></div>
@@ -186,7 +187,7 @@
     <script type="text/javascript" src="./js/main.js?v=38"></script>
     <script type="text/javascript" src="./js/caretaker-renderer.js?v=24"></script>
     <script type="text/javascript" src="./js/caretaker-sidebar.js?v=26"></script>
-    <script type="text/javascript" src="./js/workday-panel.js?v=13"></script>
+    <script type="text/javascript" src="./js/workday-panel.js?v=14"></script>
     <script type="text/javascript" src="./js/workday-local.js?v=2"></script>
     <script type="text/javascript" src="./js/caretaker-bridge.js?v=33"></script>
 </body>

@@ -216,7 +216,7 @@
 
     var actor = document.createElement('div');
     actor.className = 'workday-entry-actor';
-    actor.textContent = submitted ? 'BUZZ, THE FLY\'S AGENT' : 'CLAUDE, HR PARTNER';
+    actor.textContent = submitted ? 'BUZZ, THE FLY\'S AMBIENT AGENT' : 'CLAUDE, HR PARTNER';
     div.appendChild(actor);
 
     var head = document.createElement('div');
